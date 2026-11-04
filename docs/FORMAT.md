@@ -1,0 +1,67 @@
+# Image layout reference
+
+What is where in a 2 MiB Charmera flash dump, and how the SD update file relates to it. Every offset below was
+checked against the two public dumps and the published update files; where something is inferred rather than
+read off the bytes it says so. The long form, with sources, is in `PHASE1-REPORT.md`.
+
+File offset = runtime address + 0x200. The flash is a Puya PY25D16HB: 2 MiB, 64 KiB erase blocks, 256-byte pages.
+
+| File offset | Size | Contents |
+|---|---|---|
+| 0x000000 | 0x200 | Boot header, magic `SPII`. Register/value pairs the boot ROM applies before jumping to the code: 0xD0000088 = 0xA12B and 0xD000008C = 0x2495 are the PLL/power unlock keys, 0xD0000028 = 0x8005, 0xD00000AC = 0x104. One word (0x1B0000) has no known meaning. |
+| 0x000200 | ~0xFF870 | ARM7TDMI code and read-only data, vector table first. Build stamp `202505201029` at 0x218C4, build string `JH5408  20250520` at 0x18964, compile date `Oct 14 2025` at 0xF3978. |
+| 0x0FFA70 | 0xB6C0 | Initialised data (`.data`), copied to RAM at boot. |
+| 0x10B130 | to 0x120000 | Zero padding. 0x110000..0x120000 is the heap placeholder. |
+| 0x120000 | 0x48E9A | Resource pack: magic `GP+\0`, entry count (43), 24-byte directory entries of a 20-byte name plus a u32 sector number (×512 from 0x120000). No checksum. Holds the five UI sounds, the logo and menu JPEGs, the GPZP frames, `GPRS.PAK` at 0x141400. Ends at 0x168E9A; 0xFF to 0x16E000. |
+| 0x16E000 | 0x200 | Factory self-test sector. |
+| 0x170000 | 0xF000 | Settings bank: up to 120 512-byte sectors, each a 252-byte record + CRC32 (zlib, little-endian) at +0xFC and a zero second page. The firmware loads the sector before the first erased one. |
+| 0x17F000 | 0x200 | Photo directory: two 8-byte entries {u16 number, u16 used, u32 length}. Also sector 120 of the settings bank, which is why the stock camera misbehaves after about 120 settings saves. |
+| 0x180000 | 0x25800 | Internal photo slot 0 (0x590-byte header + JPEG). |
+| 0x1A5800 | 0x25800 | Internal photo slot 1. |
+| 0x1CB000 | to 0x200000 | Unused, 0xFF. |
+
+## Settings record fields
+
+Offsets within the 252-byte record. Verified means the firmware's setter and reader for the byte were followed.
+
+| Offset | Meaning | Status |
+|---|---|---|
+| +0x00 | Capture style / frame selector 0..10 | verified (cycled by its setter) |
+| +0x01 | Auto power-off code: 1 = 3 min, 2 = 5 min, n ≥ 3 = n min; default 2 | verified; timer rate unmeasured |
+| +0x05 | Playback volume 0..8 | verified |
+| +0x19 | UI sound level 0..8, 0 = off; default 5 | verified |
+| +0x51 | Standby minutes before the audio path is powered down; default 2 | verified |
+| +0x03, +0x12, +0x52, +0x53 | Change between live records in the dumps; purpose unknown | observed only |
+
+## Update file (`JH_5408<stamp>_<sum>.bin`)
+
+- Length 0x1E0000 in every published file: the first 0x1E0000 bytes of a dump, including the settings bank and
+  the photo slots of whoever made it. `pack` can blank those.
+- `<stamp>` is 12 digits and must differ from the 12 at 0x218C4 of the running firmware or the updater ignores the file.
+- `<sum>` is the unsigned 32-bit sum of every byte of the file, as 8 hex digits. A mismatch shows "Program error"
+  and nothing is written.
+- The updater looks only in the card's root, only during the first 5 seconds after power-on, erases 64 KiB
+  blocks from 0 up to the file length plus one extra block, then programs and verifies 256-byte pages.
+  That extra block is why file lengths that are not 0x1E0000 matter: `verify` names the block it would hit.
+- The file is not deleted afterwards. Take the card out before the next power-on or it flashes again.
+
+## Resource sound slots
+
+| Name | Offset | Format | Data bytes | Slot |
+|---|---|---|---|---|
+| BEEP.WAV | 0x121E00 | 11025 Hz, 16-bit | 4032 | 4096 |
+| CLICK.WAV | 0x123200 | 8000 Hz, 8-bit | 1882 | 2048 |
+| IMG.WAV (shutter) | 0x15FC00 | 11025 Hz, 8-bit | 5480 | 5632 |
+| POWEROFF_AUDIO.WAV | 0x162400 | 8000 Hz, 8-bit | 8421 | 8704 |
+| POWERON_AUDIO.WAV | 0x164600 | 8000 Hz, 8-bit | 6097 | 6144 |
+
+A replacement must fit its slot (header included); `sounds replace` resamples and trims to make it fit and says
+what it cut. BEEP.WAV is never requested by the event player in this build.
+
+## GPZP (compressed frames)
+
+`GPZP` + raw DEFLATE (fixed Huffman) + trailer {u32 CRC32 of the inflated data, u32 inflated length} + 0xFF padding
+to the next entry. The 800×600 frames inflate to three 240,000-byte strips in a row-pair 4:2:0 layout
+([Y even row][U,V per pair][Y odd row]); luma 0x8C in both rows of a pair is the see-through key. Thumbnails
+(`PV00n`) are 112×80 RGB565 little-endian with 0x8C71 as the key colour. Python's `zlib.compressobj(9,
+zlib.DEFLATED, -15, 8, zlib.Z_FIXED)` reproduces the stock streams byte for byte.
