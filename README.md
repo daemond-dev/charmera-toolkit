@@ -23,7 +23,10 @@ charmera --help
 | `sounds` | a file | List, extract, mute or replace the five UI sounds. |
 | `settings` | a file | Show the record the camera will load, or write one with new auto-off, standby, volume values. |
 | `tweak` | a file | Experimental start-up and power-off byte patches, each checked against the stock bytes. |
+| `frames` | a file | List, extract, preview or replace the four photo frames (PNG in and out, budgets checked). |
+| `resources` | nothing / a file | List or extract every resource entry; replace a JPEG resource such as the boot logo. |
 | `pack` | a file | Turn an image into a correctly named update file, optionally with settings and photos blanked. |
+| `stage` | the card | Re-verify an update file, copy it to the card root and read it back. |
 | `card-check` / `card-fix` | nothing / the card | Diagnose and fix the exFAT dirty-bit problem that stops phones reading the card. |
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
@@ -39,12 +42,17 @@ Ground rules baked into the commands:
 
 ## Documentation
 
+- `docs/FIRST-FLASH.md`: the first flash end to end, with the point of no return marked.
 - `docs/USAGE.md`: the commands, with examples.
 - `docs/FORMAT.md`: the image layout, settings fields, update-file rules, sound slots and frame format.
+- `docs/STAGE.md`: putting an update file on the card, and what each refusal means.
+- `docs/RESOURCES.md`: the resource pack, and how to make a boot logo that fits.
+- `docs/ANDROID.md`: what can and cannot be done from an Android phone.
 - `docs/RECOVERY.md`: the recovery decision tree (SD updater, CH341A, what is unknown).
 - `docs/FLASH-CANDIDATES.md`: the first files to try on a camera and how they were reviewed.
 - `docs/CARDS.md`: the exFAT dirty-bit problem and the FAT32 fix.
 - `docs/EXIF.md`: what is wrong with the camera's EXIF and AVI dates and what `exif-fix` does.
+- `docs/FRAMES.md`: the frame format, PNG requirements and what is still unverified about the overlay.
 - `docs/NOTES-boot-and-power.md`: boot sequence, auto-off and standby analysis behind `tweak` and `settings`.
 - `docs/PHASE1-REPORT.md`: the research this is built on, every claim labelled verified, reported or inferred.
 

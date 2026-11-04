@@ -38,6 +38,7 @@ class RegionDiff:
     end: int
     differing: int
     ranges: List[Tuple[int, int]]   # [start, end) of differing runs, first MAX_RANGES only
+    truncated: bool                 # more runs exist than are listed
     only_in: Optional[str]          # "a" / "b" when one file ends inside the region
     sha_a: str
     sha_b: str
@@ -46,45 +47,45 @@ class RegionDiff:
 MAX_RANGES = 8
 
 
-def differing_ranges(a: bytes, b: bytes, base: int, limit: int = MAX_RANGES) -> Tuple[int, List[Tuple[int, int]]]:
-    """Count differing bytes over the common length and collect the first `limit` differing runs."""
+def differing_ranges(a: bytes, b: bytes, base: int, limit: int = MAX_RANGES) -> Tuple[int, List[Tuple[int, int]], bool]:
+    """Count differing bytes over the common length and collect the first `limit` differing runs.
+
+    Returns (count, runs, truncated): runs are [start, end) file offsets (base added); truncated is True
+    when more runs exist than were collected. A run that crosses a 4 KiB chunk boundary is one run.
+    """
     n = min(len(a), len(b))
     count = 0
-    ranges: List[Tuple[int, int]] = []
-    i = 0
-    # Fast skip over identical 4 KiB chunks, then byte-walk the rest.
+    runs: List[Tuple[int, int]] = []
+    truncated = False
+    run_start: Optional[int] = None
     chunk = 4096
+    i = 0
+
+    def close(end: int) -> None:
+        nonlocal run_start, truncated
+        if run_start is not None:
+            if len(runs) < limit:
+                runs.append((base + run_start, base + end))
+            else:
+                truncated = True
+            run_start = None
+
     while i < n:
         j = min(i + chunk, n)
         if a[i:j] == b[i:j]:
+            close(i)          # a run that ended exactly at the chunk boundary
             i = j
             continue
-        run_start = None
         for k in range(i, j):
             if a[k] != b[k]:
                 count += 1
                 if run_start is None:
                     run_start = k
-            elif run_start is not None:
-                if len(ranges) < limit:
-                    ranges.append((base + run_start, base + k))
-                elif ranges and ranges[-1][1] == base + run_start:
-                    ranges[-1] = (ranges[-1][0], base + k)
-                run_start = None
-        if run_start is not None:
-            if ranges and ranges[-1][1] == base + run_start:
-                ranges[-1] = (ranges[-1][0], base + j)
-            elif len(ranges) < limit:
-                ranges.append((base + run_start, base + j))
+            else:
+                close(k)
         i = j
-    # Merge runs split at chunk boundaries.
-    merged: List[Tuple[int, int]] = []
-    for r in ranges:
-        if merged and merged[-1][1] == r[0]:
-            merged[-1] = (merged[-1][0], r[1])
-        else:
-            merged.append(r)
-    return count, merged
+    close(n)
+    return count, runs, truncated
 
 
 def diff_regions(a: bytes, b: bytes) -> List[RegionDiff]:
@@ -95,11 +96,11 @@ def diff_regions(a: bytes, b: bytes) -> List[RegionDiff]:
         if start >= longest:
             break
         sa, sb = a[start:end], b[start:end]
-        count, ranges = differing_ranges(sa, sb, start)
+        count, ranges, truncated = differing_ranges(sa, sb, start)
         only_in = None
         if len(sa) != len(sb):
             only_in = "a" if len(sa) > len(sb) else "b"
-        out.append(RegionDiff(name, start, end, count, ranges, only_in,
+        out.append(RegionDiff(name, start, end, count, ranges, truncated, only_in,
                               hashlib.sha256(sa).hexdigest()[:16], hashlib.sha256(sb).hexdigest()[:16]))
     return out
 
@@ -157,7 +158,7 @@ def explain_resources(a: bytes, b: bytes) -> List[str]:
         pa = a[ea.offset: ea.offset + size]
         pb = b[eb.offset: eb.offset + size]
         if pa != pb:
-            count, _ = differing_ranges(pa, pb, ea.offset)
+            count, _, _ = differing_ranges(pa, pb, ea.offset)
             lines.append(f"  {name}: {count} differing byte(s) within its {size} byte slot")
     for name in names_b:
         if name not in names_a:
@@ -198,8 +199,8 @@ def handler(args) -> int:
         if args.ranges and rd.ranges:
             for s, e in rd.ranges:
                 print(f"    {s:#08x}-{e:#08x} ({e - s} bytes)")
-            if rd.differing and len(rd.ranges) == MAX_RANGES:
-                print("    ...")
+            if rd.truncated:
+                print("    ... (more differing ranges not listed)")
         if rd.name == "settings bank" and (rd.differing or rd.only_in):
             for line in explain_settings(a, b):
                 print(line)
@@ -212,8 +213,12 @@ def handler(args) -> int:
     if sw_a == sw_b:
         print("software region (0x0-0x170000) identical: the two files differ only in settings or photos")
     else:
-        code_same = a[img.HEADER_SIZE: img.CODE_END] == b[img.HEADER_SIZE: img.CODE_END]
-        print("software region differs" + (" (resource pack only; code unchanged)" if code_same else " INCLUDING CODE"))
+        changed = [name for name, start, end in REGIONS
+                   if end <= img.SOFTWARE_END and a[start:end] != b[start:end]]
+        if len(sw_a) != len(sw_b):
+            changed.append("length")
+        code = "code and tables" in changed or "boot header (SPII)" in changed
+        print("software region differs in: " + ", ".join(changed) + (" (INCLUDING CODE)" if code else ""))
     return 1 if any_diff else 0
 
 

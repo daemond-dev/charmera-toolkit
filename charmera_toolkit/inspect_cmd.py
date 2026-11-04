@@ -46,6 +46,8 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
     if show_resources:
         for e in res:
             print(f"  {e.index:2d} {e.display_name:20s} at {e.offset:#8x}  budget {e.budget}")
+    if info.get("sounds_error"):
+        print(f"sounds:          cannot be read: {info['sounds_error']}")
     if info["sounds"]:
         print("sounds:")
         for s in info["sounds"]:

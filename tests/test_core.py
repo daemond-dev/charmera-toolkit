@@ -359,7 +359,8 @@ def test_diff_command_regions_and_settings(tmp_path, capsys):
     mod[0x62B8] = 0x02                       # one code byte
     mod[beep + 100: beep + 110] = bytes(b ^ 0xFF for b in base[beep + 100: beep + 110])   # inside BEEP.WAV
     mod = bytes(mod)
-    count, ranges = diff_cmd.differing_ranges(base, mod, 0)
+    count, ranges, truncated = diff_cmd.differing_ranges(base, mod, 0)
+    assert not truncated
     assert count == 11 and ranges[0] == (0x62B8, 0x62B9) and ranges[1] == (beep + 100, beep + 110)
     regions = {r.name: r for r in diff_cmd.diff_regions(base, mod)}
     assert regions["code and tables"].differing == 1
@@ -380,3 +381,86 @@ def test_diff_command_regions_and_settings(tmp_path, capsys):
     assert diff_cmd.handler(args) == 1
     out = capsys.readouterr().out
     assert "+0x19   3 ->   0" in out and "differ only in settings or photos" in out
+
+
+def test_diff_ranges_cross_chunk_boundaries_and_report_truncation():
+    from charmera_toolkit import diff_cmd
+    a = bytes(3 * 4096)
+    b = bytearray(a)
+    b[4090:4100] = b"\x01" * 10            # one run across the first chunk boundary
+    b[8192 - 1] = 1                         # a run ending exactly at a boundary
+    count, runs, truncated = diff_cmd.differing_ranges(a, bytes(b), 0x100)
+    assert count == 11 and not truncated
+    assert runs == [(0x100 + 4090, 0x100 + 4100), (0x100 + 8191, 0x100 + 8192)]
+    many = bytearray(a)
+    for k in range(0, 40, 2):
+        many[k] = 1
+    count, runs, truncated = diff_cmd.differing_ranges(a, bytes(many), 0, limit=8)
+    assert count == 20 and len(runs) == 8 and truncated
+    # a run that crosses a boundary after the limit is reached still sets the flag
+    edge = bytearray(a)
+    for k in range(0, 16, 2):
+        edge[k] = 1
+    edge[4095:4097] = b"\x01\x01"
+    count, runs, truncated = diff_cmd.differing_ranges(a, bytes(edge), 0, limit=8)
+    assert len(runs) == 8 and truncated
+
+
+def test_diff_names_non_code_software_changes(tmp_path, capsys):
+    from charmera_toolkit import diff_cmd
+    base = synthetic_image([make_record()])
+    heap = bytearray(base); heap[0x110010] ^= 0xFF
+    (tmp_path / "a.bin").write_bytes(base); (tmp_path / "b.bin").write_bytes(bytes(heap))
+    args = type("A", (), {"a": str(tmp_path / "a.bin"), "b": str(tmp_path / "b.bin"), "ranges": False})
+    assert diff_cmd.handler(args) == 1
+    out = capsys.readouterr().out
+    assert "software region differs in: heap placeholder (zeros)" in out and "resource pack only" not in out
+    assert "INCLUDING CODE" not in out
+
+
+def test_output_checks_refuse_hard_links_dirs_and_missing_folders(tmp_path):
+    from charmera_toolkit.sounds import _check_output
+    src = tmp_path / "backup.bin"; src.write_bytes(b"x")
+    link = tmp_path / "link.bin"
+    try:
+        os.link(src, link)
+    except (OSError, AttributeError):
+        pytest.skip("hard links not available here")
+    assert "is the input file" in _check_output(src, link, overwrite=True)
+    assert "is a directory" in _check_output(src, tmp_path, overwrite=True)
+    assert "does not exist" in _check_output(src, tmp_path / "nope" / "out.bin", overwrite=False)
+    assert _check_output(src, tmp_path / "new.bin", overwrite=False) is None
+
+
+def test_truncated_images_are_reported_not_tracebacks(tmp_path, capsys):
+    from charmera_toolkit import cli
+    img = synthetic_image([make_record()])
+    beep = next(e for e in image.resource_directory(img) if e.display_name == "BEEP.WAV").offset
+    cut = tmp_path / "cut.bin"; cut.write_bytes(img[: beep + 20])
+    assert cli.main(["inspect", str(cut)]) == 0
+    assert "cannot be read" in capsys.readouterr().out
+    assert cli.main(["sounds", "list", str(cut)]) == 2
+    assert "error:" in capsys.readouterr().out
+    bank = tmp_path / "bank.bin"; bank.write_bytes(img[: settings.SETTINGS_BASE + 0x400])
+    assert cli.main(["inspect", str(bank)]) == 0
+    out = capsys.readouterr().out
+    assert "None" not in out
+
+
+def test_tweak_apply_argument_errors(tmp_path, capsys):
+    from charmera_toolkit import cli
+    assert cli.main(["tweak", "apply", "--enable", "boot-delay", "--out", str(tmp_path / "o.bin")]) == 2
+    assert "needs the image" in capsys.readouterr().out
+    src = tmp_path / "s.bin"; src.write_bytes(synthetic_image([make_record()]))
+    assert cli.main(["tweak", "apply", str(src), "--enable", " , ", "--out", str(tmp_path / "o.bin")]) == 2
+    assert "names no tweak" in capsys.readouterr().out
+
+
+def test_pack_out_must_be_a_directory(tmp_path, capsys):
+    from charmera_toolkit import cli
+    src = tmp_path / "s.bin"; src.write_bytes(synthetic_image([make_record()]))
+    afile = tmp_path / "muted.bin"; afile.write_bytes(b"x")
+    rc = cli.main(["pack", "--input", str(src), "--out", str(afile), "--allow-unknown-build", "--stamp", "202611050001",
+                   "--i-understand-this-file-flashes-a-camera"])
+    assert rc == 2
+    assert "--out must be a directory" in capsys.readouterr().out

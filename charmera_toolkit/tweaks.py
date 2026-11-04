@@ -97,6 +97,9 @@ def handler(args) -> int:
             print(f"               {p.detail}")
         print("\nAll of these are untested on hardware. Apply one at a time, pack, verify, and keep a restore path.")
         return 0
+    if not args.file:
+        print("error: apply needs the image to patch: charmera tweak apply IMAGE --enable NAME --out NEW.bin")
+        return 2
     src = Path(args.file)
     if not src.is_file():
         print(f"error: {src} is not a file")
@@ -113,6 +116,9 @@ def handler(args) -> int:
         print("error: these patches are defined for the original 2025 series build only; this image is not that build")
         return 2
     names = [n.strip() for n in args.enable.split(",") if n.strip()]
+    if not names:
+        print("error: --enable names no tweak; see `tweak list`")
+        return 2
     out = Path(args.out)
     problem = _check_output(src, out, args.overwrite)
     if problem:

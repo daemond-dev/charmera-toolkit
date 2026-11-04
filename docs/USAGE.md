@@ -15,6 +15,8 @@ charmera card-check --list
 charmera card-check /dev/sdX            # Linux
 charmera card-check \\.\PhysicalDrive2  # Windows (run as administrator)
 charmera exif-fix --source E:\ --out C:\Photos\charmera
+charmera resources list my_backup.bin                                # all 43 resource entries, kinds and lengths
+charmera resources extract my_backup.bin --out resources/            # each entry trimmed to its real length
 ```
 
 `inspect` tells you what a file is: dump or update file, which build it carries, whether its software region is
@@ -36,16 +38,37 @@ charmera settings show my_backup.bin                                 # what the 
 charmera settings set my_backup.bin --out quiet.bin --ui-sound 0 --auto-off 10 --i-understand-this-is-a-mod
 charmera tweak list                                                  # experimental start-up / power-off patches
 charmera tweak apply my_backup.bin --out fast.bin --enable boot-delay,fast-poweroff --i-understand-this-is-a-mod
+charmera frames list my_backup.bin                                   # the four photo frames and their byte budgets
+charmera frames extract my_backup.bin --out frames/                  # 800x600 PNGs with transparency, plus thumbnails
+charmera frames preview my_backup.bin --slot 1 --photo photo-800x600.png --out preview.png
+charmera frames replace my_backup.bin --slot 1 --png frame.png --out framed.bin                  # prints the plan only
+charmera frames replace my_backup.bin --slot 1 --png frame.png --thumb thumb.png --out framed.bin --i-understand-this-is-a-mod
+charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jpg --out logo.bin --strip-metadata --i-understand-this-is-a-mod
 ```
 
 `settings set` keeps everything else in the record and leaves that record as the only one in the bank. `tweak apply`
 refuses any patch whose original bytes are not where it expects them, so it cannot land on the wrong build or on
-top of an earlier edit; every tweak is untested on hardware and labelled with its risk.
+top of an earlier edit; every tweak is untested on hardware and labelled with its risk. `frames replace` takes an
+800x600 RGBA PNG (transparent = see-through), re-encodes it the way the camera stores frames, and refuses with a
+per-strip table when the result does not fit the slot's byte budget; see docs/FRAMES.md.
 
 The gate flags exist so that nothing flashable appears by accident. A modified image goes through `pack` and then `verify`
 before it is allowed near a card.
 
+`resources replace` swaps a JPEG resource, such as the boot logo, only for a baseline JPEG with the same size,
+component count and subsampling as the original that fits the slot; see docs/RESOURCES.md. A custom boot logo has
+not been tried on a camera.
+
 ## Commands that write to hardware
 
-`card-fix` and `restore` print what they are about to do and wait for you to type the target back. See docs/CARDS.md and
+```
+charmera stage out/JH_5408<stamp>_<sum>.bin --card E:                         # Windows
+charmera stage out/JH_5408<stamp>_<sum>.bin --card /run/media/deck/<label>    # Steam Deck
+charmera stage out/JH_5408<stamp>_<sum>.bin --card E: --plan-only             # all checks, writes nothing
+```
+
+`stage` runs `verify` again, refuses a card that already holds another update file, copies the file to the card
+root, and reads it back to compare hashes. See docs/STAGE.md.
+
+`card-fix` and `stage` print what they are about to do and wait for you to type the target back; `restore` waits for the word RESTORE. See docs/CARDS.md and
 docs/RECOVERY.md.

@@ -115,13 +115,20 @@ def handler(args) -> int:
         return 0
     out_dir = Path(args.out)
     out = out_dir / name.filename
+    if out_dir.exists() and not out_dir.is_dir():
+        print(f"error: --out must be a directory; pack names the file itself (it would write {out_dir}/{name.filename})")
+        return 2
     if out.exists() and not args.overwrite:
         print(f"error: {out} already exists; remove it, choose another --out, or pass --overwrite")
         return 2
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(payload)
-    (out_dir / (name.filename + ".sha256")).write_text(f"{hashlib.sha256(payload).hexdigest()}  {name.filename}\n", encoding="utf-8")
-    (out_dir / (name.filename + ".MANIFEST.txt")).write_text(text + "\n", encoding="utf-8")
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(payload)
+        (out_dir / (name.filename + ".sha256")).write_text(f"{hashlib.sha256(payload).hexdigest()}  {name.filename}\n", encoding="utf-8")
+        (out_dir / (name.filename + ".MANIFEST.txt")).write_text(text + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"error: cannot write into {out_dir}: {exc}")
+        return 2
     print(f"wrote {out}")
     print("Before it touches a card: run `charmera verify` on it, and make sure you have a verified full-flash backup.")
     return 0

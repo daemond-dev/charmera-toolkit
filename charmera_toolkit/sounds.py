@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import struct
 import wave
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -209,7 +210,11 @@ def _write_mod(args, image: bytes, out: Path, what: str) -> int:
         print(f"dry run: would write {out} ({len(image)} bytes) with {what}.")
         print(f"Re-run with {GATE_FLAG} to write it. The result is an image, not an update file; pack and verify it next.")
         return 0
-    out.write_bytes(image)
+    try:
+        out.write_bytes(image)
+    except OSError as exc:
+        print(f"error: could not write {out}: {exc}")
+        return 1
     print(f"wrote {out} ({len(image)} bytes): {what}")
     print("next: charmera pack --input <this file> ... then charmera verify <the update file>")
     return 0
@@ -221,8 +226,17 @@ def _check_output(src: Path, out: Path, overwrite: bool) -> Optional[str]:
         same = out.resolve() == src.resolve()
     except OSError:
         same = False
+    if not same and out.exists():
+        try:
+            same = os.path.samefile(out, src)   # a hard link or another path to the same file
+        except OSError:
+            pass
     if same:
         return "--out is the input file; write the mod to a new path and keep your backup untouched"
+    if out.is_dir():
+        return f"{out} is a directory; give a file name for --out"
+    if not out.parent.is_dir():
+        return f"the folder {out.parent} does not exist; create it first or choose another --out"
     if out.exists() and not overwrite:
         return f"{out} already exists; choose another name or pass --overwrite"
     return None
@@ -240,13 +254,17 @@ def handler(args) -> int:
         print("error: replace needs --slot and --wav")
         return 2
     image = src.read_bytes()
-    if args.action == "list":
-        _print_slots(image)
-        return 0
-    if args.action == "extract":
-        for p in extract(image, Path(args.out)):
-            print(f"wrote {p}")
-        return 0
+    try:
+        if args.action == "list":
+            _print_slots(image)
+            return 0
+        if args.action == "extract":
+            for p in extract(image, Path(args.out)):
+                print(f"wrote {p}")
+            return 0
+    except ValueError as exc:
+        print(f"error: {exc}")
+        return 2
     out = Path(args.out)
     problem = _check_output(src, out, args.overwrite)
     if problem:

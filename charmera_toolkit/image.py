@@ -275,9 +275,20 @@ class WavSlot:
 
 
 def parse_wav_at(image: bytes, entry: ResourceEntry) -> WavSlot:
+    """Parse the WAV in a resource slot. Raises ValueError (never struct.error) on a damaged or truncated file."""
     off = entry.offset
+    if off + 12 > len(image):
+        raise ValueError(f"{entry.display_name} at {off:#x} lies past the end of the file (truncated image)")
     if image[off: off + 4] != b"RIFF" or image[off + 8: off + 12] != b"WAVE":
         raise ValueError(f"{entry.display_name} at {off:#x} is not a RIFF WAVE")
+    try:
+        return _parse_wav_chunks(image, entry)
+    except struct.error:
+        raise ValueError(f"{entry.display_name} at {off:#x} is cut off (truncated image)") from None
+
+
+def _parse_wav_chunks(image: bytes, entry: ResourceEntry) -> WavSlot:
+    off = entry.offset
     riff_size = struct.unpack_from("<I", image, off + 4)[0]
     p = off + 12
     fmt = None
@@ -294,6 +305,8 @@ def parse_wav_at(image: bytes, entry: ResourceEntry) -> WavSlot:
         p += 8 + csz + (csz & 1)
     if fmt is None or data is None:
         raise ValueError(f"{entry.display_name}: missing fmt or data chunk")
+    if data[0] + data[1] > len(image):
+        raise ValueError(f"{entry.display_name}: sample data runs past the end of the file (truncated image)")
     tag, ch, rate, _brate, _align, bits = fmt
     return WavSlot(entry, riff_size, tag, ch, rate, bits, data[0], data[1])
 
@@ -363,6 +376,13 @@ def summarize(image: bytes) -> dict:
             current = settings_mod.current_record(image)
         except ValueError as exc:
             current_note = str(exc)
+    elif len(image) > settings_mod.SETTINGS_BASE:
+        current_note = "the file ends inside the settings bank, so the record the camera would load cannot be told"
+    sounds_error = None
+    try:
+        sounds = sound_slots(image) if len(image) > RESOURCE_BASE else []
+    except ValueError as exc:
+        sounds, sounds_error = [], str(exc)
     info = {
         "current_note": current_note,
         "size": len(image),
@@ -380,7 +400,8 @@ def summarize(image: bytes) -> dict:
         "public_dump": PUBLIC_DUMPS.get(hashlib.sha256(image).hexdigest()),
         "resources": resource_directory(image),
         "resources_end": find_resources_end(image) if len(image) > RESOURCE_BASE else None,
-        "sounds": sound_slots(image) if len(image) > RESOURCE_BASE else [],
+        "sounds": sounds,
+        "sounds_error": sounds_error,
         "settings_records": recs,
         "settings_valid": len(valid),
         "current_settings": current,

@@ -41,7 +41,9 @@ def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow
         checks.append(Check("stamp", name.stamp != STOCK_TIMESTAMP,
                             f"stamp {name.stamp} {'differs from' if name.stamp != STOCK_TIMESTAMP else 'EQUALS'} the stock stamp {STOCK_TIMESTAMP}"
                             + ("" if name.stamp != STOCK_TIMESTAMP else " (the updater would ignore the file)")))
-        checks.append(Check("stamp-date", name.stamp_datetime() is not None, "stamp is a real date" if name.stamp_datetime() else "stamp is not a valid YYYYMMDDhhmm", "warn"))
+        real_date = name.stamp_datetime() is not None
+        checks.append(Check("stamp-date", real_date, "stamp is a real date" if real_date else "stamp is not a valid YYYYMMDDhhmm",
+                            "fail" if real_date else "warn"))
     except ValueError as exc:
         checks.append(Check("filename", False, str(exc)))
 
