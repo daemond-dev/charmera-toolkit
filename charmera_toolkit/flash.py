@@ -157,11 +157,12 @@ def find_flashrom(explicit: Optional[str] = None) -> str:
             return str(candidate.resolve())
         found = shutil.which(explicit)
         if found:
-            return found
+            return str(Path(found).resolve())
         raise FlashromError(f"--flashrom {explicit!r} is not a file and is not on PATH.\n" + install_hints())
     found = shutil.which("flashrom")
     if found:
-        return found
+        # On Windows, which() also looks in the working directory and may answer with a relative name.
+        return str(Path(found).resolve())
     raise FlashromError("flashrom was not found on PATH.\n" + install_hints())
 
 

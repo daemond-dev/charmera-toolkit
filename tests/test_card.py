@@ -714,6 +714,11 @@ def test_cli_fix_refuses_a_windows_disk_with_other_letters(tmp_path, monkeypatch
 # Disk listing, parsed from fake data
 
 
+linux_paths_only = pytest.mark.skipif(
+    os.name == "nt", reason="parses Linux sysfs and /proc/mounts, whose paths start with /")
+
+
+@linux_paths_only
 def test_list_disks_linux_from_fake_sysfs(tmp_path):
     sys_root = tmp_path / "sys"
     dev_root = tmp_path / "dev"
@@ -773,6 +778,7 @@ def test_windows_list_parsers():
     assert card.parse_wmic_csv("") == [] and card.parse_get_disk_csv("garbage") == []
 
 
+@linux_paths_only
 def test_linux_mounts_for_matches_disk_and_partitions(tmp_path):
     sys_root = tmp_path / "sys"
     (sys_root / "block" / "sdz" / "sdz1").mkdir(parents=True)

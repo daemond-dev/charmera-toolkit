@@ -302,9 +302,14 @@ def test_find_flashrom_relative_name_is_returned_absolute(fake_flashrom, tmp_pat
         found = flash.find_flashrom(given)
         assert Path(found).is_absolute(), found
         assert Path(found) == expected
-    # Absolute paths and PATH lookups are unchanged.
+    # Absolute paths are unchanged; a PATH lookup answers with the PATH copy, absolute (Windows' which()
+    # also searches the working directory, so the lookup runs from a directory without a copy).
     assert Path(flash.find_flashrom(str(expected))) == expected
-    assert Path(flash.find_flashrom(None)) == (tmp_path / "fakebin" / name).resolve()
+    monkeypatch.chdir(tmp_path)
+    found = flash.find_flashrom(None)
+    assert Path(found).is_absolute(), found
+    assert Path(found) == (tmp_path / "fakebin" / name).resolve()
+    monkeypatch.chdir(local)
 
     assert run(["probe", "--flashrom", f".{os.sep}{name}"]) == 0
     out = capsys.readouterr().out
