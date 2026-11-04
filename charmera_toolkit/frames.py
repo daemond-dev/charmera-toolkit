@@ -80,7 +80,6 @@ _RV_T = [(_RV * (v - 128) + 32768) >> 16 for v in range(256)]
 _GU_T = [_GU * (v - 128) for v in range(256)]
 _GV_T = [_GV * (v - 128) for v in range(256)]
 _BU_T = [(_BU * (v - 128) + 32768) >> 16 for v in range(256)]
-_CLAMP = bytes(range(256))
 
 
 def _clamp(v: int) -> int:
@@ -430,8 +429,13 @@ def _check_rowpair(data: bytes, what: str = "row-pair data") -> int:
     return (len(data) // ROWPAIR_BYTES) * 2
 
 
-def rowpair_to_rgb(data: bytes) -> List[bytes]:
-    """800-wide RGB rows from row-pair 4:2:0 bytes (any whole number of row-pairs). No key handling."""
+def rowpair_to_rgb(data: bytes, preserve_luma: bool = False) -> List[bytes]:
+    """800-wide RGB rows from row-pair 4:2:0 bytes (any whole number of row-pairs). No key handling.
+
+    A YUV value outside the RGB gamut is clipped per channel by default, which is what a display does.
+    With preserve_luma the chroma is scaled towards grey instead until the pixel fits, so its luma survives
+    a round trip through RGB exactly; `frame_to_rgba` uses that for frames that will be edited and put back.
+    """
     height = _check_rowpair(data)
     rows: List[bytes] = []
     for p in range(height // 2):
@@ -454,12 +458,28 @@ def rowpair_to_rgb(data: bytes) -> List[bytes]:
                     r = y + dr
                     g = y + dg
                     b = y + db
+                    if preserve_luma and (r < 0 or r > 255 or g < 0 or g > 255 or b < 0 or b > 255):
+                        r, g, b = _desaturate(y, u, v)
                     row[o] = 0 if r < 0 else (255 if r > 255 else r)
                     row[o + 1] = 0 if g < 0 else (255 if g > 255 else g)
                     row[o + 2] = 0 if b < 0 else (255 if b > 255 else b)
         rows.append(bytes(re))
         rows.append(bytes(ro))
     return rows
+
+
+def _desaturate(y: int, u: int, v: int) -> Tuple[int, int, int]:
+    """The RGB of (y, u, v) with its chroma scaled by the largest factor that keeps all channels in 0..255.
+    Luma is untouched, so converting the result back gives y again (to within rounding)."""
+    offsets = (_RV * (v - 128), _GU * (u - 128) + _GV * (v - 128), _BU * (u - 128))   # 16.16 fixed point
+    scale = 1 << 16
+    for d in offsets:
+        if d > 0:
+            scale = min(scale, ((255 - y) << 32) // d)
+        elif d < 0:
+            scale = min(scale, (y << 32) // -d)
+    r, g, b = (y + ((d * scale + (1 << 31)) >> 32) for d in offsets)
+    return r, g, b
 
 
 def key_mask(data: bytes) -> List[List[bool]]:
@@ -475,8 +495,12 @@ def key_mask(data: bytes) -> List[List[bool]]:
 
 
 def frame_to_rgba(data: bytes) -> List[bytes]:
-    """RGBA rows: alpha 0 for see-through pairs, 255 elsewhere. Pass 720,000 bytes for a whole frame."""
-    rgb = rowpair_to_rgb(data)
+    """RGBA rows: alpha 0 for see-through pairs, 255 elsewhere. Pass 720,000 bytes for a whole frame.
+
+    Colours outside the RGB gamut are desaturated rather than clipped so that every luma byte survives
+    the trip through a PNG editor and back; see rowpair_to_rgb.
+    """
+    rgb = rowpair_to_rgb(data, preserve_luma=True)
     mask = key_mask(data)
     out: List[bytes] = []
     for row, m in zip(rgb, mask):
@@ -652,11 +676,19 @@ def rgb_to_thumb(rows: Sequence[bytes]) -> bytes:
     return bytes(out)
 
 
-def make_thumbnail(rows: Sequence[bytes]) -> bytes:
-    """Box-average an 800x600 RGBA frame to 112x80 RGB565; boxes that are mostly see-through get the key grey."""
-    rows = _as_rgba(rows, FRAME_W)
-    if len(rows) != FRAME_H:
-        raise ValueError(f"a frame has {FRAME_H} rows, got {len(rows)}")
+THUMB_MAX_DROPPED_BITS = 4     # the last rung of the colour ladder: RGB565 reduced to 1, 2 and 1 bits
+
+
+def _thumbnail_once(rows: Sequence[bytes], dropped_bits: int) -> bytes:
+    """One 112x80 RGB565 thumbnail of an 800x600 RGBA frame.
+
+    Each thumbnail pixel covers a box of about 7x7.5 frame pixels. A box that is mostly see-through gets the
+    key grey; otherwise it takes the most common colour among its opaque pixels, which keeps flat colours and
+    hard edges the way the stock thumbnails do (averaging would blend edges into hundreds of colours that
+    fixed-Huffman DEFLATE cannot compress). `dropped_bits` first rounds every colour to fewer RGB565 levels.
+    """
+    rm = (0xFF << (3 + dropped_bits)) & 0xFF
+    gm = (0xFF << (2 + dropped_bits)) & 0xFF
     thumb_rows = []
     for j in range(THUMB_H):
         y0 = (j * FRAME_H) // THUMB_H
@@ -665,27 +697,50 @@ def make_thumbnail(rows: Sequence[bytes]) -> bytes:
         for i in range(THUMB_W):
             x0 = (i * FRAME_W) // THUMB_W
             x1 = ((i + 1) * FRAME_W) // THUMB_W
-            rs = gs = bs = n = total = 0
+            counts: Dict[Tuple[int, int, int], int] = {}
+            total = 0
+            opaque = 0
             for y in range(y0, y1):
                 row = rows[y]
                 for x in range(x0, x1):
                     o = 4 * x
                     total += 1
                     if row[o + 3] >= ALPHA_OPAQUE:
-                        rs += row[o]
-                        gs += row[o + 1]
-                        bs += row[o + 2]
-                        n += 1
+                        opaque += 1
+                        c = (row[o] & rm, row[o + 1] & gm, row[o + 2] & rm)
+                        counts[c] = counts.get(c, 0) + 1
             t = 4 * i
-            if 2 * n >= total and n:
-                trow[t] = (rs + n // 2) // n
-                trow[t + 1] = (gs + n // 2) // n
-                trow[t + 2] = (bs + n // 2) // n
+            if 2 * opaque >= total and opaque:
+                best = max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+                trow[t: t + 3] = bytes(best)
                 trow[t + 3] = 255
             else:
                 trow[t + 3] = 0
         thumb_rows.append(bytes(trow))
     return rgb_to_thumb(thumb_rows)
+
+
+def make_thumbnail_fitting(rows: Sequence[bytes], budget: Optional[int]) -> Tuple[bytes, int]:
+    """The thumbnail of an 800x600 frame and the number of colour bits dropped to make its GPZP file fit
+    `budget` bytes (0 when the full-colour one fits or no budget is given). If even the last rung of the
+    ladder is too large, that one is returned and the caller's budget check reports it."""
+    rows = _as_rgba(rows, FRAME_W)
+    if len(rows) != FRAME_H:
+        raise ValueError(f"a frame has {FRAME_H} rows, got {len(rows)}")
+    thumb = _thumbnail_once(rows, 0)
+    if budget is None or len(encode_gpzp(thumb)) <= budget:
+        return thumb, 0
+    for dropped in range(1, THUMB_MAX_DROPPED_BITS + 1):
+        thumb = _thumbnail_once(rows, dropped)
+        if len(encode_gpzp(thumb)) <= budget:
+            return thumb, dropped
+    return thumb, THUMB_MAX_DROPPED_BITS
+
+
+def make_thumbnail(rows: Sequence[bytes], budget: Optional[int] = None) -> bytes:
+    """112x80 RGB565 menu thumbnail of an 800x600 RGBA frame; see-through areas are the key grey 0x8C71.
+    With `budget`, colours are reduced step by step until the encoded thumbnail fits that many bytes."""
+    return make_thumbnail_fitting(rows, budget)[0]
 
 
 # --- The frames inside an image -----------------------------------------------------------------------------
@@ -715,10 +770,10 @@ def frame_slots(image: bytes) -> Dict[int, FrameSlot]:
     by_name = {e.name: e for e in resource_directory(image)}
     out: Dict[int, FrameSlot] = {}
     for n in FRAME_SLOTS:
-        strips = [by_name.get(strip_name(n, s)) for s in range(STRIPS)]
-        thumb = by_name.get(thumb_name(n))
-        if all(strips) and thumb and all(e.budget for e in strips + [thumb]):
-            out[n] = FrameSlot(n, strips, thumb)  # type: ignore[arg-type]
+        wanted = [strip_name(n, s) for s in range(STRIPS)] + [thumb_name(n)]
+        found = [by_name[name] for name in wanted if name in by_name]
+        if len(found) == len(wanted) and all(e.budget for e in found):
+            out[n] = FrameSlot(n, found[:STRIPS], found[STRIPS])
     return out
 
 
@@ -807,6 +862,7 @@ class ReplacePlan:
     nudged: int
     transparent_pairs: int
     total_pairs: int
+    thumb_bits_dropped: int = 0     # colour reduction the generated thumbnail needed to fit (0 = none)
 
     @property
     def fits(self) -> bool:
@@ -827,12 +883,16 @@ def plan_replacement(image: bytes, slot: int, frame_rows: Sequence[bytes],
     for s, e in enumerate(fs.strips):
         strip = rowpair[s * STRIP_BYTES: (s + 1) * STRIP_BYTES]
         parts.append(EncodedPart(f"strip {s}", e, encode_gpzp(strip), (s * STRIP_ROWS, (s + 1) * STRIP_ROWS - 1)))
-    thumb = rgb_to_thumb(thumb_rows) if thumb_rows is not None else make_thumbnail(rows)
+    dropped = 0
+    if thumb_rows is not None:
+        thumb = rgb_to_thumb(thumb_rows)
+    else:
+        thumb, dropped = make_thumbnail_fitting(rows, fs.thumb.budget)
     parts.append(EncodedPart("thumbnail", fs.thumb, encode_gpzp(thumb)))
     for p in parts:
         if not fixed_huffman_only(p.data[4:-8]):
             raise ValueError(f"{p.label}: zlib produced a non-fixed-Huffman block; refusing to write it")
-    return ReplacePlan(slot, parts, nudged, transparent, len(mask) * (FRAME_W // 2))
+    return ReplacePlan(slot, parts, nudged, transparent, len(mask) * (FRAME_W // 2), dropped)
 
 
 def apply_plan(image: bytes, plan: ReplacePlan) -> bytes:
@@ -930,6 +990,8 @@ def _print_plan(plan: ReplacePlan) -> None:
     if plan.transparent_pairs == 0:
         print("note: nothing is transparent; this frame would cover the whole photo")
     print(f"nudged {plan.nudged:,} opaque pair{'s' if plan.nudged != 1 else ''} whose lumas were both 140 (the see-through key) to 140/141")
+    if plan.thumb_bits_dropped:
+        print(f"thumbnail: colours reduced by {plan.thumb_bits_dropped} bit{'s' if plan.thumb_bits_dropped != 1 else ''} per channel to fit its slot (pass --thumb to supply your own)")
     for p in plan.parts:
         print(f"  {p.describe()}")
 

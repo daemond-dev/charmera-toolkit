@@ -23,6 +23,7 @@ charmera --help
 | `sounds` | a file | List, extract, mute or replace the five UI sounds. |
 | `settings` | a file | Show the record the camera will load, or write one with new auto-off, standby, volume values. |
 | `tweak` | a file | Experimental start-up and power-off byte patches, each checked against the stock bytes. |
+| `frames` | a file | List, extract, preview or replace the four photo frames (PNG in and out, budgets checked). |
 | `pack` | a file | Turn an image into a correctly named update file, optionally with settings and photos blanked. |
 | `card-check` / `card-fix` | nothing / the card | Diagnose and fix the exFAT dirty-bit problem that stops phones reading the card. |
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
@@ -46,6 +47,7 @@ Ground rules baked into the commands:
 - `docs/FLASH-CANDIDATES.md`: the first files to try on a camera and how they were reviewed.
 - `docs/CARDS.md`: the exFAT dirty-bit problem and the FAT32 fix.
 - `docs/EXIF.md`: what is wrong with the camera's EXIF and AVI dates and what `exif-fix` does.
+- `docs/FRAMES.md`: the frame format, PNG requirements and what is still unverified about the overlay.
 - `docs/NOTES-boot-and-power.md`: boot sequence, auto-off and standby analysis behind `tweak` and `settings`.
 - `docs/PHASE1-REPORT.md`: the research this is built on, every claim labelled verified, reported or inferred.
 

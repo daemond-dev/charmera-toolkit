@@ -36,11 +36,18 @@ charmera settings show my_backup.bin                                 # what the 
 charmera settings set my_backup.bin --out quiet.bin --ui-sound 0 --auto-off 10 --i-understand-this-is-a-mod
 charmera tweak list                                                  # experimental start-up / power-off patches
 charmera tweak apply my_backup.bin --out fast.bin --enable boot-delay,fast-poweroff --i-understand-this-is-a-mod
+charmera frames list my_backup.bin                                   # the four photo frames and their byte budgets
+charmera frames extract my_backup.bin --out frames/                  # 800x600 PNGs with transparency, plus thumbnails
+charmera frames preview my_backup.bin --slot 1 --photo photo-800x600.png --out preview.png
+charmera frames replace my_backup.bin --slot 1 --png frame.png --out framed.bin                  # prints the plan only
+charmera frames replace my_backup.bin --slot 1 --png frame.png --thumb thumb.png --out framed.bin --i-understand-this-is-a-mod
 ```
 
 `settings set` keeps everything else in the record and leaves that record as the only one in the bank. `tweak apply`
 refuses any patch whose original bytes are not where it expects them, so it cannot land on the wrong build or on
-top of an earlier edit; every tweak is untested on hardware and labelled with its risk.
+top of an earlier edit; every tweak is untested on hardware and labelled with its risk. `frames replace` takes an
+800x600 RGBA PNG (transparent = see-through), re-encodes it the way the camera stores frames, and refuses with a
+per-strip table when the result does not fit the slot's byte budget; see docs/FRAMES.md.
 
 The gate flags exist so that nothing flashable appears by accident. A modified image goes through `pack` and then `verify`
 before it is allowed near a card.

@@ -10,7 +10,6 @@ import io
 import random
 import struct
 import zlib
-from pathlib import Path
 
 import pytest
 
@@ -272,7 +271,7 @@ def test_gpzp_container_synthetic():
 def test_gpzp_roundtrip_on_every_stock_entry(stock_image):
     entries = [e for e in image.resource_directory(stock_image) if stock_image[e.offset: e.offset + 4] == b"GPZP"]
     assert len(entries) == 35
-    identical = 0
+    identical = set()
     for e in entries:
         slot = stock_image[e.offset: e.offset + e.budget]
         g = frames.parse_gpzp(slot)
@@ -285,13 +284,12 @@ def test_gpzp_roundtrip_on_every_stock_entry(stock_image):
         assert frames.fixed_huffman_only(again[4:-8])
         assert len(again) <= g.file_len, (e.name, len(again), g.file_len)
         if again == slot[: g.file_len]:
-            identical += 1
-            if e.name == "F_0_001GPZP":
-                identical += 100
+            identical.add(e.name)
     if not ZLIB_NG:
-        # The stock encoder is not zlib (its blocks hold 4096 symbols, zlib's 2^n - 1), so byte identity
-        # holds only where a single block or an identical match sequence results; F_0_001 is one of those.
-        assert identical >= 120, identical
+        # The stock encoder is not zlib (its blocks hold 4096 symbols, zlib's hold 2^n - 1), so byte identity
+        # holds only where a single block with the same match sequence results; F_0_001 is one of 23 such.
+        assert "F_0_001GPZP" in identical
+        assert len(identical) >= 20, sorted(identical)
 
 
 # --- Row-pair conversion -----------------------------------------------------------------------------------------
@@ -441,15 +439,32 @@ def test_thumbnail_pack_and_make():
         frames.thumb_to_rgb(data[:-2])
     with pytest.raises(ValueError):
         frames.rgb_to_thumb(rows[:-1])
-    # box average of a border frame: corners carry the colour, the middle is see-through
+    # a border frame: corners carry the colour, the middle is see-through
     thumb = frames.make_thumbnail(border_frame((220, 40, 40), 24))
     assert len(thumb) == frames.THUMB_BYTES
     words = [struct.unpack_from("<H", thumb, 2 * i)[0] for i in range(TW * TH)]
     assert words[0] == frames.rgb565(220, 40, 40)
     assert words[TW * (TH // 2) + TW // 2] == frames.KEY_RGB565
     assert 0.1 < words.count(frames.KEY_RGB565) / len(words) < 0.95
+    assert frames.make_thumbnail_fitting(border_frame((220, 40, 40), 24), 1024) == (thumb, 0)
     with pytest.raises(ValueError):
         frames.make_thumbnail(border_frame()[:-1])
+    # a two-way gradient has thousands of colours: the ladder drops colour bits until the file fits
+    grad = []
+    for y in range(H):
+        row = bytearray(W * 3)
+        row[0::3] = bytes((x * 255) // (W - 1) for x in range(W))
+        row[1::3] = bytes([(y * 255) // (H - 1)]) * W
+        row[2::3] = bytes([90]) * W
+        grad.append(bytes(row))
+    full = frames.make_thumbnail(grad)
+    assert len(frames.encode_gpzp(full)) > 2048
+    fitted, dropped = frames.make_thumbnail_fitting(grad, 2048)
+    assert 1 <= dropped <= frames.THUMB_MAX_DROPPED_BITS and len(frames.encode_gpzp(fitted)) <= 2048
+    assert frames.make_thumbnail(grad, 2048) == fitted
+    # noise never fits: the last rung comes back and the caller's budget check says so
+    noisy, dropped = frames.make_thumbnail_fitting(noise_frame(), 1024)
+    assert dropped == frames.THUMB_MAX_DROPPED_BITS and len(frames.encode_gpzp(noisy)) > 1024
 
 
 # --- Frames inside an image, replace, extract, preview ------------------------------------------------------------
@@ -467,6 +482,7 @@ def test_frame_slots_and_replace_library(tmp_path):
         frames.read_frame(img, 0)
     plan = frames.plan_replacement(img, 1, border_frame((30, 90, 200), 32))
     assert plan.fits and plan.nudged == 0 and 0.5 < plan.transparent_pairs / plan.total_pairs < 0.95
+    assert plan.thumb_bits_dropped == 0
     assert [p.label for p in plan.parts] == ["strip 0", "strip 1", "strip 2", "thumbnail"]
     assert all("fits" in p.describe() for p in plan.parts)
     new = frames.apply_plan(img, plan)
@@ -659,24 +675,35 @@ def test_stock_frame_rgba_roundtrip(stock_image):
         assert nudged == 0
         assert frames.key_mask(back) == frames.key_mask(rp)
         opaque = 0
-        clamped_off = 0
+        out_of_gamut = 0
+        chroma_off = 0
         for p in range(H // 2):
             b = p * frames.ROWPAIR_BYTES
             for k in range(W // 2):
                 u, v = rp[b + W + 2 * k], rp[b + W + 2 * k + 1]
+                pair_in_gamut = True
+                pair_opaque = False
                 for off in (0, 2 * W):
                     e = b + off + 2 * k
                     if rp[e] == 140 and rp[e + 1] == 140:
                         continue
+                    pair_opaque = True
                     for x in (e, e + 1):
                         opaque += 1
-                        d = abs(rp[x] - back[x])
-                        if in_gamut(rp[x], u, v):
-                            assert d <= 2, (n, x, rp[x], back[x], u, v)
-                        elif d > 2:
-                            clamped_off += 1
-        # colours the camera cannot show (out of RGB gamut) lose luma on the way through RGB; they are rare
-        assert clamped_off < 0.01 * opaque, (n, clamped_off, opaque)
+                        # every luma survives the trip through RGB, in or out of gamut
+                        assert abs(rp[x] - back[x]) <= 2, (n, x, rp[x], back[x], u, v)
+                        if not in_gamut(rp[x], u, v):
+                            out_of_gamut += 1
+                            pair_in_gamut = False
+                if pair_opaque and pair_in_gamut:
+                    if abs(rp[b + W + 2 * k] - back[b + W + 2 * k]) > 2 or abs(rp[b + W + 2 * k + 1] - back[b + W + 2 * k + 1]) > 2:
+                        chroma_off += 1
+        assert chroma_off == 0, (n, chroma_off)
+        # the saturated frame 2 has about 5% of its opaque pixels outside the RGB gamut, the others under 1%
+        assert out_of_gamut < 0.10 * opaque, (n, out_of_gamut, opaque)
+        # and the re-encoded strips fit their slots again
+        for s, e in enumerate(frames.frame_slots(stock_image)[n].strips):
+            assert len(frames.encode_gpzp(back[s * frames.STRIP_BYTES: (s + 1) * frames.STRIP_BYTES])) <= e.budget, (n, s)
 
 
 def test_replace_cli_on_stock_copy(stock_image, tmp_path, capsys):
@@ -688,3 +715,30 @@ def test_replace_cli_on_stock_copy(stock_image, tmp_path, capsys):
         assert frames.read_frame(new, n) == frames.read_frame(stock_image, n)
         assert frames.read_thumbnail(new, n) == frames.read_thumbnail(stock_image, n)
     assert image.find_resources_end(new) == image.find_resources_end(stock_image)
+
+
+def test_stock_frames_survive_extract_and_replace(stock_image, tmp_path, capsys):
+    """The flow a user follows: extract a stock frame as PNG, put it back unchanged. Every strip and the
+    generated thumbnail must fit the stock slots again (frame 3's thumbnail, 1,406 of 1,536 bytes, is the
+    tightest; frame 2's bottom band only fits because the export preserves luma)."""
+    src = tmp_path / "src.bin"
+    src.write_bytes(stock_image)
+    out_dir = tmp_path / "ex"
+    assert run("frames", "extract", str(src), "--out", str(out_dir)) == 0
+    capsys.readouterr()
+    for n in range(4):
+        out = tmp_path / f"back{n}.bin"
+        assert run("frames", "replace", str(src), "--slot", str(n), "--png", str(out_dir / f"frame-{n}.png"),
+                   "--out", str(out), GATE) == 0, n
+        text = capsys.readouterr().out
+        assert "nudged 0" in text and "over by" not in text
+        new = out.read_bytes()
+        rp = frames.read_frame(new, n)
+        orig = frames.read_frame(stock_image, n)
+        assert frames.key_mask(rp) == frames.key_mask(orig)
+        for p in range(H // 2):
+            b = p * frames.ROWPAIR_BYTES
+            for off in (0, 2 * W):
+                assert all(abs(a - c) <= 2 for a, c in zip(rp[b + off: b + off + W], orig[b + off: b + off + W])), (n, p)
+        assert len(frames.read_thumbnail(new, n)) == frames.THUMB_BYTES
+    assert src.read_bytes() == stock_image
