@@ -39,6 +39,7 @@ Ground rules baked into the commands:
 
 ## Documentation
 
+- `docs/FIRST-FLASH.md`: the first flash end to end, with the point of no return marked.
 - `docs/USAGE.md`: the commands, with examples.
 - `docs/FORMAT.md`: the image layout, settings fields, update-file rules, sound slots and frame format.
 - `docs/RECOVERY.md`: the recovery decision tree (SD updater, CH341A, what is unknown).

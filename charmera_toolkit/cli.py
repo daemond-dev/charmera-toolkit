@@ -16,6 +16,7 @@ FEATURE_MODULES = [
     ("charmera_toolkit.diff_cmd", "diff: compare two images region by region"),
     ("charmera_toolkit.pack", "pack: build an update file (output gated)"),
     ("charmera_toolkit.sounds", "sounds: list, extract, mute or replace the UI sounds"),
+    ("charmera_toolkit.frames", "frames: list, extract, preview or replace the four photo frames"),
     ("charmera_toolkit.settings_cmd", "settings: show or change the stored settings (auto-off, standby, volumes)"),
     ("charmera_toolkit.tweaks", "tweak: experimental start-up and power-off byte patches"),
     ("charmera_toolkit.card", "card-check / card-fix: the exFAT dirty-bit and MBR type problem"),
