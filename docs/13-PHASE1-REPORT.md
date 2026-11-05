@@ -5,11 +5,11 @@ Reading order: 13 of 13 · previous: [Boot and power notes](12-NOTES-boot-and-po
 Status: complete for Phase 1. Everything here is static analysis and public sources; nothing has been flashed.
 Date: 2026-11-04. Scope: original 2025 series (matte body, yellow Kodak boot screen). No hardware was touched; every finding below comes from public files, public issue threads, and static analysis of two public flash dumps.
 
-Labels used throughout: **VERIFIED** = reproduced here from the binaries or files; **REPORTED** = stated by a community source and cited, not reproduced here; **INFERRED** = my reasoning from evidence; **UNKNOWN** = nobody has shown it.
+Labels used throughout: **VERIFIED** = reproduced here from the binaries or files; **REPORTED** = stated by a community source and cited, not reproduced here; **INFERRED** = reasoned from the evidence, with the reasoning given; **UNKNOWN** = nobody has shown it.
 
 ## 0. Sources and how each was checked
 
-| Source | Checked at | What it contributes | How I checked it |
+| Source | Checked at | What it contributes | How it was checked |
 |---|---|---|---|
 | benbadio/keychain-camera-plus | commit 209c25a (2026-10-26) | Full 2 MiB stock dump (`dumps/charmera_stock_latest.bin`), stock-restore SD file, UVC patch, packaging script, updater offsets, CH341A scripts, board photos | Cloned; hashed every binary; re-derived the checksum rule; read every script and the full git history (initial release 919b298 onwards) |
 | Khimira/Project-Sirius | commit 8d64da5 (2026-07-24) | Second full 2 MiB stock dump (`Original_Firmware.bin`); issues #1 and #2 | Cloned; hashed; diffed against the keychain dump block by block; issues fetched in full |
@@ -200,7 +200,7 @@ Nothing here has been flashed yet. The first mute test on a camera waits for you
 - Settled: the settings loader takes the sector before the first erased one, so a single-record store is honoured (section 2).
 - Settled: the updater programs to the file length in 256-byte pages and erases one extra block at length + 64 KiB (section 4).
 - Sensor: this build drives one hard-coded driver through a bit-banged two-wire bus (GPIO 0x11 clock, GPIO 0x12 data, write address 0x78), 61 register writes with SuperPix-style page selects, never reads a chip ID and ignores write failures, which is consistent with (not proof of) the cross-edition reports. The SP140A name remains community inference. The toolkit fingerprints the 61-entry table (SHA-256 aea3976b...) and the code region (297506be...) so a future Millennium or CLOT dump can be told apart.
-- Boot time and power: section 11.
+- Boot time and power: [section 11](#11-quick-start-and-power-saving).
 - Whether the 20 ms sleep between the two sensor tables and the single 1280x720 mode leave room for a faster preview start: not measurable statically.
 - Whether the mask ROM of the GPCV2247F has a USB service mode and what the ISP header carries. Needs the datasheet or a probe on hardware; no safe way to test it here.
 - The CLOT edition's existence beyond one issue comment; the Millennium's actual sensor.
@@ -216,9 +216,9 @@ Already built in `charmera-toolkit` (read-only unless a gate flag is given): `in
 - Nothing produces a flashable file without an explicit flag, and every such file comes with a manifest and a SHA-256.
 - No firmware is distributed; the toolkit works on the owner's backup and references the public dumps by hash only.
 
-## 11. Quick start and power saving (added at your request)
+## 11. Quick start and power saving
 
-All offsets are file offsets; VA = offset − 0x200. VERIFIED by disassembly unless marked. Detailed notes with excerpts: `work/bootpower.md` in the research scratch directory (copied into the toolkit docs).
+All offsets are file offsets; VA = offset − 0x200. VERIFIED by disassembly unless marked. The detailed notes, with the disassembly behind each claim, are the [Boot and power notes](12-NOTES-boot-and-power.md).
 
 **What the firmware is.** µC/OS-II, 100 Hz OS tick (OSTimeDly at VA 0x904E4, OSTimeDlyHMSM converts ms/10). `main` at 0x2DD48 sets up an 8 MiB heap and a 100 Hz timer, then a root task spawns seven tasks: state machine (prio 45), peripheral/keys/ADC (48), AP task doing SD housekeeping every second (52), display (7), audio (17), USB (50), file service (1). A software-timer service on hardware timer 2 ticks at 1/128 s (INFERRED, strongly: 7680 ticks per minute in the loop-record timer, and the idle maths divides by 128 to get seconds).
 

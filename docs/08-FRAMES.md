@@ -160,7 +160,7 @@ its budgets.
 ## What is not known
 
 - Nothing from this module has been flashed. The compositor rule is emulation-verified by the community;
-  that the camera accepts our streams (fixed Huffman, but with zlib's block boundaries instead of the stock
+  that the camera accepts the toolkit's streams (fixed Huffman, but with zlib's block boundaries instead of the stock
   encoder's) is expected from the inflater's code, not shown on hardware.
 - Whether the menu keys on 0x8C71 in the thumbnail or just displays it.
 - Whether the firmware tolerates a frame entry whose file is longer than the stock one but within the

@@ -8,7 +8,7 @@ experience. Read the whole section that applies to you before touching anything.
 
 Every factual claim carries one of three labels:
 
-- VERIFIED: checked from documents or from the firmware binary itself by the research lead.
+- VERIFIED: checked against documents or the firmware binary itself.
 - REPORTED: stated by community members who did it; not independently checked.
 - UNKNOWN: nobody has published it.
 

@@ -2,9 +2,9 @@
 
 Reading order: 12 of 13 · previous: [Image layout](11-FORMAT.md) · next: [Research report](13-PHASE1-REPORT.md) · [all docs](README.md)
 
-Static analysis only. Dump: `fw/keychain_stock.bin` (2 MiB, sha256 cc3b4b2f...ea42f), not modified.
-Scripts: `work/bootpower/fwlib.py` (capstone helpers, call graph), `d.py <file-off-hex> <n>` (annotated disassembly),
-`strs.py`, dumps `full_arm.txt` (whole code region, ARM mode), `f_*.txt` (per-function dumps).
+Static analysis only, by disassembling the code region of the public stock dump (2 MiB, sha256
+cc3b4b2f...ea42f; see the [Research report](13-PHASE1-REPORT.md) for where it comes from) in ARM mode. Nothing
+here was run on a camera.
 The patches in section 6 are what `charmera tweak` applies ([Command reference](07-USAGE.md)); the settings
 fields are what `charmera settings` changes. All addresses below are **file offsets** unless marked VA. Labels: VERIFIED (seen in the binary), INFERRED, UNKNOWN.
 
@@ -56,7 +56,7 @@ Tick unit = 1/128 s (**INFERRED, strong**). Evidence:
 * power-key long press = 48 runs (0x74E8 `cmp r3,#0x30`) = 1.5 s; settings-flush check every 160 runs (0x7FFC `cmp r0,#0xa0`) = 5 s; counter 0x60 (0x8168) = 3 s.
 Hardware timer 2 control = 0xC0030000+8 (ctrl bits 13/14/15 set, low field = r1 = 0); the fixed rate select is not in the firmware (0x325E0 writes 0xC0030020=0x5555 but has no callers), so the absolute rate rests on the inference above. If the real rate differed, every "seconds" value in §3 scales accordingly (the owner's auto-off stopwatch test, §6, resolves it).
 
-## 2. Boot path (question 1)
+## 2. Boot path
 
 Order of events, with blocking points.
 
@@ -86,7 +86,7 @@ Summary of fixed boot delays (VERIFIED): 100 ms (0x62B8) + 50 ms (0x64F8) + up t
 * Sound: posted to the audio task; the startup loop only requires that playback *started*; nothing waits for completion. The audio task may still be playing when preview starts.
 * Logo hold: no explicit timer. Logo is shown until the home state's HOME_SMALL draw (after storage detection) and then live view. At power-off the logo is shown again for 600 ms (below).
 
-## 3. Power-off, auto-off, standby (question 3)
+## 3. Power-off, auto-off, standby
 
 ### 3.1 ap_state_handling_power_off (0x23008, VERIFIED; arg r6: 0 = normal, 1 = "USB/other")
 0xCFA0; speaker amp on 0x286A8(1); post 0x600D (cancels countdown 0x10CD80+0x18); 0x21EFC; 0x21C1C (display toggle msg); if r6==0: 0x1EA44(3) **POWEROFF_AUDIO.WAV**; `OSTimeDly(0x14)` 200 ms (0x23050); if r6==0: re-display **POWER_ON_LOGO.JPG** (0x23070..0x23198) then `OSTimeDly(0x3C)` **600 ms (0x2319C)**; free; 0x1F760 (beep getter) -> OSTimeDly(1) or 0x1EB78; 0x6DA8; OSTimeDly(2); 0xE2EBC(2); 0x27210(0); 0x1FC74; GPIO 0x5F=0 (amp off); 0x33BC8; 0x2DF4C(0) (ADC off); if r6!=0: `OSTimeDly(10)` loop that never exits (0x2320C..0x23220: `and r4,r0,#0xff; cmp r4,#0x12c`), i.e. "not poweroff" idle-forever; wait <= 2 s for byte 0x10CD7C == 0 (0x23224..0x2324C, `cmp r4,#0xc8`); 0x2ED78(0,0,0); 0x2ECF4(0,0); 0x2EBA4(0x40,0); 0x362D8; GPIO 0x5F=0; 0x286A8(0); 0x28688; 0x32204(0..3) and 0x325C0(0..2) (timers off); wait until 0x310FC(0)==0 (power key released, 0x232CC..0x232D8); 0x2F3B8(0xF,0); 0x2F45C; 0x32CD8; tail-call **0x30F00**: 0x30EE8(0); 0x30D74(3) -> 0xD0000028[2:0]=3; 0x30D54(1) -> 0xD0000028 bit15; `b .` forever (PMU off, VERIFIED register writes, meaning of mode 3 INFERRED).
@@ -128,7 +128,7 @@ Current settings record: byte +0x01 = 2 -> **5 minutes** (if the 128 Hz tick inf
 * Flash 0x170000: append-only records of 0x100 bytes = 0xFC data + CRC32 (zlib/IEEE, little-endian) at +0xFC; 16 valid records at 0x170000..0x171E00 in this dump (all with auto-off=2, standby=2). 0x16E000 holds a 'JHCM' marker area written by 0x73DA0 (all 0xFF here).
 * RAM copy at VA 0x1107DC (0xFC bytes + CRC), loaded by 0x1FD24, dirty flag +0xFA, defaults 0x1F89C. Fields identified: +0x01 auto-off index (default 2), +0x51 standby index (default 2), +0x19 sound on/volume (default 5, used as boolean by 0x1EA44), +0x50 (default 2 then 0), +0x12 resolution-like (many users), +0xE6 (default 1), +0x0F (default 6), +0x29 (default 4). The settings menu state 0x77EAC reads items via the getter switch at 0x78EA4..0x78F38 (+0x50,+0x15,+0xE7,+0x29,+0xE6,+0x12,+0x0F,+0xE5,+0x0B,+0x14,+0x11,?,+0x35,+0x52,+0xE9,+0x28,+0x53). Generic SDK strings "Auto Off"/"LCD Off"/"1 Min." (0x141BDC..) are in the resource pack and are not referenced by code; the Charmera UI uses the index->minutes mapping above.
 
-## 4. Clocks (question 4)
+## 4. Clocks
 
 * Header: 0xD0000028 = 0x8005 (bit15 + mode 5) and 0xD00000AC = 0x104 after the unlock keys (§0). Meaning of mode bits UNKNOWN (datasheet).
 * main -> 0x36274 -> 0x312FC: **sysclk_hz = 13,500,000 + 4,500,000 * (0xD000005C & 0x3F)** (0x31274, VERIFIED formula), stored at VA 0x11F7D4; then 0x30FB8(0,4): 0xD00000AC = (old & ~0xF) | 4; 0x31084(1): 0xD0000020 bits 6:4 = 1. Then 0x326F8 installs exception vectors at 0xF8400000, 0x3661C/0x345D4/0x33A68/0x33C40/0x2E404(0)/0x31704 (interrupt controller, DMA, GPIO, timebase init; INFERRED).
@@ -136,7 +136,7 @@ Current settings record: byte +0x01 = 2 -> **5 minutes** (if the 128 Hz tick inf
 * Peripheral clock enables: 0x2C794 writes 0xD0000010 = 0xFE7F, 0xD0000014 = 0xCF5D, 0xD00000E0 = 0x19DE and clears bit 28 of 0xD000000C (in the CDSP/sensor init chain 0x2C670 <- 0x2BD24 <- ... <- 0x5F7B0).
 * Dynamic clock changes: none at idle. 0xD0000028 is only changed in power-off (mode 3) and in state 0x21370 (msg 0x108, USB mass-storage; 0x213A4 sets bit15 and 0x21548 resets the SPI divider). The uC/OS-II idle task body / idle hook was not located (UNKNOWN); ARM7TDMI has no WFI, and no halt-register write other than the power-off sequence was found.
 
-## 5. Battery and charging (question 5)
+## 5. Battery and charging
 
 * ADC: 0xC00D0000 (trigger/busy at +4, data at +8). Runtime sampling: peripheral run 0x72EC every >= 2 OS ticks, channel 1 (0x2E020(1)), result delivered by the ADC callback 0x6DB4 into halfword 0x10CC58+0x32 = (adc12 << 4) | channel. A battery sample is accepted every 33 runs (~1 s); samples must be stable (5 % change rule 0x7370..0x73B0) twice.
 * Level: 0x6F74: rolling 5-slot window at 0x10CCCC, sum of 4 samples compared with 4*threshold, thresholds table **file 0xF3864 = {0, 2190, 2420, 2600} ADC counts** -> level 0..3 (0: avg <= 2190, 1: <= 2420, 2: <= 2600, 3: above), hysteresis 20/4 = 5 counts (0x7038 `mov r3,#0x14`, 0x7070 `mvn r3,#0x13`), stricter direction when charging. Level stored at 0xFF948+5/+7, UI redraw msg 0x703E with pointer 0xFF94F when level < 4 (BATTERY00..03 icons, INFERRED).
@@ -144,7 +144,7 @@ Current settings record: byte +0x01 = 2 -> **5 minutes** (if the 128 Hz tick inf
 * ADC-to-volts: divider ratio and ADC reference are UNKNOWN; thresholds are raw counts.
 * Charging/DC detect: PMU status 0xD0000068 bit2 (0x6F5C); bit0 = power key (0x310FC(0)); bit1 = 0x310FC(1) (unused in the paths read). 0x7098 posts 0x703F on DC connect and 0x7040 on disconnect, keeps a charging flag 0x10CC58+0x15; 0x7C18 debounces DC state over 16 runs and powers off on unplug when in charge-only mode. No charger IC register access found (charging is hardware, INFERRED).
 
-## 6. Patch candidates (question 6) and measurements
+## 6. Patch candidates and measurements
 
 All are single-word changes unless noted; file offsets; current bytes little-endian. Risks are static guesses.
 
@@ -173,7 +173,7 @@ Measurements the owner should make first (stock):
 4. Idle current at live view, after standby, and off; current with the LED masked (tape) to see if GPIO 0x26 matters.
 5. Whether the power-on sound is cut short when live view starts.
 
-## 7. Wi-Fi stack (question 2)
+## 7. Wi-Fi stack
 
 VERIFIED static conclusion: **never initialised**.
 * `ssv6xxx_wifi_init` (string 0xA22AC, function 0xA20A4) is called only from 0x4659C inside 0x463B0 (`[33m SSV dev init %d, DevInit=%d` message, retry loop 0x4659C..0x465BC: on failure prints, 0xACC00, 0xA54B0, loops back while 0xA54B0 returns 0; delays inside 0x46F9C: OSTimeDly(10) at 0x46FBC and OSTimeDly(30) at 0x46FCC).
