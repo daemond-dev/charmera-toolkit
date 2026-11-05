@@ -767,14 +767,31 @@ def noise_band_frame(y0=200, y1=214, seed=11):
     return [bytes(r) for r in rows]
 
 
-def check_stored_band_refused(img, slot, tmp_path, capsys):
+def _encode_with_a_stored_block(payload: bytes) -> bytes:
+    """The same container as frames.encode_gpzp, but with an empty stored block in the middle of the stream (what
+    a sync flush writes): small enough to fit any budget, and not fixed-Huffman only."""
+    c = zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_FIXED)
+    half = len(payload) // 2
+    stream = c.compress(payload[:half]) + c.flush(zlib.Z_SYNC_FLUSH) + c.compress(payload[half:]) + c.flush()
+    return frames.GPZP_MAGIC + stream + struct.pack("<II", zlib.crc32(payload) & 0xFFFFFFFF, len(payload))
+
+
+def check_stored_band_refused(img, slot, tmp_path, capsys, monkeypatch):
     """replace must refuse the noise band even though strip 1 fits its budget: dry run and gated run both
-    exit 2 naming the band, and nothing is written."""
+    exit 2 naming the band, and nothing is written. Whether zlib stores the noise band depends on the zlib
+    build (zlib-ng and some older builds compress it instead), so where it does not, the band's encoding is
+    forced to contain a stored block; the refusal under test is the same either way."""
     rows = noise_band_frame()
     plan = frames.plan_replacement(img, slot, rows)
     kinds = [kind for kind, _ in frames.deflate_blocks(plan.parts[1].data[4:-8])]
-    if ZLIB_NG and "stored" not in kinds:
-        pytest.skip("this zlib build does not store the noise band")
+    if "stored" not in kinds:
+        band = plan.parts[1].payload
+        real = frames.encode_gpzp
+        monkeypatch.setattr(frames, "encode_gpzp", lambda data: _encode_with_a_stored_block(data) if bytes(data) == band else real(data))
+        plan = frames.plan_replacement(img, slot, rows)
+        kinds = [kind for kind, _ in frames.deflate_blocks(plan.parts[1].data[4:-8])]
+        if not plan.fits:
+            pytest.skip("with this zlib the noise band does not fit the slot once forced, so the budget check alone refuses it")
     assert "stored" in kinds
     assert plan.fits                                    # the budget alone would let it through
     assert [p.label for p in plan.problems] == ["strip 1"]
@@ -797,9 +814,9 @@ def check_stored_band_refused(img, slot, tmp_path, capsys):
         assert "nothing written" in text and "dry run" not in text and not out.exists()
 
 
-def test_replace_refuses_stored_blocks_synthetic(tmp_path, capsys):
+def test_replace_refuses_stored_blocks_synthetic(tmp_path, capsys, monkeypatch):
     img = synthetic_frame_image(slot=3, budgets=(20480, 20480, 20480, 2048))
-    check_stored_band_refused(img, 3, tmp_path, capsys)
+    check_stored_band_refused(img, 3, tmp_path, capsys, monkeypatch)
     # the write path checks every part itself: a hand-altered plan cannot slip a bad file through
     good = frames.plan_replacement(img, 3, border_frame())
     assert good.problems == [] and frames.apply_plan(img, good)
@@ -817,10 +834,10 @@ def test_replace_refuses_stored_blocks_synthetic(tmp_path, capsys):
     assert frames.apply_plan(img, good)
 
 
-def test_replace_refuses_stored_blocks_on_stock(stock_image, tmp_path, capsys):
+def test_replace_refuses_stored_blocks_on_stock(stock_image, tmp_path, capsys, monkeypatch):
     """Frame 3's middle band (F_3_001, 18,944 bytes) is one of the two stock slots big enough for a stored
     block; a 14-row noise band reaches it and fits the budget."""
-    check_stored_band_refused(stock_image, 3, tmp_path, capsys)
+    check_stored_band_refused(stock_image, 3, tmp_path, capsys, monkeypatch)
 
 
 def test_list_extract_preview_cli_synthetic(tmp_path, capsys):
