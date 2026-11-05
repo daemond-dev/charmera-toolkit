@@ -329,7 +329,10 @@ def test_tweaks_apply_and_refuse(tmp_path, capsys):
     img = bytes(img)
     new, applied = tweaks.apply_patches(img, ["boot-delay", "fast-poweroff"])
     assert applied == ["boot-delay", "fast-poweroff"]
-    assert new[0x62B8: 0x62BC] == b"\x02\x00\xa0\xe3" and new[0x2319C: 0x231A0] == b"\x01\x00\xa0\xe3"
+    assert new[0x62B8: 0x62BC] == b"\x02\x00\xa0\xe3" and new[0x2319C: 0x231A0] == b"\x05\x00\xa0\xe3"
+    rec, rec_applied = tweaks.apply_patches(img, ["recommended", "boot-delay"])
+    assert rec_applied == ["boot-delay", "lcd-poll", "fast-poweroff"]
+    assert rec[0x6544: 0x6555] == img[0x6544: 0x6555] and rec[0x64F8: 0x64FC] == img[0x64F8: 0x64FC]   # logo kept
     assert sum(1 for a, b in zip(img, new) if a != b) == 3
     with pytest.raises(ValueError):
         tweaks.apply_patches(new, ["boot-delay"])          # already applied

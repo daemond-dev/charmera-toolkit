@@ -151,14 +151,14 @@ All are single-word changes unless noted; file offsets; current bytes little-end
 | # | file off | current | meaning | change | risk |
 |---|---|---|---|---|---|
 | 1 | 0x62B8 | `0a 00 a0 e3` (mov r0,#10) | 100 ms OSTimeDly before power-key/DC check | #2 (20 ms) | low-medium: acts as PMU/ADC settle+debounce |
-| 2 | 0x64F8 | `05 00 a0 e3` | 50 ms after posting the logo frame (frame is freed right after) | #1 or #2 | medium: display task must consume the frame first |
+| 2 | 0x64F8 | `05 00 a0 e3` | 50 ms after posting the logo frame (frame is freed right after) | #1 or #2 | medium: display task must consume the frame first. Not used: it saves 40 ms at the risk of a garbled logo |
 | 3 | 0x6360 | `05 00 a0 e3` | display-ready poll interval (x50) | #1 | low (saves <= 40 ms) |
 | 4 | 0x63BC | `a0 61 00 eb` (bl 0x1EA44) | play POWERON WAV | `00 00 a0 e1` (nop) or set settings +0x19 = 0 | low; frees audio task during boot; loop still exits (flag set by the 0x63CC path only if r0!=0 -> **also nop 0x63C0..0x63CC or keep**: simplest is settings +0x19=0 which also silences every sound) |
-| 5 | 0x63D0..0x64E4 | logo decode/display | skip by patching 0x63D8 `bl 0x1510`'s result path; easier: replace 0x63D4 `add r0,pc,#0x168` target string with a non-existent name so 0x1510 returns 0xFFFF and the code jumps to 0x64E8 | removes JPEG decode (tens of ms, UNKNOWN) | low-medium (resource name is data: 0x6544 "POWER_ON_LOGO.JPG" -> e.g. "POWER_ON_LOGO.JP_" ) |
+| 5 | 0x63D0..0x64E4 | logo decode/display | skip by patching 0x63D8 `bl 0x1510`'s result path; easier: replace 0x63D4 `add r0,pc,#0x168` target string with a non-existent name so 0x1510 returns 0xFFFF and the code jumps to 0x64E8 | removes JPEG decode (tens of ms, UNKNOWN) | low-medium (resource name is data: 0x6544 "POWER_ON_LOGO.JPG" -> e.g. "POWER_ON_LOGO.JP_" ). Not used: the logo is the only thing on screen while the card mounts, and the decode is the only time it costs. Power-off has its own copy of the name at 0x23300 |
 | 6 | 0x6714 | `0d 01 00 00` (literal 0x10D used by 0x6584) | first state after startup = home screen | `01 01 00 00` -> enter photo state directly | medium-high: the home state also kicks the DCIM scan (msg 0x5006) and key setup; only worth it if the owner confirms the home screen waits (see measurements) |
 | 7 | 0x775C | `05 50 a0 03` (moveq r5,#5) | auto-off minutes for setting index 2 | #3 -> 3 min, #1 -> 1 min | low; or change settings byte +0x01 in the record (needs CRC32 update over 0xFC bytes, and every valid record is read in sequence; safest to append a new record) |
 | 8 | record +0x51 | 2 | standby stage after 2 min | 1 | low (CRC) |
-| 9 | 0x2319C | `3c 00 a0 e3` | 600 ms logo hold at power-off | #1 | cosmetic, low |
+| 9 | 0x2319C | `3c 00 a0 e3` | 600 ms logo hold at power-off; nothing runs during it, the frame is freed after it | #5 (50 ms, the post-to-free time the firmware uses at power-on) | low; the logo still shows during shutdown |
 | 10 | 0x23050 | `14 00 a0 e3` | 200 ms after POWEROFF sound | #1 | low (cuts the sound) |
 | 11 | 0x627C | `96 00 a0 e3` | 1.5 s BATTERY00 hold at low-battery boot | - | leave |
 | 12 | 0x6D84 | `04 30 a0 e3` | peripheral period 4 ticks (31.25 ms) | - | **do not change**: idle seconds math and key timings assume it |

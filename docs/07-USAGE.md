@@ -39,7 +39,7 @@ charmera sounds replace my_backup.bin --out custom.bin --slot IMG.WAV --wav shut
 charmera settings show my_backup.bin                                 # what the camera will load
 charmera settings set my_backup.bin --out quiet.bin --ui-sound 0 --auto-off 10 --i-understand-this-is-a-mod
 charmera tweak list                                                  # experimental start-up / power-off patches
-charmera tweak apply my_backup.bin --out fast.bin --enable boot-delay,fast-poweroff --i-understand-this-is-a-mod
+charmera tweak apply my_backup.bin --out fast.bin --enable recommended --i-understand-this-is-a-mod
 charmera frames list my_backup.bin                                   # the four photo frames and their byte budgets
 charmera frames extract my_backup.bin --out frames/                  # 800x600 PNGs with transparency, plus thumbnails
 charmera frames preview my_backup.bin --slot 1 --photo photo-800x600.png --out preview.png
@@ -50,7 +50,9 @@ charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jp
 
 `settings set` keeps everything else in the record and leaves that record as the only one in the bank. `tweak apply`
 refuses any patch whose original bytes are not where it expects them, so it cannot land on the wrong build or on
-top of an earlier edit; every tweak is untested on hardware and labelled with its risk. `frames replace` takes an
+top of an earlier edit; every tweak is untested on hardware and labelled with its risk. `recommended` is boot-delay,
+lcd-poll and fast-poweroff: it shortens only fixed waits where nothing is loading and keeps the power-on logo, which
+is on screen while the camera mounts the card. `frames replace` takes an
 800x600 RGBA PNG (transparent = see-through), re-encodes it the way the camera stores frames, and refuses with a
 per-strip table when the result does not fit the slot's byte budget; see [Photo frames](08-FRAMES.md).
 

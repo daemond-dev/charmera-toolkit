@@ -61,7 +61,7 @@ A note on method: the boot header has no public specification for this chip, so 
 
 **Code image.** The ARM vector table starts at 0x200 and the image is loaded to RAM address 0, so file offset = runtime address + 0x200 (VERIFIED three ways: reset vector literal, literal pools, PC-relative string references). Regions (VERIFIED from the reset handler's constants): code and read-only data 0x200 to 0xFFA70; initialised data 0xFFA70 to 0x10B130 (RAM 0xFF870, 0xB6C0 bytes, copied in place); BSS at RAM 0x10AF30 for 0xA3820 bytes; stacks up to about RAM 0x1B0AB0. The file bytes 0x10B130 to 0x120000 are zero padding that no SPI read targets; in RAM that range is BSS and heap, which is why "free space for code" there is a trap. µC/OS-II with a 100 Hz tick; uncompressed; no checksum over the code anywhere in the image.
 
-**Resource pack, 0x120000 to 0x168E9A.** Two-byte magic `GP`, u16 entry count (43), 24-byte entries from 0x18 (19 name bytes copied, u32 start sector of 512 bytes from 0x120000). The mount code checks only the two magic bytes; there is no checksum over the pack or its files; open-by-name strips the dot; reads are clamped to the slot (next entry's start minus own start). Contents: UI art in `GPZP` files (`GPZP` tag, raw DEFLATE, then an 8-byte trailer of CRC-32 and inflated length whose checking is UNKNOWN; RGB565 inside per the community decode), four frames as twelve 240,000-byte strips, four 112x80 frame thumbnails, the 160x80 power-on logo JPEG, a background JPEG, the menu text pack GPRS.PAK (0x141400, 14 languages), two small `GPZ` files for the USB modes, and the five sounds (section 7).
+**Resource pack, 0x120000 to 0x168E9A.** Magic `GP+\0`, then two u16 words (both 3; meaning unknown), then 24-byte entries from 0x18, 43 in the stock build (19 name bytes copied, u32 start sector of 512 bytes from 0x120000). The mount code checks only the two magic bytes; there is no checksum over the pack or its files; open-by-name strips the dot; reads are clamped to the slot (next entry's start minus own start). Contents: UI art in `GPZP` files (`GPZP` tag, raw DEFLATE, then an 8-byte trailer of CRC-32 and inflated length whose checking is UNKNOWN; RGB565 inside per the community decode), four frames as twelve 240,000-byte strips, four 112x80 frame thumbnails, the 160x80 power-on logo JPEG, a background JPEG, the menu text pack GPRS.PAK (0x141400, 14 languages), two small `GPZ` files for the USB modes, and the five sounds (section 7).
 
 **Factory self-test sector 0x16E000.** A `JHCM` write/read-back test sector used at the factory; 0xFF in both dumps (VERIFIED).
 
@@ -249,7 +249,8 @@ Fixed boot delays therefore total only about 150 ms plus whatever the hardware i
 |---|---|---|
 | No power-on sound (also saves its ~0.8 s if anything waits on it) | settings +0x19 = 0 (the mute) | low |
 | Shorter fixed delays | 0x62B8 `0a` → `02` (100 → 20 ms); 0x6360 `05` → `01` (poll 50 → 10 ms) | low; 0x64F8 `05` → `01` is medium because the frame buffer is freed right after |
-| Skip the logo | rename the resource at 0x6544 so the lookup fails | low to medium; untested failure path |
+| Skip the logo | rename the resource at 0x6544 so the lookup fails | low to medium; untested failure path. Not recommended: it saves only the decode, and the logo is what shows while the card mounts |
+| Shorter power-off | 0x2319C 600 → 50 ms logo hold, 0x23050 200 → 10 ms; nothing runs during either wait | low; cuts the power-off sound short if sounds are on |
 | Longer or shorter auto-off | settings +0x01 (append a record; CRC32 over 252 bytes) | low |
 | Earlier standby | settings +0x51 | low |
 | LED off | 0x6520 `01 10 a0 e3` → `00 10 a0 e3`, only once GPIO 38 is confirmed to be just the LED | medium |

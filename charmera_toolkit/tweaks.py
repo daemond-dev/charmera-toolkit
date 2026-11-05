@@ -36,27 +36,46 @@ PATCHES: Dict[str, Patch] = {p.name: p for p in [
           "The boot state polls a display-ready flag up to 50 times with a 50 ms delay (file 0x6360). This shortens "
           "the delay; the loop still ends as soon as the LCD reports ready, so at most 40 ms is saved.",
           ((0x6360, b"\x05\x00\xa0\xe3", b"\x01\x00\xa0\xe3"),)),
-    Patch("logo-hold", "medium", "shorten the 50 ms pause after the power-on logo is drawn to 10 ms",
-          "mov r0,#5 at file 0x64F8. The frame buffer is freed right after this delay, so the pause may be giving the "
-          "display DMA time to finish; if the logo tears or the next screen glitches, undo this one.",
+    Patch("logo-hold", "medium", "shorten the 50 ms pause after the power-on logo is drawn to 10 ms (not recommended)",
+          "mov r0,#5 at file 0x64F8. The logo's frame buffer is freed right after this pause, so it is probably what "
+          "lets the display finish drawing the logo. Saves 40 ms at the risk of a garbled logo; not in the recommended set.",
           ((0x64F8, b"\x05\x00\xa0\xe3", b"\x01\x00\xa0\xe3"),)),
-    Patch("skip-logo", "medium", "skip the power-on logo by renaming the resource the boot code looks up",
-          "The boot state opens 'POWER_ON_LOGO.JPG' by name (string at file 0x6544). Changing one letter makes the lookup "
-          "fail; the failure path (resource index 0xFFFF) is taken but has not been exercised on hardware.",
+    Patch("skip-logo", "medium", "skip the power-on logo (cosmetic only, not recommended)",
+          "The boot state opens 'POWER_ON_LOGO.JPG' by name (string at file 0x6544); changing one letter makes the lookup "
+          "fail, and that failure path has not been exercised on hardware. It saves only the decode of a 3.5 KB image: "
+          "the logo is what is on screen while the camera mounts the card, so the screen would stay blank for that wait "
+          "instead. Power-off uses its own copy of the name (0x23300) and is not affected.",
           ((0x6544, b"POWER_ON_LOGO.JPG\x00", b"POWER_ON_LOG0.JPG\x00"),)),
     Patch("led-off", "medium", "do not switch GPIO 38 on at boot (inferred to be the front LED)",
           "mov r1,#1 before the GPIO write for pin 0x26 at file 0x6520 becomes mov r1,#0. The pin's role is INFERRED: "
           "if it is not the LED (for example a display enable), the screen may stay dark. Test only with a restore path ready.",
           ((0x6520, b"\x01\x10\xa0\xe3", b"\x00\x10\xa0\xe3"),)),
-    Patch("fast-poweroff", "low", "drop the cosmetic waits at power-off (600 ms logo hold, 200 ms after the sound)",
-          "mov r0,#0x3c at file 0x2319C and mov r0,#0x14 at 0x23050 become mov r0,#1. The power-off sequence still "
-          "waits for key release and the hardware flag before cutting power.",
-          ((0x2319C, b"\x3c\x00\xa0\xe3", b"\x01\x00\xa0\xe3"), (0x23050, b"\x14\x00\xa0\xe3", b"\x01\x00\xa0\xe3"))),
+    Patch("fast-poweroff", "low", "cut the idle waits at power-off: logo hold 600 to 50 ms, wait after the sound 200 to 10 ms",
+          "mov r0,#0x3c at file 0x2319C becomes mov r0,#5 and mov r0,#0x14 at 0x23050 becomes mov r0,#1. Nothing runs "
+          "during either wait. The logo is still drawn and kept for 50 ms, the same time the firmware gives it at "
+          "power-on before freeing its frame, so it still shows while the camera shuts down. With UI sounds on, the "
+          "shorter waits cut the power-off sound short; with them off they cost nothing. Key release and the "
+          "hardware power flag are still waited for.",
+          ((0x2319C, b"\x3c\x00\xa0\xe3", b"\x05\x00\xa0\xe3"), (0x23050, b"\x14\x00\xa0\xe3", b"\x01\x00\xa0\xe3"))),
     Patch("boot-to-photo", "high", "enter the photo state directly instead of the home screen after boot",
           "The literal 0x10D (home state) at file 0x6714 becomes 0x101 (photo state). Only worth trying if the stock "
           "camera really waits on the home screen for a key press; what posts the mode change at boot is unknown.",
           ((0x6714, b"\x0d\x01\x00\x00", b"\x01\x01\x00\x00"),)),
 ]}
+
+
+# Shortens only fixed waits where nothing is loading; the power-on logo, shown while the card mounts, is kept.
+RECOMMENDED = ["boot-delay", "lcd-poll", "fast-poweroff"]
+
+
+def expand_names(names: List[str]) -> List[str]:
+    """Replace 'recommended' with the recommended set, keeping order and dropping repeats."""
+    out: List[str] = []
+    for n in names:
+        for m in (RECOMMENDED if n == "recommended" else [n]):
+            if m not in out:
+                out.append(m)
+    return out
 
 
 def check_patch(image: bytes, patch: Patch) -> List[str]:
@@ -73,6 +92,7 @@ def check_patch(image: bytes, patch: Patch) -> List[str]:
 
 def apply_patches(image: bytes, names: List[str]) -> Tuple[bytes, List[str]]:
     """Apply the named patches; raises ValueError listing every problem if any patch does not fit."""
+    names = expand_names(names)
     unknown = [n for n in names if n not in PATCHES]
     if unknown:
         raise ValueError("unknown tweak(s): " + ", ".join(unknown) + "; see `tweak list`")
@@ -95,7 +115,9 @@ def handler(args) -> int:
         for p in PATCHES.values():
             print(f"{p.name:14s} [{p.risk:6s}] {p.summary}")
             print(f"               {p.detail}")
-        print("\nAll of these are untested on hardware. Apply one at a time, pack, verify, and keep a restore path.")
+        print(f"\nrecommended = {', '.join(RECOMMENDED)}: only fixed waits where nothing is loading; the power-on logo, "
+              "which is on screen while the camera mounts the card, is kept.")
+        print("All of these are untested on hardware. Apply one at a time, pack, verify, and keep a restore path.")
         return 0
     if not args.file:
         print("error: apply needs the image to patch: charmera tweak apply IMAGE --enable NAME --out NEW.bin")
@@ -141,7 +163,7 @@ def register(subparsers) -> None:
     p = subparsers.add_parser("tweak", help="experimental start-up and power-off byte patches (list, apply)")
     p.add_argument("action", choices=["list", "apply"])
     p.add_argument("file", nargs="?", help="apply: a 2 MiB dump or a 0x1E0000 update file of the original series")
-    p.add_argument("--enable", help="apply: comma-separated tweak names from `tweak list`")
+    p.add_argument("--enable", help="apply: comma-separated tweak names from `tweak list`, or 'recommended'")
     p.add_argument("--out", help="apply: output image path")
     p.add_argument("--accept-high-risk", action="store_true", help="apply: allow tweaks marked high risk")
     p.add_argument("--overwrite", action="store_true", help="allow --out to replace an existing file (never the input)")
