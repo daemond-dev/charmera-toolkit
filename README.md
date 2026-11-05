@@ -36,6 +36,9 @@ Examples for every command are in the [Command reference](docs/07-USAGE.md).
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
 
+On a phone, the [Charmera Card app](android/README.md) checks an update file and puts it on the SD card
+([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)).
+
 Ground rules baked into the commands:
 
 - Read-only by default. Nothing is written to a card, a chip or a camera without a typed confirmation.

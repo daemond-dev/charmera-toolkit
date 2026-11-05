@@ -154,6 +154,7 @@ Gaming mode formats cards as ext4 for games; such a card is refused, and the cam
   deletes anything except its own failed copy.
 - A `charmera-stage.part` on a card is an interrupted run. The camera ignores it; delete it.
 - [The first flash](01-FIRST-FLASH.md) puts this step in the sequence from backup to first flash.
+- On a phone, the [Charmera Card app](../android/README.md) does the same job.
 
 ---
 

@@ -6,6 +6,14 @@ Short version: a phone can do the SD-card route, which covers every normal flash
 route (CH341A), which is what you need for the first full backup and for a camera that no longer boots. Nothing
 in this file has been tried on a phone yet; the parts that are inference are marked.
 
+## The app
+
+[Charmera Card](../android/README.md) is a small app for exactly this step: it checks an update file the way
+`charmera verify` does, writes it to the top folder of the card through Android's folder picker, reads it back,
+and removes it again after the flash. It needs no permissions and no root. Download
+[charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
+on the phone. The rest of this page is the same job done by hand, and what the app cannot help with.
+
 ## What the phone has to do
 
 The camera flashes itself. On power-on it looks in the card root for a file named

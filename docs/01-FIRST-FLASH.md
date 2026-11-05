@@ -78,7 +78,7 @@ What the regions are and which rules `verify` enforces: [Image layout](11-FORMAT
 `stage` copies the file to the card root, after running `verify` again, refusing a card that already holds
 another update file, and reading the copy back to compare hashes. It asks you to type the card path before
 it writes. [Putting the file on the card](04-STAGE.md) explains each refusal. From a phone instead of a
-computer, see [Using an Android phone](06-ANDROID.md).
+computer, use the [Charmera Card app](../android/README.md); [Using an Android phone](06-ANDROID.md) covers the rest.
 
 ```
 charmera stage out/JH_5408<stamp>_<sum>.bin --card E:          # Windows
