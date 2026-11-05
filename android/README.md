@@ -134,6 +134,13 @@ the checker's and the card rules' tests on the plain JVM first (`test/UpdateChec
 signs `out/charmera-card-<version>.apk`. No Gradle.
 
 GitHub Actions builds it on every push to `main` that touches `android/` and publishes it as the `android-app`
-release (`.github/workflows/android.yml`), one run at a time. Without the repo secrets `SIGNING_KEYSTORE_B64`,
-`SIGNING_ALIAS` and `SIGNING_PASS`, each build is signed with a new throwaway key. A new build then cannot install
-over an old one: uninstall the app first. The only thing lost is the remembered card.
+release (`.github/workflows/android.yml`), one run at a time. Every published build is signed with the same release
+key, so a new version installs over the old one. The key lives only in the repo secrets `SIGNING_KEYSTORE_B64`,
+`SIGNING_ALIAS` and `SIGNING_PASS`. Before publishing, the workflow checks that the APK's certificate matches
+`SIGNING_CERT_SHA256` in this folder, and it refuses to publish anything else. Without the secrets a build is
+signed with a throwaway key and kept only as a run artifact.
+
+Keep a copy of the three secret values somewhere safe: GitHub never shows a secret again once it is saved. If the
+key is lost, make a new one, save it in the secrets, put its certificate SHA-256 (from `apksigner verify
+--print-certs`) in `SIGNING_CERT_SHA256`, and uninstall the app once before installing the first build signed with
+it.

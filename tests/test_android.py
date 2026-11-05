@@ -155,3 +155,13 @@ def test_android_readme_links_resolve():
             elif anchor and dest.suffix == ".md" and anchor not in docs.anchors(dest):
                 problems.append(f"{number}: no heading for {target}")
     assert not problems, "\n".join(problems)
+
+
+def test_release_certificate_is_pinned_and_the_workflow_checks_it():
+    root = SRC.parents[6]
+    pin = (root / "android" / "SIGNING_CERT_SHA256").read_text(encoding="utf-8").strip()
+    assert re.fullmatch(r"[0-9a-f]{64}", pin)
+    wf = (root / ".github" / "workflows" / "android.yml").read_text(encoding="utf-8")
+    assert "SIGNING_CERT_SHA256" in wf and "--print-certs" in wf
+    publish = wf[wf.index("- name: Publish on Releases"):]
+    assert "steps.key.outputs.release == 'true'" in publish.splitlines()[1]
