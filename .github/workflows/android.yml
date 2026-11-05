@@ -11,9 +11,8 @@ on:
     branches: [main]
     paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
-# One run at a time: the publish step deletes and recreates the release, so two runs at once could leave an older
-# APK behind the link or fail half way. A run that starts while another is going waits for it instead of cancelling
-# it, so a publish is never cut off between the delete and the create.
+# One run at a time, so two publishes never race on the release. A run that starts while another is going waits
+# for it instead of cancelling it, so a publish is never cut off half way.
 concurrency:
   group: android-app-release
   cancel-in-progress: false
@@ -75,9 +74,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The release is never deleted: the tag moves to this commit and the APK is replaced in place, so the
+          # download link keeps working even if GitHub fails part way. Server errors are retried.
           VER=$(cat android/VERSION)
-          gh release delete android-app --cleanup-tag --yes >/dev/null 2>&1 || true
-          gh release create android-app android/out/charmera-card.apk --target "$GITHUB_SHA" \
-            --title "Charmera Card for Android $VER (build ${{ github.run_number }})" \
-            --notes "Puts a verified Charmera update file on an SD card from an Android phone (7.0 or later). Download charmera-card.apk on the phone, open it, and allow the install. What it does and what it cannot do: android/README.md."
+          TITLE="Charmera Card for Android $VER (build ${{ github.run_number }})"
+          NOTES="Puts a verified Charmera update file on an SD card from an Android phone (7.0 or later). Download charmera-card.apk on the phone, open it, and allow the install. What it does and what it cannot do: android/README.md."
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i * 15)); done; return 1; }
+          git tag -f android-app "$GITHUB_SHA"
+          retry git push -f origin refs/tags/android-app
+          if gh release view android-app >/dev/null 2>&1; then
+            retry gh release upload android-app android/out/charmera-card.apk --clobber
+            retry gh release edit android-app --title "$TITLE" --notes "$NOTES"
+          else
+            retry gh release create android-app android/out/charmera-card.apk --verify-tag --title "$TITLE" --notes "$NOTES"
+          fi
           echo "APK: https://github.com/${{ github.repository }}/releases/download/android-app/charmera-card.apk" >> "$GITHUB_STEP_SUMMARY"
