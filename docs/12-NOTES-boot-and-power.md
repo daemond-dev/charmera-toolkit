@@ -1,9 +1,12 @@
 # Kodak Charmera (GPCV2247F) stock firmware: boot path, power management, clocks, battery
 
+Reading order: 12 of 13 · previous: [Image layout](11-FORMAT.md) · next: [Research report](13-PHASE1-REPORT.md) · [all docs](README.md)
+
 Static analysis only. Dump: `fw/keychain_stock.bin` (2 MiB, sha256 cc3b4b2f...ea42f), not modified.
 Scripts: `work/bootpower/fwlib.py` (capstone helpers, call graph), `d.py <file-off-hex> <n>` (annotated disassembly),
 `strs.py`, dumps `full_arm.txt` (whole code region, ARM mode), `f_*.txt` (per-function dumps).
-All addresses below are **file offsets** unless marked VA. Labels: VERIFIED (seen in the binary), INFERRED, UNKNOWN.
+The patches in section 6 are what `charmera tweak` applies ([Command reference](07-USAGE.md)); the settings
+fields are what `charmera settings` changes. All addresses below are **file offsets** unless marked VA. Labels: VERIFIED (seen in the binary), INFERRED, UNKNOWN.
 
 ## 0. Address mapping (VERIFIED)
 
@@ -187,3 +190,7 @@ VERIFIED static conclusion: **never initialised**.
 
 ## 9. Key function table (file offsets)
 0x23C reset; 0x2DD48 main; 0x2DCAC root task; 0x9012C OSTaskCreate; 0x906E4 OSTimeDly; 0x90734 OSTimeDlyHMSM; 0x908B8 OSTimeGet; 0x8F87C OSQPost; 0x25B84 msgQSend wrapper; 0x25C38 msgQReceive wrapper; 0x27CAC timer register; 0x27DA0 timer cancel; 0x32504 hw timer start; 0x36104 gpio_set(pin=(port<<4)|bit, val) regs 0xC0000000+port*0x20; 0x2E96C/0x2EBA4 pin/reg read/write by id; 0x310FC PMU status bit (0xD0000068); 0x30F00 final power off; 0x23008 ap_state_handling_power_off; 0x23348 speaker mute/unmute via 0x6008 (not "state set"); 0x286A8 speaker amp enable; 0x1EA44 play WAV by index (0 CLICK? table: 0->+4 CLICK, 2->POWERON, 3->POWEROFF, 5->BEEP, 6->IMG); 0x1510 resource lookup by name; 0x22AEC JPEG decode; 0x65B0 state_startup; 0x6334 state_startup_init; 0x62A8 boot key/battery check; 0x6104 boot ADC; 0x303C AP housekeeping (SD); 0x2526C home/mode state; 0x1C644 photo/capture state; 0x1D6FC video state; 0xAF80 state 0x104; 0x21370 state 0x108 (USB); 0x77EAC settings menu state; 0x8758 peripheral task; 0x886C periodic handler (0x6000); 0x7584 key scanner + auto-off; 0x72EC ADC sampling; 0x7098/0x6F74 battery level; 0x7C18 DC unplug; 0x1FD24/0x1FAA8 settings load; 0x1F89C defaults; 0x1FBC4 settings save-if-dirty; 0x31274 sysclk formula; 0x3017C SPI clock divider; 0xDF2F4 PLL unlock keys; 0x60F3C Wi-Fi mode switch; 0x46F9C Wifi_mode_active; 0xA20A4 ssv6xxx_wifi_init.
+
+---
+
+Reading order: 12 of 13 · previous: [Image layout](11-FORMAT.md) · next: [Research report](13-PHASE1-REPORT.md) · [all docs](README.md)

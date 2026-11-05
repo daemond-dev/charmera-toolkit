@@ -5,8 +5,11 @@ Tools for backing up, inspecting, verifying, recovering and modding the Kodak Ch
 standard library only.
 
 Status: every command is unit-tested against two public dumps and the published update files. Nothing has been
-flashed to a camera yet; `docs/FLASH-CANDIDATES.md` lists the first files meant to be tried, with hashes and the
-exact bytes they change.
+flashed to a camera yet; [Flash candidates](docs/03-FLASH-CANDIDATES.md) lists the first files meant to be tried,
+with hashes and the exact bytes they change.
+
+**Start with [The first flash](docs/01-FIRST-FLASH.md).** It walks through backup, choosing a file, verifying,
+putting it on the card, flashing and undoing, and links to every other document at the step where you need it.
 
 ```
 pip install -e .
@@ -14,6 +17,8 @@ charmera --help
 ```
 
 ## Commands
+
+Examples for every command are in the [Command reference](docs/07-USAGE.md).
 
 | Command | Writes to | What it does |
 |---|---|---|
@@ -38,23 +43,35 @@ Ground rules baked into the commands:
 - `pack` refuses an input it cannot identify as the original 2025 series, and `verify` fails any file whose
   erase footprint would reach beyond what the published update files touch.
 - No Kodak or Reto firmware is distributed here. The tools work on your own backup; upstream files are referenced
-  by URL and hash in `docs/PHASE1-REPORT.md`.
+  by URL and hash in the [Research report](docs/13-PHASE1-REPORT.md).
 
 ## Documentation
 
-- `docs/FIRST-FLASH.md`: the first flash end to end, with the point of no return marked.
-- `docs/USAGE.md`: the commands, with examples.
-- `docs/FORMAT.md`: the image layout, settings fields, update-file rules, sound slots and frame format.
-- `docs/STAGE.md`: putting an update file on the card, and what each refusal means.
-- `docs/RESOURCES.md`: the resource pack, and how to make a boot logo that fits.
-- `docs/ANDROID.md`: what can and cannot be done from an Android phone.
-- `docs/RECOVERY.md`: the recovery decision tree (SD updater, CH341A, what is unknown).
-- `docs/FLASH-CANDIDATES.md`: the first files to try on a camera and how they were reviewed.
-- `docs/CARDS.md`: the exFAT dirty-bit problem and the FAT32 fix.
-- `docs/EXIF.md`: what is wrong with the camera's EXIF and AVI dates and what `exif-fix` does.
-- `docs/FRAMES.md`: the frame format, PNG requirements and what is still unverified about the overlay.
-- `docs/NOTES-boot-and-power.md`: boot sequence, auto-off and standby analysis behind `tweak` and `settings`.
-- `docs/PHASE1-REPORT.md`: the research this is built on, every claim labelled verified, reported or inferred.
+In reading order; the [docs index](docs/README.md) has the same list. Each document links to the previous and
+next one, and to the others where it mentions them.
+
+Before and during a flash:
+
+1. [The first flash](docs/01-FIRST-FLASH.md): start here; the whole path, with the point of no return marked.
+2. [Recovery](docs/02-RECOVERY.md): read before you flash; the SD updater and CH341A routes back, and the editions
+   that must never be flashed.
+3. [Flash candidates](docs/03-FLASH-CANDIDATES.md): the first three files to try, their hashes and what each changes.
+4. [Putting the file on the card](docs/04-STAGE.md): the `stage` command and what each refusal means.
+5. [SD card problems](docs/05-CARDS.md): why phones reject a card the camera has used, and the fix.
+6. [Using an Android phone](docs/06-ANDROID.md): what a phone can do and what needs a computer.
+
+Commands and mods:
+
+7. [Command reference](docs/07-USAGE.md): every command, with examples.
+8. [Photo frames](docs/08-FRAMES.md): your own frames from PNGs.
+9. [Resource pack and boot logo](docs/09-RESOURCES.md): the resource pack, and a boot logo that fits.
+10. [Photo dates (EXIF)](docs/10-EXIF.md): what `exif-fix` repairs on copies of your photos and videos.
+
+Reference and background:
+
+11. [Image layout](docs/11-FORMAT.md): what is where in the flash, settings fields, update-file rules.
+12. [Boot and power notes](docs/12-NOTES-boot-and-power.md): the analysis behind `tweak` and `settings`.
+13. [Research report](docs/13-PHASE1-REPORT.md): the sources, each claim labelled verified, reported or inferred.
 
 ## Tests
 

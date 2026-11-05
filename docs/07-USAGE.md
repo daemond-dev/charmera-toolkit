@@ -1,5 +1,7 @@
 # Using the toolkit
 
+Reading order: 7 of 13 · previous: [Using an Android phone](06-ANDROID.md) · next: [Photo frames](08-FRAMES.md) · [all docs](README.md)
+
 All commands run as `python -m charmera_toolkit <command>` (or `charmera <command>` after `pip install -e .`).
 Python 3.9 or newer, Windows or Linux, no extra packages.
 
@@ -50,13 +52,13 @@ charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jp
 refuses any patch whose original bytes are not where it expects them, so it cannot land on the wrong build or on
 top of an earlier edit; every tweak is untested on hardware and labelled with its risk. `frames replace` takes an
 800x600 RGBA PNG (transparent = see-through), re-encodes it the way the camera stores frames, and refuses with a
-per-strip table when the result does not fit the slot's byte budget; see docs/FRAMES.md.
+per-strip table when the result does not fit the slot's byte budget; see [Photo frames](08-FRAMES.md).
 
 The gate flags exist so that nothing flashable appears by accident. A modified image goes through `pack` and then `verify`
 before it is allowed near a card.
 
 `resources replace` swaps a JPEG resource, such as the boot logo, only for a baseline JPEG with the same size,
-component count and subsampling as the original that fits the slot; see docs/RESOURCES.md. A custom boot logo has
+component count and subsampling as the original that fits the slot; see [Resource pack and boot logo](09-RESOURCES.md). A custom boot logo has
 not been tried on a camera.
 
 ## Commands that write to hardware
@@ -68,7 +70,11 @@ charmera stage out/JH_5408<stamp>_<sum>.bin --card E: --plan-only             # 
 ```
 
 `stage` runs `verify` again, refuses a card that already holds another update file, copies the file to the card
-root, and reads it back to compare hashes. See docs/STAGE.md.
+root, and reads it back to compare hashes. See [Putting the file on the card](04-STAGE.md).
 
-`card-fix` and `stage` print what they are about to do and wait for you to type the target back; `restore` waits for the word RESTORE. See docs/CARDS.md and
-docs/RECOVERY.md.
+`card-fix` and `stage` print what they are about to do and wait for you to type the target back; `restore` waits for the word RESTORE. See [SD card problems](05-CARDS.md) and
+[Recovery](02-RECOVERY.md).
+
+---
+
+Reading order: 7 of 13 · previous: [Using an Android phone](06-ANDROID.md) · next: [Photo frames](08-FRAMES.md) · [all docs](README.md)

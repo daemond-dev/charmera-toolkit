@@ -1,7 +1,10 @@
 # exif-fix: the Charmera's broken EXIF and the wrong video date
 
+Reading order: 10 of 13 · previous: [Resource pack and boot logo](09-RESOURCES.md) · next: [Image layout](11-FORMAT.md) · [all docs](README.md)
+
 `charmera exif-fix` copies the photos and videos off a Charmera card and repairs the copies. The card is
-only ever read.
+only ever read. If the computer or phone will not open the card at all, fix that first:
+[SD card problems](05-CARDS.md).
 
 ## The problem
 
@@ -159,3 +162,7 @@ the file still decodes.
   correct instant in their own zone; the per-file line shows the local time that went in.
 - Output names use the modification time, which on a Charmera is the capture time. For files copied off
   the card by other means first, the EXIF date inside the photo may differ from the name.
+
+---
+
+Reading order: 10 of 13 · previous: [Resource pack and boot logo](09-RESOURCES.md) · next: [Image layout](11-FORMAT.md) · [all docs](README.md)

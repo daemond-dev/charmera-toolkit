@@ -799,7 +799,7 @@ def test_udev_rule_sorts_before_uaccess_and_every_reference_agrees(monkeypatch):
     hints = flash.install_hints()
     assert "scripts/70-ch341a.rules" in hints
     assert "99-ch341a" not in hints
-    for rel in ("docs/RECOVERY.md", "scripts/backup.sh"):
+    for rel in ("docs/02-RECOVERY.md", "scripts/backup.sh"):
         content = (REPO / rel).read_text(encoding="utf-8")
         assert "scripts/70-ch341a.rules" in content, rel
         assert "99-ch341a" not in content, rel
@@ -828,7 +828,7 @@ def test_restore_wrappers_describe_backup_as_the_chip_now(name):
 
 
 def test_recovery_doc_matches_the_tool():
-    text = " ".join((REPO / "docs" / "RECOVERY.md").read_text(encoding="utf-8").split())  # unwrap lines
+    text = " ".join((REPO / "docs" / "02-RECOVERY.md").read_text(encoding="utf-8").split())  # unwrap lines
     assert "--backup <backup of the chip as it is now>.bin" in text
     assert "if flashrom stopped before it reached the erase" in text
     assert "the chip is untouched" in text

@@ -1,10 +1,12 @@
 # The resource pack and the `resources` command
 
+Reading order: 9 of 13 · previous: [Photo frames](08-FRAMES.md) · next: [Photo dates (EXIF)](10-EXIF.md) · [all docs](README.md)
+
 What the GP+ pack at 0x120000 holds, how `resources list` / `extract` / `replace` treat it, and how to make a
 boot logo the camera has a chance of accepting. Every offset and length below was read off the stock
 original-series dump; what the camera does with a changed logo is UNTESTED (nothing from this toolkit has
-been flashed yet). The frames in the pack have their own command and document (`frames`, `docs/FRAMES.md`),
-the sounds too (`sounds`, `docs/FORMAT.md`).
+been flashed yet). The frames in the pack have their own command and document (`frames`, [Photo frames](08-FRAMES.md)),
+the sounds too (`sounds`, [Image layout](11-FORMAT.md)).
 
 ## The pack
 
@@ -167,14 +169,18 @@ what it does with a file it dislikes (show garbage, show nothing, or hang the bo
 mounted), and whether the Huffman tables an encoder "optimizes" are accepted as readily as the standard
 ones. Two ways to keep the risk small:
 
-- Have a full backup (`charmera backup`) and read `docs/RECOVERY.md` first. If the camera hangs at the logo
+- Have a full backup (`charmera backup`) and read [Recovery](02-RECOVERY.md) first. If the camera hangs at the logo
   it never mounts the card, so the SD updater cannot help; getting back then means writing the backup with
-  a CH341A (section B of that document). Do not try a logo without one.
+  a CH341A ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)). Do not try a logo without one.
 - Try the recorder background first (`--name AUDIO_REC_BG.JPG`, 4608-byte budget). It is shown only when
   you enter the audio recorder, after the camera has booted and mounted the card, so a file the decoder
   rejects can be undone through the SD updater. If it displays correctly, the same encoder settings are a
   good candidate for the logo. (This ordering is a suggestion from how the files are used, not a tested
   procedure.)
 
-If the camera does not boot after a logo change, go to `docs/RECOVERY.md`, section B, and restore the
+If the camera does not boot after a logo change, go to [Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly), and restore the
 backup you made before the change.
+
+---
+
+Reading order: 9 of 13 · previous: [Photo frames](08-FRAMES.md) · next: [Photo dates (EXIF)](10-EXIF.md) · [all docs](README.md)

@@ -17,7 +17,7 @@ Safety rules:
 - Electrical warning that software cannot enforce: the "H" in PY25D16HB means a 2.3 to 3.6 V part
   (VERIFIED from Puya's part-number coding). Program it at 3.3 V, never through a 1.8 V adapter, and not
   with an unmodified black CH341A board, which drives its data lines at 5 V. Disconnect the camera's
-  battery first. See docs/RECOVERY.md before clipping anything.
+  battery first. See docs/02-RECOVERY.md before clipping anything.
 """
 from __future__ import annotations
 

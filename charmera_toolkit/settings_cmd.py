@@ -1,7 +1,7 @@
 """`settings`: show the camera's stored settings, or write an image whose current record has new values.
 
 What the bytes mean comes from the firmware's own setters and the code that reads them (see settings.py
-and docs/PHASE1-REPORT.md section 11). Only fields whose meaning is verified can be set here:
+and docs/13-PHASE1-REPORT.md section 11). Only fields whose meaning is verified can be set here:
 
 - ui-sound: 0 turns every event sound off, 1..8 is their volume (default 5).
 - playback-volume: 0..8 (default 5).

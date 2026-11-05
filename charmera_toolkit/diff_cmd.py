@@ -3,7 +3,7 @@
 Use it to review a mod before packing it (stock dump against the modified image), to compare two backups of the
 same camera, or to check a public dump against your own. It never writes anything.
 
-Regions follow the layout in docs/FORMAT.md. For each region the output gives the number of differing bytes and
+Regions follow the layout in docs/11-FORMAT.md. For each region the output gives the number of differing bytes and
 the first few differing ranges; the settings bank is additionally explained record by record and the resource
 pack entry by entry, because those are where mods and normal use leave their marks.
 """

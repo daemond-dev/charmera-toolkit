@@ -3,7 +3,7 @@
 Every patch names the exact bytes it expects at its offset (taken from the original 2025-series build) and
 is refused when they are not there, so it cannot land in the wrong place on a modified or different build.
 None of these has been tested on a camera yet. They come from the boot and power analysis in
-docs/NOTES-boot-and-power.md; the delays are OS ticks of 10 ms passed to the µC/OS-II delay call.
+docs/12-NOTES-boot-and-power.md; the delays are OS ticks of 10 ms passed to the µC/OS-II delay call.
 
 Risk labels: low = a delay the code only waits out; medium = a delay or output whose purpose is inferred;
 high = changes the state machine's path. Start with the low ones, one at a time, on a camera you can restore.

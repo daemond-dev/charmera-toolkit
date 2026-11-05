@@ -1,5 +1,7 @@
 # Flash candidates (original 2025 series only)
 
+Reading order: 3 of 13 · previous: [Recovery](02-RECOVERY.md) · next: [Putting the file on the card](04-STAGE.md) · [all docs](README.md)
+
 Three update files built from the public original-series dump, reviewed statically and by an independent
 pass. None has been flashed yet. They are reproducible byte for byte from the recipe below, so they are not
 committed: build them yourself from the upstream dump and compare the hashes.
@@ -57,8 +59,14 @@ checksum part of the name must then be recomputed, which `pack` does.
 
 ## Flashing order, when you are ready
 
-1. `backup` your camera twice; keep the files.
+The full sequence, with backups, staging and undo, is [The first flash](01-FIRST-FLASH.md); this is the short form.
+
+1. `backup` your camera twice; keep the files ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)).
 2. `verify` the candidate against your backup (`--stock <backup>`); read every line.
-3. Card formatted FAT32, only the candidate in the root, camera off, card in, power on, wait for 100%, hold power to switch off, remove the card, delete the file from it.
+3. Card formatted FAT32 ([SD card problems](05-CARDS.md)), only the candidate in the root (`stage` puts it there: [Putting the file on the card](04-STAGE.md)), camera off, card in, power on, wait for 100%, hold power to switch off, remove the card, delete the file from it.
 4. Power on. Expected: no power-on sound (A, B); the live view and the shutter work as before.
 5. To revert: C, or `pack` your own backup.
+
+---
+
+Reading order: 3 of 13 · previous: [Recovery](02-RECOVERY.md) · next: [Putting the file on the card](04-STAGE.md) · [all docs](README.md)

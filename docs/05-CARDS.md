@@ -1,6 +1,9 @@
 # The card: why phones reject it, and how to fix it
 
-`card-check` and `card-fix` deal with the microSD card, not with the camera's firmware.
+Reading order: 5 of 13 · previous: [Putting the file on the card](04-STAGE.md) · next: [Using an Android phone](06-ANDROID.md) · [all docs](README.md)
+
+`card-check` and `card-fix` deal with the microSD card, not with the camera's firmware. They need a computer;
+what a phone alone can do is in [Using an Android phone](06-ANDROID.md).
 
 ## The problem
 
@@ -115,3 +118,7 @@ is no type byte to set, `--format-fat32` is the fix.
 
 Keep exFAT only if you need files over 4 GiB. Then, after every camera session and before the card goes into an
 Android phone: unmount, optionally `fsck.exfat -y /dev/sdX1`, then `card-fix /dev/sdX --clear-dirty`.
+
+---
+
+Reading order: 5 of 13 · previous: [Putting the file on the card](04-STAGE.md) · next: [Using an Android phone](06-ANDROID.md) · [all docs](README.md)

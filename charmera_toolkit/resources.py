@@ -21,7 +21,7 @@ Kinds, told apart by the first bytes of the slot:
 baseline (SOF0), the same size, component count and sampling factors as the file it replaces, no restart
 interval unless the stock file has one, the same scan layout, and it has to fit the slot. The directory is
 never touched, so every other entry keeps its offset. A custom logo has not been tried on a camera;
-docs/RESOURCES.md says what to expect and docs/RECOVERY.md what to do if it does not boot.
+docs/09-RESOURCES.md says what to expect and docs/02-RECOVERY.md what to do if it does not boot.
 
 Writing a modified image is a mod step: the output is a full image, not an update file. Run `pack` on it
 afterwards and read what `verify` says.
@@ -591,8 +591,8 @@ def _print_plan(plan: ReplacePlan, source: str) -> None:
     where = "what the slot uses" if not plan.pad_assumed else "assumed; the slot had no uniform padding to copy"
     print(f"  padding: {plan.gap} B of 0x{plan.pad_byte:02X} after the new file ({where}); "
           f"{(e.budget or 0) - len(plan.data)} B of the slot stay free; the directory is not touched")
-    print(f"note: a replaced {e.display_name} has not been tried on a camera. Read docs/RESOURCES.md before flashing it,")
-    print("      and docs/RECOVERY.md if the camera does not boot afterwards.")
+    print(f"note: a replaced {e.display_name} has not been tried on a camera. Read docs/09-RESOURCES.md before flashing it,")
+    print("      and docs/02-RECOVERY.md if the camera does not boot afterwards.")
 
 
 def handler(args) -> int:

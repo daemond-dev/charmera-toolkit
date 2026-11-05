@@ -1,5 +1,7 @@
 # stage: putting the update file on the card
 
+Reading order: 4 of 13 · previous: [Flash candidates](03-FLASH-CANDIDATES.md) · next: [SD card problems](05-CARDS.md) · [all docs](README.md)
+
 `stage` is the last step before the camera. It copies one verified update file to the root of the camera's
 SD card and proves the copy is good, so that the first time the camera sees the file is also the first time
 anything could go wrong, and not before.
@@ -10,7 +12,7 @@ charmera stage UPDATE.bin --card <mount point or drive letter> [--stock my_backu
 
 ## Why a command for a file copy
 
-The camera's SD updater is simple and unforgiving (docs/PHASE1-REPORT.md section 4, docs/FORMAT.md):
+The camera's SD updater is simple and unforgiving ([Research report, section 4](13-PHASE1-REPORT.md#4-the-sd-updater-flow), [Image layout](11-FORMAT.md)):
 
 - On power-on it scans only the card root, only during the first 5 seconds, for the first file matching
   `JH_5408*.bin`. A file in a folder, or a card inserted after power-on, is never seen.
@@ -63,7 +65,7 @@ a refused volume, a failed write or read-back); 2 a usage problem or no confirma
 ## The sequence on the camera
 
 Charge the camera first. Programming takes 15 to 20 seconds and a power loss in that window leaves a camera
-that only a chip programmer can bring back (docs/RECOVERY.md). Whether the updater runs on USB power without
+that only a chip programmer can bring back ([Recovery](02-RECOVERY.md)). Whether the updater runs on USB power without
 a battery is not known.
 
 1. Camera off. Put the card in. Then, and only then, power on: the updater arms only during the first five
@@ -89,7 +91,7 @@ minute).
 | `... is not a mount point or drive root` | You gave a folder on the card, or the card is not mounted. | Give the mount point itself (`/run/media/deck/<label>`, `E:`). For a test on a plain folder add `--i-know-what-i-am-doing`. |
 | `... does not exist` / `... is not a directory` | Wrong path, card not inserted, or a device path (`/dev/sdb1`). | `stage` takes the mounted path, not the device; `card-check` and `card-fix` take the device. |
 | `... is not on removable media` | The mount is a fixed disk. | Check the path. `--i-know-what-i-am-doing` overrides if the card really shows up as fixed. |
-| `... is ext4; the camera reads exFAT and FAT32 only` | The card is formatted with something the camera cannot read. | `card-fix --format-fat32` (docs/CARDS.md) or let the camera format it. |
+| `... is ext4; the camera reads exFAT and FAT32 only` | The card is formatted with something the camera cannot read. | `card-fix --format-fat32` ([SD card problems](05-CARDS.md)) or let the camera format it. |
 | `already holds N update file(s) in its root` | An earlier update file, or a different build of this one, is still there. | Delete it from the card, then run `stage` again. |
 | `... is already on the card and is byte-identical` | Not a refusal: the staged copy is already there. Exit 0. | Go to the camera. |
 | `has ... free; the file needs ...` | The card is full. | Make room or use another card. |
@@ -144,11 +146,15 @@ Gaming mode formats cards as ext4 for games; such a card is refused, and the cam
 ## Notes
 
 - The camera formats cards as exFAT and reads exFAT and FAT32. Either works for the update. Phones often
-  refuse the camera's exFAT card because the camera never clears the dirty bit; docs/CARDS.md explains it
+  refuse the camera's exFAT card because the camera never clears the dirty bit; [SD card problems](05-CARDS.md) explains it
   and `card-fix` repairs it. That problem does not affect the updater.
 - `--i-know-what-i-am-doing` exists for testing the command on a plain folder, and overrides the removable
   and filesystem refusals. It does not override a verify FAIL, another update file, or missing space.
 - Only the update file is written to the card. `stage` never formats, never touches `DCIM`, and never
   deletes anything except its own failed copy.
 - A `charmera-stage.part` on a card is an interrupted run. The camera ignores it; delete it.
-- docs/FIRST-FLASH.md puts this step in the sequence from backup to first flash.
+- [The first flash](01-FIRST-FLASH.md) puts this step in the sequence from backup to first flash.
+
+---
+
+Reading order: 4 of 13 · previous: [Flash candidates](03-FLASH-CANDIDATES.md) · next: [SD card problems](05-CARDS.md) · [all docs](README.md)

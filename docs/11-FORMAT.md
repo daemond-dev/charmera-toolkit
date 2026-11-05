@@ -1,8 +1,10 @@
 # Image layout reference
 
+Reading order: 11 of 13 · previous: [Photo dates (EXIF)](10-EXIF.md) · next: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)
+
 What is where in a 2 MiB Charmera flash dump, and how the SD update file relates to it. Every offset below was
 checked against the two public dumps and the published update files; where something is inferred rather than
-read off the bytes it says so. The long form, with sources, is in `PHASE1-REPORT.md`.
+read off the bytes it says so. The long form, with sources, is in the [Research report](13-PHASE1-REPORT.md).
 
 File offset = runtime address + 0x200. The flash is a Puya PY25D16HB: 2 MiB, 64 KiB erase blocks, 256-byte pages.
 
@@ -69,3 +71,7 @@ to the next entry. The 800×600 frames inflate to three 240,000-byte strips in a
 blocks hold exactly 4,096 symbols. Python's `zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_FIXED)` reproduces 23 of
 the 35 stock streams byte for byte; the other 12 come out 1 to 3 bytes shorter and inflate to identical data.
 Every stock stream uses fixed-Huffman blocks only, and `frames replace` refuses to write anything else.
+
+---
+
+Reading order: 11 of 13 · previous: [Photo dates (EXIF)](10-EXIF.md) · next: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)

@@ -26,7 +26,7 @@ RECORDED = datetime(2026, 8, 7, 18, 45, 12)
 NAME_RE = re.compile(r"^(IMG|VID)_\d{8}_\d{6}_[0-9a-f]{16}\.(jpg|avi|mp4)$")
 CAMERA_DATE = b"2026:03:03:12:16:29\x00"  # the all-colons form, 20 bytes with the NUL
 
-# Where the two internally stored photos sit in the public stock dumps (docs/RECOVERY.md); each ends at the
+# Where the two internally stored photos sit in the public stock dumps (docs/02-RECOVERY.md); each ends at the
 # first FF D9 after its start.
 STOCK_PHOTO_OFFSETS = (0x180000, 0x1A5800)
 
@@ -542,7 +542,7 @@ def test_camera_segment_order_is_handled():
 
 @pytest.mark.skipif(not os.environ.get("CHARMERA_STOCK_IMAGE"), reason="CHARMERA_STOCK_IMAGE not set")
 def test_stock_image_stored_photos_are_fixed():
-    """The two photos stored inside a public stock dump (docs/RECOVERY.md), each from its offset to the first
+    """The two photos stored inside a public stock dump (docs/02-RECOVERY.md), each from its offset to the first
     FF D9 after it. Point CHARMERA_STOCK_IMAGE at the .bin to run this."""
     image = Path(os.environ["CHARMERA_STOCK_IMAGE"]).read_bytes()
     for offset in STOCK_PHOTO_OFFSETS:

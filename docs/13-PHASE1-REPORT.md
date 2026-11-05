@@ -1,5 +1,7 @@
 # Kodak Charmera firmware: Phase 1 research report
 
+Reading order: 13 of 13 · previous: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)
+
 Status: complete for Phase 1. Everything here is static analysis and public sources; nothing has been flashed.
 Date: 2026-11-04. Scope: original 2025 series (matte body, yellow Kodak boot screen). No hardware was touched; every finding below comes from public files, public issue threads, and static analysis of two public flash dumps.
 
@@ -254,3 +256,7 @@ Fixed boot delays therefore total only about 150 ms plus whatever the hardware i
 | Boot straight into photo mode | 0x6714 literal 0x10D → 0x101 | medium to high; only if the home screen really waits for a key |
 
 **Measure first, on the stock camera:** stopwatch from power press to logo, to home, to live view, with and without a card; whether live view needs a key press; the minimum power-key hold; the real auto-off time (5:00 or 3:00 calibrates every timer above); what visibly happens at 2:00 idle; idle current at live view and in standby with the LED covered, if you can measure it.
+
+---
+
+Reading order: 13 of 13 · previous: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)

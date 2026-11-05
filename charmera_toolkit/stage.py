@@ -1,7 +1,7 @@
 """`stage`: put a verified update file on the card the way the camera's updater expects it.
 
-What the updater does (VERIFIED in the firmware and the SDK source; docs/PHASE1-REPORT.md section 4,
-docs/FORMAT.md): on power-on it looks only in the card root, only during the first 5 seconds, for the
+What the updater does (VERIFIED in the firmware and the SDK source; docs/13-PHASE1-REPORT.md section 4,
+docs/11-FORMAT.md): on power-on it looks only in the card root, only during the first 5 seconds, for the
 first file matching JH_5408*.bin. The 12 digits after JH_5408 must differ from the stamp compiled into the
 running firmware or the file is ignored. The 8 hex digits after the underscore must equal the 32-bit byte
 sum of the file or the camera shows "Program error" and erases nothing. The file is not deleted after
@@ -254,7 +254,7 @@ def inspect_card(given: str, override: bool) -> CardInfo:
         if low in NOT_FAT:
             msg = f"{given} is {fstype}; the camera reads exFAT and FAT32 only (it formats cards as exFAT itself)"
             if not override:
-                raise StageError(f"{msg}. Reformat the card (docs/CARDS.md) or pass {OVERRIDE_FLAG}.", 1)
+                raise StageError(f"{msg}. Reformat the card (docs/05-CARDS.md) or pass {OVERRIDE_FLAG}.", 1)
             notes.append(f"{msg}; going on because of {OVERRIDE_FLAG}")
         elif low not in FAT_FAMILY:
             notes.append(f"filesystem type {fstype}: cannot tell whether the camera can read it (it reads exFAT and FAT32)")
@@ -422,12 +422,12 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path) -> None:
     print(f"  how:          written as {TEMP_NAME}, flushed to the card, renamed to the final name, read back and compared")
     print()
     print("Charge the camera first: a power loss during programming leaves a camera that only a chip programmer can")
-    print("recover (docs/RECOVERY.md). Then, on the camera:")
+    print("recover (docs/02-RECOVERY.md). Then, on the camera:")
     for line in CAMERA_STEPS:
         print(f"  {line}")
     print()
     print("Cards: the camera formats them as exFAT and reads exFAT and FAT32. Phones may refuse the camera's exFAT card")
-    print("(the dirty-bit problem); docs/CARDS.md explains and card-fix repairs it. That does not affect the update.")
+    print("(the dirty-bit problem); docs/05-CARDS.md explains and card-fix repairs it. That does not affect the update.")
 
 
 # --- Command --------------------------------------------------------------------------------------------

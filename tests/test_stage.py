@@ -287,7 +287,7 @@ def test_plan_only_writes_nothing(update_file, card, confirmed, capsys):
     out = capsys.readouterr().out
     assert "plan only: nothing written." in out
     assert "Plan" in out and str(card / update_file.name) in out
-    assert "docs/CARDS.md" in out and "exFAT" in out and "FAT32" in out
+    assert "docs/05-CARDS.md" in out and "exFAT" in out and "FAT32" in out
     assert card_files(card) == [] and confirmed == []
     # a plan on a card without DCIM warns and still exits 0
     bare = card.parent / "bare"
@@ -354,7 +354,7 @@ def test_non_fat_filesystem_is_refused_unless_overridden(update_file, card, conf
         pytest.skip("the Linux mount lookup is not used on Windows")
     assert run(str(update_file), "--card", str(card)) == 1
     out = capsys.readouterr().out
-    assert "is ext4; the camera reads exFAT and FAT32 only" in out and "docs/CARDS.md" in out
+    assert "is ext4; the camera reads exFAT and FAT32 only" in out and "docs/05-CARDS.md" in out
     assert card_files(card) == []
     assert run(str(update_file), "--card", str(card), OVERRIDE, "--plan-only") == 0
     assert "warning:" in capsys.readouterr().out

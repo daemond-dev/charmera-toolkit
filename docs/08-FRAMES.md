@@ -1,5 +1,7 @@
 # Photo frames
 
+Reading order: 8 of 13 · previous: [Command reference](07-USAGE.md) · next: [Resource pack and boot logo](09-RESOURCES.md) · [all docs](README.md)
+
 The camera's frame mode lays one of four decorative overlays over the live view and the saved photo. The
 four overlays and their menu thumbnails live in the resource pack at 0x120000, so a modified image can carry
 your own. `charmera frames` lists, extracts, previews and replaces them.
@@ -7,7 +9,9 @@ your own. `charmera frames` lists, extracts, previews and replaces them.
 Status: the file formats below were checked against the stock dump byte for byte. The see-through rule the
 camera applies when it draws a frame comes from the community's disassembly and emulation of the firmware;
 this project has not flashed a replaced frame to a camera yet. Treat `replace` as an experiment that goes
-through `pack` and `verify` like every other mod, and keep your backup.
+through `pack` and `verify` like every other mod ([The first flash](01-FIRST-FLASH.md), steps 3 to 5), and keep
+your backup. The other resources, including the boot logo, are in [Resource pack and boot logo](09-RESOURCES.md);
+the byte layout of the pack is in [Image layout](11-FORMAT.md).
 
 ## Where the frames are
 
@@ -163,3 +167,7 @@ its budgets.
   budget. The directory stores sectors, not lengths, and the trailer carries the length, so it should; it
   is the reason `replace` fills to the budget and never beyond.
 - How the camera scales the 800x600 overlay onto a saved photo of a different size, if it does.
+
+---
+
+Reading order: 8 of 13 · previous: [Command reference](07-USAGE.md) · next: [Resource pack and boot logo](09-RESOURCES.md) · [all docs](README.md)

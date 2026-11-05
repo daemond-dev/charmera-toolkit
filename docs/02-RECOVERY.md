@@ -1,5 +1,7 @@
 # Recovering a Charmera
 
+Reading order: 2 of 13 · previous: [The first flash](01-FIRST-FLASH.md) · next: [Flash candidates](03-FLASH-CANDIDATES.md) · [all docs](README.md)
+
 A decision tree for getting a Kodak Charmera (original 2025 series: Generalplus GPCV2247F, 2 MiB Puya
 PY25D16HB SPI flash) back to a working firmware. It is written for a careful owner with no prior flashing
 experience. Read the whole section that applies to you before touching anything.
@@ -11,22 +13,23 @@ Every factual claim carries one of three labels:
 - UNKNOWN: nobody has published it.
 
 Nothing here distributes Kodak or Reto firmware. The restore source is always your own backup, made with
-`python -m charmera_toolkit backup` while the camera still worked. If you have no backup, read section B
+`python -m charmera_toolkit backup` while the camera still worked. If you have no backup, read [section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)
 to the end before deciding anything.
 
 ## Which situation are you in?
 
 1. Is the body an original-series camera (yellow Kodak boot screen, REPORTED)? If it is a Millennium
-   Edition (blue boot screen) or a CLOT edition, go to section D first, whatever else is wrong.
+   Edition (blue boot screen) or a CLOT edition, go to [section D](#d-wrong-edition) first, whatever else is wrong.
 2. Does the camera power on and get far enough to mount the SD card (it shows the live view, plays back
-   photos, or reacts to a card)? Yes: section A. No: section B.
+   photos, or reacts to a card)? Yes: [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card). No: [section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
 3. Was an update or a clip write interrupted (battery died, cable pulled, power cycled at "not
-   poweroff")? Read section C, which will send you to A or B.
+   poweroff")? Read [section C](#c-an-interrupted-flash), which will send you to A or B.
 
 ## A. The camera boots and the updater runs: restore through the SD card
 
 The SD updater is the gentle route. It cannot help a camera that does not boot far enough to mount the
-card (VERIFIED from the SDK source: the updater is part of the firmware that is already running).
+card (VERIFIED from the SDK source: the updater is part of the firmware that is already running). The same
+steps, for a first flash of a modified file rather than a restore, are in [The first flash](01-FIRST-FLASH.md).
 
 What the updater does (VERIFIED from the SDK source and hardware reports):
 
@@ -63,9 +66,10 @@ Steps:
    Any `FAIL` line means do not use the file. Fix the cause and repeat step 1.
 
 3. Copy only that one `.bin` file to the root of the card the camera normally uses. Leave the `.sha256`
-   and the manifest on the computer.
+   and the manifest on the computer. `charmera stage` does this copy with its checks
+   ([Putting the file on the card](04-STAGE.md)); from a phone, see [Using an Android phone](06-ANDROID.md).
 
-4. Put the card in, with a charged battery: an update that loses power part way is section C. Power on.
+4. Put the card in, with a charged battery: an update that loses power part way is [section C](#c-an-interrupted-flash). Power on.
    The updater finds the file and shows its progress on the screen.
 
 5. Do not power off and do not pull the card while it is programming. When the screen shows
@@ -81,13 +85,13 @@ erased (VERIFIED). Power off, take the card out, delete the file, rebuild it wit
 `verify` before trying again. A file renamed by hand or truncated by a bad copy is the usual cause.
 
 If the camera powers off during step 5, the flash holds a partly erased or partly written firmware and the
-camera will most likely not boot. That is section C.
+camera will most likely not boot. That is [section C](#c-an-interrupted-flash).
 
 ## B. The camera does not boot: read and write the flash chip directly
 
 This route opens the camera and clips a programmer onto the flash chip. It is the only known way to
 recover a camera that no longer boots (there is no documented boot-ROM recovery for this SoC, UNKNOWN
-status for the "ISP" header; see section C). Done carefully it is routine; done at the wrong voltage it
+status for the "ISP" header; see [section C](#c-an-interrupted-flash)). Done carefully it is routine; done at the wrong voltage it
 can destroy the chip or the SoC. Read all of this section first.
 
 ### Tools
@@ -249,16 +253,16 @@ What is known and what is not:
 
 - The SD updater erases from offset 0 first (VERIFIED). If it was interrupted after the erase began, the
   start of the flash, where the boot code lives, is gone and the camera will not boot. The updater cannot
-  run again because it is part of what was erased. Only section B can bring the camera back.
+  run again because it is part of what was erased. Only [section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly) can bring the camera back.
 - A clip write interrupted part way leaves a mix of old and new data. Keep the clip on and run `restore`
-  again; flashrom will erase and rewrite what differs. If the clip was already removed, start section B
+  again; flashrom will erase and rewrite what differs. If the clip was already removed, start [section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)
   from the top.
 - No boot-ROM recovery mode is documented for the GPCV2247F (UNKNOWN). A 10-pin "ISP" header footprint
   and a "3V" test pad exist on the board, but their pinout and function are not known (UNKNOWN). Do not
   count on them. Without a clip write, a camera whose flash was partly erased is, as far as anyone has
   published, unrecoverable.
 - If the camera still boots after an interruption (it was interrupted before the erase started, or
-  "Program error" appeared), nothing was changed (VERIFIED for "Program error"). Go to section A.
+  "Program error" appeared), nothing was changed (VERIFIED for "Program error"). Go to [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card).
 
 ## D. Wrong edition
 
@@ -270,9 +274,9 @@ What is known and what is not:
   onto a Millennium or CLOT body. `restore` checks build stamps, and the original-series stamps are what
   it accepts by default; it cannot know which body is on the clip.
 - If it has already been done: the camera boots, so the SD updater still runs. Wait for an edition-specific
-  dump from an owner of that edition and apply it through section A. Nothing in this toolkit can produce
+  dump from an owner of that edition and apply it through [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card). Nothing in this toolkit can produce
   one from the original-series image.
-- If you own a Millennium or CLOT camera that works, make a backup now (section B's `backup`, with the
+- If you own a Millennium or CLOT camera that works, make a backup now ([section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)'s `backup`, with the
   camera opened the same way). That backup is the only thing that can restore it later, and it is what
   other owners of that edition will need.
 
@@ -297,3 +301,7 @@ coding). Programmer USB ID for the CH341A: `1a86:5512`.
 Toolkit commands used here: `probe`, `backup`, `restore` (this document), `pack` and `verify` (section
 A). All of them print `--help`. Exit code 0 means the command did what it says; anything else means stop
 and read the message.
+
+---
+
+Reading order: 2 of 13 · previous: [The first flash](01-FIRST-FLASH.md) · next: [Flash candidates](03-FLASH-CANDIDATES.md) · [all docs](README.md)
