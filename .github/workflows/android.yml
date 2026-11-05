@@ -80,12 +80,16 @@ jobs:
           TITLE="Charmera Card for Android $VER (build ${{ github.run_number }})"
           NOTES="Puts a verified Charmera update file on an SD card from an Android phone (7.0 or later). Download charmera-card.apk on the phone, open it, and allow the install. What it does and what it cannot do: android/README.md."
           retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i * 15)); done; return 1; }
+          # Each step can be repeated safely, so a server error never leaves a half-made release behind:
+          # create the release only if it is missing (gh also finds a draft by its tag), replace the APK,
+          # then make sure it is published (not a draft) with this build's title.
+          ensure_release() { gh release view android-app >/dev/null 2>&1 || gh release create android-app --verify-tag --title "$TITLE" --notes "$NOTES"; }
           git tag -f android-app "$GITHUB_SHA"
           retry git push -f origin refs/tags/android-app
-          if gh release view android-app >/dev/null 2>&1; then
-            retry gh release upload android-app android/out/charmera-card.apk --clobber
-            retry gh release edit android-app --title "$TITLE" --notes "$NOTES"
-          else
-            retry gh release create android-app android/out/charmera-card.apk --verify-tag --title "$TITLE" --notes "$NOTES"
-          fi
+          retry ensure_release
+          retry gh release upload android-app android/out/charmera-card.apk --clobber
+          retry gh release edit android-app --draft=false --title "$TITLE" --notes "$NOTES"
+          # Fail unless the published release, looked up the way the download link is, carries the APK.
+          check() { gh api "repos/${{ github.repository }}/releases/tags/android-app" --jq '.assets[].name' | grep -qx charmera-card.apk; }
+          retry check
           echo "APK: https://github.com/${{ github.repository }}/releases/download/android-app/charmera-card.apk" >> "$GITHUB_STEP_SUMMARY"
