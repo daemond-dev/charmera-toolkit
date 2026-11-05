@@ -784,7 +784,8 @@ def check_stored_band_refused(img, slot, tmp_path, capsys, monkeypatch):
     rows = noise_band_frame()
     plan = frames.plan_replacement(img, slot, rows)
     kinds = [kind for kind, _ in frames.deflate_blocks(plan.parts[1].data[4:-8])]
-    if "stored" not in kinds:
+    forced = "stored" not in kinds
+    if forced:
         band = plan.parts[1].payload
         real = frames.encode_gpzp
         monkeypatch.setattr(frames, "encode_gpzp", lambda data: _encode_with_a_stored_block(data) if bytes(data) == band else real(data))
@@ -796,7 +797,13 @@ def check_stored_band_refused(img, slot, tmp_path, capsys, monkeypatch):
     assert plan.fits                                    # the budget alone would let it through
     assert [p.label for p in plan.problems] == ["strip 1"]
     line = plan.parts[1].describe()
-    assert "too noisy" in line and "stored" in line and "rows 200-399" in line and "fits" not in line
+    # a stored block with data in it reads "too noisy"; an empty one (possible when forced) gets the general wording
+
+    def names_the_stored_block(s):
+        return "too noisy" in s or (forced and "stored DEFLATE blocks" in s)
+
+    assert names_the_stored_block(line) and "stored" in line and "fits" not in line
+    assert forced or "rows 200-399" in line
     with pytest.raises(frames.EncodingError) as exc:
         frames.apply_plan(img, plan)
     assert "strip 1:" in str(exc.value)
@@ -810,7 +817,7 @@ def check_stored_band_refused(img, slot, tmp_path, capsys, monkeypatch):
     for extra in ((), (GATE,)):
         assert run("frames", "replace", str(src), "--slot", str(slot), "--png", str(png), "--out", str(out), *extra) == 2
         text = capsys.readouterr().out
-        assert "too noisy" in text and "rows 200-399" in text and "strip 1 cannot be written" in text
+        assert names_the_stored_block(text) and "strip 1 cannot be written" in text and (forced or "rows 200-399" in text)
         assert "nothing written" in text and "dry run" not in text and not out.exists()
 
 
