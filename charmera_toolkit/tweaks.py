@@ -133,6 +133,10 @@ def handler(args) -> int:
         print("error: --out is required")
         return 2
     image = src.read_bytes()
+    if len(image) not in (0x1E0000, 0x200000):
+        print(f"error: {src} is {len(image):,} bytes; tweak takes a 2 MiB dump or a 0x1E0000-byte update file. A shorter "
+              "file is usually a cut-off download.")
+        return 2
     build = detect_build(image)
     if build.build is not ORIGINAL_2025:
         print("error: these patches are defined for the original 2025 series build only; this image is not that build")

@@ -41,11 +41,15 @@ inflated length                 u32 little-endian
 ```
 
 The firmware's inflater has no dynamic-Huffman path, so the toolkit encodes with zlib's `Z_FIXED` strategy
-at level 9 and checks each stream it wrote for dynamic blocks before it lets the image out. Fixed Huffman
-costs a little compression: 8 bits per literal, 7 or 8 bits plus extra bits per match. The stock encoder is
-not zlib (its blocks hold 4,096 symbols where zlib's hold 4,095 or 16,383), so re-encoding a stock payload
-gives a stream that is 1 to 3 bytes shorter than the original on 12 of the 35 entries and byte-identical on
-the other 23; it always inflates to the same bytes.
+at level 9. That strategy never writes a dynamic block, but zlib still writes a block stored (uncompressed)
+when storing it is smaller, which happens for near-random content such as noise or glitter. No stock stream
+holds a stored block and nothing shows that the camera's inflater handles one, so `replace` walks every
+stream it encoded, block by block, reads it back against the data it was made from, and refuses to write
+anything that is not fixed-Huffman throughout. Fixed Huffman costs a little compression: 8 bits per
+literal, 7 or 8 bits plus extra bits per match. The stock encoder is not zlib (its blocks hold 4,096
+symbols where zlib's hold 4,095 or 16,383), so re-encoding a stock payload gives a stream that is 1 to 3
+bytes shorter than the original on 12 of the 35 entries and byte-identical on the other 23; it always
+inflates to the same bytes.
 
 ## The overlay payload
 
@@ -84,9 +88,12 @@ flashed by this project yet.
 ## Making a frame
 
 Draw an 800x600 PNG with an alpha channel. Transparent pixels (alpha below 128) are see-through, everything
-else covers the photo. Export it as an 8-bit RGBA PNG (RGB without alpha is accepted and gives a frame with
-no see-through area at all). Palette, greyscale, 16-bit and interlaced PNGs are refused with a message asking
-for that export; the toolkit has its own small PNG reader and does not need any image library.
+else covers the photo. Export it as an 8-bit RGBA PNG. RGB, greyscale and palette PNGs (palette and
+greyscale at 1 to 8 bits) are read too: a transparent colour or palette alpha in a `tRNS` chunk, which is
+what ImageMagick's `PNG24:` and Pillow's `transparency=` write, counts as alpha, and without one the frame
+has no see-through area at all (`replace` then says so). Greyscale-with-alpha, 16-bit and interlaced PNGs
+are refused with a message asking for an 8-bit RGB or RGBA export, and a damaged file gets a message saying
+which chunk is wrong; the toolkit has its own small PNG reader and does not need any image library.
 
 Horizontal resolution of the see-through mask is two pixels: a pair with one transparent and one opaque
 pixel is drawn opaque with the opaque pixel's colour, as the published frame maker does. Colour resolution is
@@ -121,6 +128,16 @@ budget and refuses to write anything:
 Pick the frame slot whose budgets match where your detail is, or move the detail to a band with room, or
 flatten it (fewer colours, hard edges, no gradient).
 
+Near-random content can fail in a second way even when it fits: where about 16 KB of a band is noise,
+zlib stores that part uncompressed in a stored block, which no stock frame uses (see
+[The GPZP container](#the-gpzp-container)). In the stock layout only frame 3's middle and bottom bands are
+big enough to hold one. `replace` then refuses that band and writes nothing:
+
+```
+  strip 1: 18,480 bytes, budget 18,944: cannot be written, too noisy for the camera's encoding: zlib could only store 16,429 bytes of it uncompressed (a stored DEFLATE block), and the camera's frames use fixed-Huffman blocks only; simplify that band of the frame (rows 200-399): flat colours, no noise, grain or photo texture
+error: strip 1 cannot be written: the camera's frames hold fixed-Huffman blocks only (see the line above); nothing written
+```
+
 ## The thumbnail
 
 `PV00n` is the picture the frame menu shows: 112x80 pixels, little-endian RGB565, 17,920 bytes inflated.
@@ -131,8 +148,13 @@ one); an area that is mostly see-through gets 0x8C71, and an opaque pixel that h
 0x8C71 is moved one blue level. The thumbnail slots are small (1,024 bytes, 1,536 for frame 3), so when the
 full-colour thumbnail does not fit, colours are rounded to fewer RGB565 levels, one bit per channel at a
 time, until it does; `replace` says when that happened. The four stock frames, put back from their PNGs,
-get thumbnails of 400 to 1,406 bytes at full colour, so none of them needs a step. Pass `--thumb` with a
-112x80 PNG (RGB, or RGBA where transparent pixels become the key grey) to supply your own instead.
+get thumbnails of 400 to 1,406 bytes at full colour, so none of them needs a step.
+
+Pass `--thumb` with a 112x80 PNG to supply your own instead. Transparent pixels (alpha below 128) and
+pixels of the key grey itself (anything that packs to 0x8C71) become 0x8C71; every other pixel is written
+as its RGB565 colour, without the nudge. `extract` writes `thumb-n.png` as RGBA with the key grey
+transparent (the grey is kept underneath), so a thumbnail put back unchanged gives the stock thumbnail word
+for word, key grey included; an RGB `thumb-n.png` without alpha goes back the same way.
 Whether the menu treats 0x8C71 as a key colour or merely paints it is not verified; the stock thumbnails
 use it where the frame is see-through, so the toolkit does the same.
 
@@ -141,21 +163,28 @@ use it where the frame is see-through, so the toolkit does the same.
 ```
 charmera frames list my_backup.bin
 charmera frames extract my_backup.bin --out frames/
-    # frames/frame-0.png .. frame-3.png (RGBA, transparent where see-through), thumb-n.png, the raw .gpzp files
+    # frames/frame-0.png .. frame-3.png and thumb-0.png .. thumb-3.png (RGBA, transparent where see-through),
+    # and the raw .gpzp files
 charmera frames preview my_backup.bin --slot 1 --photo photo-800x600.png --out preview.png
     # photo-800x600.png must be exactly 800x600; crop or scale it yourself first
 charmera frames replace my_backup.bin --slot 1 --png frame.png --out framed.bin
     # prints the plan: see-through fraction, nudged pairs, every strip's size against its budget
 charmera frames replace my_backup.bin --slot 1 --png frame.png --thumb thumb.png --out framed.bin --i-understand-this-is-a-mod
-charmera pack --input framed.bin --out out/ --i-understand-this-file-flashes-a-camera
-charmera verify out/JH_5408..._........bin --stock my_backup.bin
+charmera pack --input framed.bin --out out/frames/ --i-understand-this-file-flashes-a-camera
+charmera verify out/JH_5408..._........bin --stock my_backup.bin --allow-modified
 ```
+
+`extract` refuses to write into a folder that already holds any of the files it would write (a second
+extract would otherwise replace the PNGs you edited there) and names them; pass `--overwrite` to replace
+them, or extract into an empty folder. It never replaces the input file.
 
 `replace` never writes to the input file and refuses an existing `--out` without `--overwrite`. It writes
 each of the four encoded files into its slot followed by 0xFF padding to the budget, so every byte outside
-those four slots is unchanged; `verify` will report the software region as modified, which is expected for a
-mod. Start from `extract`: the stock frame PNGs show what the camera draws, and editing one keeps you inside
-its budgets.
+those four slots is unchanged. The software region therefore differs from your backup, which `verify`
+reports as a FAIL unless you pass `--allow-modified`: with it, the same line passes as the intended mod
+(it still names the regions that changed) and every other check runs as usual. Without the flag, verify
+ends with "do not put this file on a card". Start from `extract`: the stock frame PNGs show what the camera
+draws, and editing one keeps you inside its budgets.
 
 ## What is not known
 

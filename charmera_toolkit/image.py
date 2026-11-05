@@ -1,7 +1,8 @@
 """Reading a Charmera flash image: header, flash map, build identity, resources, sounds, settings, photos.
 
 Everything here is read-only and works on a full 2 MiB dump, a 0x1E0000-byte update file, or a
-shorter software-only image (the layout of the first 0x170000 bytes is the same in all three).
+software-only image of exactly 0x170000 bytes (the layout of the first 0x170000 bytes is the same in all
+three). Any other length below 0x1E0000 is reported as 'truncated'.
 
 Status labels in comments: VERIFIED = checked against both public dumps and the firmware code by the
 research pass; INFERRED = consistent with the evidence but not proven on hardware; UNKNOWN = guess.
@@ -22,6 +23,7 @@ VA_OFFSET = 0x200            # VERIFIED: file offset = runtime address + 0x200
 CODE_END = 0x110000          # INFERRED: code and tables; the 64 KiB at 0x110000 is zero (heap placeholder)
 RESOURCE_BASE = 0x120000     # VERIFIED: 'GP+' resource pack
 RESOURCE_SECTOR = 0x200      # VERIFIED: directory entries address 512-byte sectors from RESOURCE_BASE
+RESOURCE_LIMIT = 0x16E000    # VERIFIED: the factory self-test sector starts here; verify ends the last entry's slot at it
 SOFTWARE_END = 0x170000      # VERIFIED: everything below is identical in both public dumps
 SETTINGS_BASE = settings_mod.SETTINGS_BASE
 PHOTO_INDEX = 0x17F000       # VERIFIED: 8-byte entries describing the internally stored photos
@@ -174,13 +176,18 @@ def embedded_stamp(image: bytes, build: KnownBuild = ORIGINAL_2025) -> str:
 
 
 def image_kind(image: bytes) -> str:
+    """'dump' (2 MiB), 'update' (0x1E0000), 'software-only' (exactly 0x170000: code, data and the whole
+    resource pack), 'truncated' (any other length below 0x1E0000: a cut-off download or an incomplete
+    read, which would leave part of the code or resource pack erased), or 'unknown'."""
     n = len(image)
     if n == FLASH_SIZE:
         return "dump"
     if n == UPDATE_FILE_SIZE:
         return "update"
-    if n <= SOFTWARE_END and n >= RESOURCE_BASE:
+    if n == SOFTWARE_END:
         return "software-only"
+    if n < UPDATE_FILE_SIZE:
+        return "truncated"
     return "unknown"
 
 

@@ -40,8 +40,10 @@ charmera inspect backups/<file>.bin
 
 Without a clip, the published stock dump (hash in [Research report](13-PHASE1-REPORT.md), reproduced by `pack` from the
 published restore file) is identical to every original-series camera read so far in the first 0x170000 bytes.
-Your settings and your two internally stored photos are the only things that differ, and the candidates below
-blank those anyway. The risk you accept is that your camera is the first one whose firmware differs.
+Your settings and the photos the camera stores in its own memory are the only things that differ. The risk
+you accept is that your camera is the first one whose firmware differs. Flashing any of the candidates below
+resets your settings and erases those stored photos, and without a backup they cannot be put back (see the
+warning in step 5).
 
 ## 2. Pick the file
 
@@ -51,6 +53,8 @@ blank those anyway. The risk you accept is that your camera is the first one who
   first if you only want to know that the updater path works on your camera.
 - A: C plus UI sounds set to 0 in the settings record. Fully reversible by flashing C.
 - B: A plus silenced sound data in the resource pack, for the case where the settings are ever reset.
+
+All three erase the two photos the camera stores in its own memory.
 
 Build your own instead, then `pack` it. Each of these commands prints what it will change and refuses to write
 until you pass its gate flag:
@@ -65,10 +69,17 @@ until you pass its gate flag:
 
 ```
 charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup or the stock dump>
+charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup or the stock dump> --allow-modified   # a mod of code or resources
 charmera diff <your backup> out/JH_5408<stamp>_<sum>.bin
 ```
 
-`verify` fails closed. A FAIL line means the file does not go on a card. `diff` shows every region that
+`verify` fails closed. A FAIL line means the file does not go on a card. It refuses any change to bytes
+0..0x170000 (the code and the resource pack) unless you tell it the change is intended, which is what
+`--allow-modified` does. Candidates A and C, and files from `settings` or `sounds mute --method settings`,
+leave that region as it is and pass without the flag. Candidate B and anything built with `sounds mute
+--method pcm` or `both`, `sounds replace`, `frames`, `resources` or `tweak` need it. With the flag, the
+`software-region` line lists the 64 KiB blocks that differ from your `--stock` file; they must be only the
+ones your mod was meant to change (for B: 0x120000, 0x150000 and 0x160000). `diff` shows every region that
 differs from your backup, so you can confirm the change is the one you intended and nothing else moved.
 What the regions are and which rules `verify` enforces: [Image layout](11-FORMAT.md), especially
 [the update file rules](11-FORMAT.md#update-file-jh_5408stamp_sumbin).
@@ -78,25 +89,48 @@ What the regions are and which rules `verify` enforces: [Image layout](11-FORMAT
 `stage` copies the file to the card root, after running `verify` again, refusing a card that already holds
 another update file, and reading the copy back to compare hashes. It asks you to type the card path before
 it writes. [Putting the file on the card](04-STAGE.md) explains each refusal. From a phone instead of a
-computer, use the [Charmera Card app](../android/README.md); [Using an Android phone](06-ANDROID.md) covers the rest.
+computer, use the [Charmera Card app](../android/README.md) (on Android 11 and later through a USB card reader
+or the camera's USB-C cable, not the phone's own SD slot); [Using an Android phone](06-ANDROID.md) covers the rest.
 
 ```
 charmera stage out/JH_5408<stamp>_<sum>.bin --card E:          # Windows
 charmera stage out/JH_5408<stamp>_<sum>.bin --card /run/media/deck/<label>   # Steam Deck
 ```
 
-Use a card the camera has formatted itself, or a FAT32 card ([SD card problems](05-CARDS.md)). Take the card out of the
-reader only after `stage` reports the read-back matched.
+Use a card the camera has formatted itself, or a FAT32 card ([SD card problems](05-CARDS.md)). When `stage`
+reports the read-back matched, eject the card (Windows: Safely Remove Hardware or Explorer's Eject; Linux:
+`udisksctl unmount` or the file manager's eject), then take it out of the reader.
 
 ## 5. Flash (the point of no return)
 
+Before you start:
+
+- Original 2025 series only: matte body, yellow Kodak boot screen. Never a Millennium Edition (blue boot
+  screen) or a CLOT edition ([Recovery, section D](02-RECOVERY.md#d-wrong-edition)). No check on the file can
+  tell which body it goes into; only you can.
+- Charge the battery fully, then unplug the cable. Programming takes about 15 to 20 seconds, and a power loss
+  in that window leaves a camera that only a chip programmer can bring back
+  ([Recovery, section C](02-RECOVERY.md#c-an-interrupted-flash)).
+- The photos the camera stores in its own memory (up to two, taken with no card in) are replaced. The
+  candidates, and any file packed with `--blank-photos`, erase them; a file packed from someone else's dump
+  replaces them with that owner's. Only a file packed from your own backup without `--blank-photos` puts back
+  the photos that were in the camera when you made that backup. If they matter and you have no backup, get
+  them off the camera first: the card-side `SPIDCIM` folder is where the camera copies them
+  ([Research report, section 2](13-PHASE1-REPORT.md#2-firmware-container-format)), so check that folder on a
+  computer before you flash.
+
+Then:
+
 1. Camera off. Insert the card.
-2. Hold the power key. The camera finds the file within its first five seconds and shows the update progress.
-3. Do not touch anything until the camera is back at a normal screen or has powered itself off. If the
-   screen shows "Program error", the name checksum did not match; nothing was erased, remove the card and
-   re-run `verify`.
-4. Power off, remove the card, and delete the update file from it before using that card in the camera
-   again. The camera does not delete it, and it would flash again at every power-on.
+2. Hold the power key to switch on. Within its first five seconds the camera finds the file and shows
+   "Upgrade NN%", which advances once per 64 KiB block, about 15 to 20 seconds in all. Do not touch the
+   key or the card while it counts.
+3. At 100% the camera stays on its last screen. Nothing reboots by itself, and the camera never deletes or
+   renames the file. Take the card out, then hold the power key about a second until the camera switches off.
+4. If the screen shows "Program error" instead, the sum in the name did not match the file and nothing was
+   erased; the camera switches itself off. Take the card out and re-run `verify`.
+5. Delete the update file from the card (on a computer or the phone, ejecting the card before you take it
+   out) before that card goes back into the camera. Left there, it flashes again at every power-on.
 
 ## 6. Check
 

@@ -38,8 +38,11 @@ Offsets within the 252-byte record. Verified means the firmware's setter and rea
 ## Update file (`JH_5408<stamp>_<sum>.bin`)
 
 - Length 0x1E0000 in every published file: the first 0x1E0000 bytes of a dump, including the settings bank and
-  the photo slots of whoever made it. `pack` can blank those.
-- `<stamp>` is 12 digits and must differ from the 12 at 0x218C4 of the running firmware or the updater ignores the file.
+  the photo slots of whoever made it. `pack` can blank those. It also takes a software-only image of exactly
+  0x170000 bytes and pads it; any other shorter input is refused as truncated, because the updater programs
+  whatever the file holds and padding a cut-off file would erase part of the code or the resource pack.
+- `<stamp>` is 12 ASCII digits (0-9 only; the camera reads fixed character positions) and must differ from the 12 at
+  0x218C4 of the running firmware or the updater ignores the file.
 - `<sum>` is the unsigned 32-bit sum of every byte of the file, as 8 hex digits. A mismatch shows "Program error"
   and nothing is written.
 - The updater looks only in the card's root, only during the first 5 seconds after power-on, erases 64 KiB
@@ -48,6 +51,22 @@ Offsets within the 252-byte record. Verified means the firmware's setter and rea
   0x1F0000 (block 31, blank anyway; block 30 is left alone). For a 0x170000 file it is 0x180000, the first photo
   slot. That is why file lengths other than 0x1E0000 matter: `verify` names the block it would hit.
 - The file is not deleted afterwards. Take the card out before the next power-on or it flashes again.
+
+## Resource entries
+
+The camera checks only the pack's `GP+` magic, nothing inside it, so `verify` does. An entry's slot runs from its offset to the next
+entry's offset; the last entry's slot runs to the factory self-test sector at 0x16E000. Every slot must lie after the
+directory and inside the file, must not be erased (all 0xFF), and must hold the kind its name says:
+
+| Name ends in | Must hold |
+|---|---|
+| `.WAV` | `RIFF` ... `WAVE` with a `fmt ` and a `data` chunk; 8 + the RIFF size fits the slot |
+| `.JPG` | starts FF D8 and has an FF D9 end marker inside the slot |
+| `.GPZP`, `.GPZ` | `GPZP`, a raw DEFLATE stream that inflates, a trailer whose CRC-32 and length match, fixed-Huffman blocks only |
+| `.PAK` | starts `GPRS` |
+
+The two public dumps, the published stock restore file and the three [flash candidates](03-FLASH-CANDIDATES.md)
+pass. A cut-off download padded with 0xFF fails here even when the rest of the file looks right.
 
 ## Resource sound slots
 
@@ -70,7 +89,8 @@ to the next entry. The 800×600 frames inflate to three 240,000-byte strips in a
 (`PV00n`) are 112×80 RGB565 little-endian with 0x8C71 as the key colour. The stock encoder is not zlib: its
 blocks hold exactly 4,096 symbols. Python's `zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_FIXED)` reproduces 23 of
 the 35 stock streams byte for byte; the other 12 come out 1 to 3 bytes shorter and inflate to identical data.
-Every stock stream uses fixed-Huffman blocks only, and `frames replace` refuses to write anything else.
+Every stock stream uses fixed-Huffman blocks only. `frames replace` refuses any output that is not fixed-Huffman, stored blocks included, and `verify`
+fails any GPZP entry with a block that is not fixed-Huffman, stored blocks included.
 
 ---
 

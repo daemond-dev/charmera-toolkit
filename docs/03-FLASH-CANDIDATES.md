@@ -10,8 +10,16 @@ Input: `charmera_stock_latest.bin` from https://github.com/benbadio/keychain-cam
 SHA-256 `cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f`. The Project-Sirius dump gives the same
 software region; its settings bank and photos differ, so the hashes below are for the keychain dump.
 
-Prerequisite before any of these goes on a card: a verified full-flash backup of your own camera (`backup`),
-and a yellow-boot-screen original-series body. A Millennium or CLOT body must not receive these.
+Before you flash any of these: an original 2025 series body (matte, yellow Kodak boot screen; a Millennium or
+CLOT body must never receive these) and a fully charged battery. A verified full-flash backup of your own
+camera (`backup`) is recommended, as in
+[The first flash, step 1](01-FIRST-FLASH.md#1-back-up-the-stock-firmware-recommended-or-accept-the-public-stock-image);
+that step also says what you accept by flashing without one.
+
+All three erase the photos the camera stores in its own memory (up to two, taken with no card in), because
+they are packed with `--blank-photos`; any file you pack with that option does the same. Only your own backup,
+packed without `--blank-photos`, puts back the photos that were in the camera when you made it. If they matter
+and you have no backup, get them off the camera before you flash.
 
 | Candidate | What differs from stock | Update file | SHA-256 |
 |---|---|---|---|
@@ -21,7 +29,7 @@ and a yellow-boot-screen original-series body. A Millennium or CLOT body must no
 
 What the camera will do with each (VERIFIED from the firmware's loader and updater, not yet on hardware):
 
-- The updater accepts the file (name sum matches), erases blocks 0 to 29, programs the file, erases block 31 (empty), then waits for a one-second power-key hold.
+- The updater accepts the file (name sum matches), erases and programs blocks 0 to 29 ("Upgrade NN%" advances once per 64 KiB block), then erases block 31 (empty). At 100% the camera stays on its last screen; nothing reboots by itself, and the file is neither deleted nor renamed. Take the card out, then hold the power key about a second to switch the camera off.
 - On the next boot the settings loader stops at sector 1 (erased) and loads sector 0; its CRC passes, and the camera runs with those values: UI sound 0 (A, B) or 5 (C), playback volume 5, auto-off code 2, language and date-format bytes as in the factory record. (Sector 120, the zeroed photo directory, is not erased either, but the loader never gets that far.) Two bytes differ from what the dumped camera was last running: +0x03 is 1 instead of 0 and +0x53 is 0 instead of 2; both values occur in other live records of the two dumps, so they are known-good states, and your own choices (frame/style selector) start from the factory state.
 - The photo directory reads as two unused entries, so playback without a card shows nothing.
 - A and B: the event-sound player returns before playing for every event (power on, shutter, keys, power off). B also has silent audio data if a later settings reset turns the gate back on.
@@ -48,6 +56,10 @@ python -m charmera_toolkit verify out/B/JH_5408202611050002_0FB0BD3C.bin --stock
 python -m charmera_toolkit verify out/C/JH_5408202611050003_0FB74C24.bin --stock charmera_stock_latest.bin
 ```
 
+B's verify needs `--allow-modified` because `verify` refuses any change to bytes 0..0x170000 (the code and the
+resource pack) unless it is told the change is intended, and B changes three resource blocks. A and C leave
+that region byte-identical to stock and pass without the flag.
+
 The stamps are fixed so the names and hashes reproduce. Any other stamp except `202505201029` works too; only the
 checksum part of the name must then be recomputed, which `pack` does.
 
@@ -61,11 +73,12 @@ checksum part of the name must then be recomputed, which `pack` does.
 
 The full sequence, with backups, staging and undo, is [The first flash](01-FIRST-FLASH.md); this is the short form.
 
-1. `backup` your camera twice; keep the files ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)).
-2. `verify` the candidate against your backup (`--stock <backup>`); read every line.
-3. Card formatted FAT32 ([SD card problems](05-CARDS.md)), only the candidate in the root (`stage` puts it there: [Putting the file on the card](04-STAGE.md)), camera off, card in, power on, wait for 100%, hold power to switch off, remove the card, delete the file from it.
-4. Power on. Expected: no power-on sound (A, B); the live view and the shutter work as before.
-5. To revert: C, or `pack` your own backup.
+1. Recommended: `backup` your camera and keep the file ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)). Without a clip, `--stock` below is the public dump.
+2. `verify` the candidate against your backup (`--stock <backup>`, plus `--allow-modified` for B); read every line.
+3. A card the camera has formatted itself (exFAT) or a FAT32 card; either works for the update ([SD card problems](05-CARDS.md)). Reformatting erases the card, so copy its photos off first if you do. Only the candidate in the root (`stage` puts it there: [Putting the file on the card](04-STAGE.md)); eject the card before you take it out of the reader.
+4. Original 2025 series body only; battery fully charged and the cable unplugged; the photos stored in the camera saved or given up (see above). Camera off, card in, power on. Wait for "Upgrade NN%" to reach 100%; the camera then stays on its last screen and does not reboot by itself. Take the card out, then hold the power key about a second to switch off. Delete the file from the card before it goes back into the camera.
+5. Power on without the card. Expected: no power-on sound (A, B); the live view and the shutter work as before.
+6. To revert: C, or `pack` your own backup.
 
 ---
 

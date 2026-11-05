@@ -6,7 +6,8 @@ What is in the resource pack (VERIFIED against the stock dump):
   overlay, plus a 112x80 RGB565 menu thumbnail PV00n. A GPZP file is 'GPZP', a raw DEFLATE stream of the
   payload, then a little-endian CRC-32 and length of the payload; the rest of the slot is 0xFF.
 - The stock streams use fixed-Huffman blocks only and the camera's inflater has no dynamic-Huffman path, so
-  this module always encodes with zlib's Z_FIXED strategy and checks the result for dynamic blocks.
+  this module always encodes with zlib's Z_FIXED strategy and walks every stream it made: a stored block
+  (zlib still stores near-random data raw) or a dynamic one is refused, never written.
 - A strip inflates to 240,000 bytes: 100 row-pairs of 800 luma bytes (even row), 800 U,V bytes interleaved
   per horizontal pixel pair, 800 luma bytes (odd row). BT.601 full range.
 
@@ -18,11 +19,14 @@ become a hole, so `rgba_to_frame` nudges its second luma to 141 and reports how 
 Writing a modified image is a mod step: the output is a full image, not an update file. Run `pack` on it
 afterwards and read what `verify` says.
 
-Everything is standard library. The PNG codec here reads 8-bit RGB and RGBA PNGs only; anything else gets a
-message asking for that export.
+Everything is standard library. The PNG codec here reads 8-bit RGB and RGBA, greyscale and palette PNGs
+(honouring a tRNS transparent colour or palette alpha) and writes 8-bit RGB and RGBA; anything else gets a
+message asking for an 8-bit RGB or RGBA export.
 """
 from __future__ import annotations
 
+import io
+import os
 import struct
 import zlib
 from dataclasses import dataclass
@@ -133,13 +137,21 @@ def png_write(dest, width: int, height: int, rows: Sequence[bytes], mode: str = 
     return len(data)
 
 
-_PNG_COLOR_NAMES = {0: "greyscale", 2: "RGB", 3: "palette", 4: "greyscale with alpha", 6: "RGBA"}
 PNG_HINT = "export as 8-bit RGB or RGBA PNG"
+# The bit depths PNG allows per colour type (0 greyscale, 2 RGB, 3 palette, 4 greyscale + alpha, 6 RGBA)
+_PNG_DEPTHS = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6: (8, 16)}
+_PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+# Sub-byte samples, most significant bits first: _PNG_SAMPLES[depth][byte] is that byte's samples
+_PNG_SAMPLES = {d: [bytes((b >> s) & ((1 << d) - 1) for s in range(8 - d, -1, -d)) for b in range(256)] for d in (1, 2, 4)}
 
 
-def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> List[bytes]:
-    """Undo the five PNG scanline filters. Pure Python, so it is the slow part of reading a large PNG."""
-    stride = width * bpp
+def _unfilter(raw: bytes, width: int, height: int, bpp: int, stride: Optional[int] = None) -> List[bytes]:
+    """Undo the five PNG scanline filters. Pure Python, so it is the slow part of reading a large PNG.
+
+    `bpp` is the filter's byte distance (1 for samples narrower than a byte); `stride` the bytes per row,
+    width * bpp unless given."""
+    if stride is None:
+        stride = width * bpp
     expected = height * (stride + 1)
     if len(raw) != expected:
         raise ValueError(f"PNG image data is {len(raw)} bytes, expected {expected} for {width}x{height}")
@@ -187,15 +199,29 @@ def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> List[bytes]:
     return rows
 
 
-def png_read(data: bytes) -> Tuple[int, int, str, List[bytes]]:
-    """Decode an 8-bit RGB or RGBA non-interlaced PNG. Returns (width, height, mode, rows).
+def _png_samples(line: bytes, depth: int, width: int) -> bytes:
+    """One byte per sample from a row of 1-, 2-, 4- or 8-bit samples (one channel)."""
+    if depth == 8:
+        return line
+    table = _PNG_SAMPLES[depth]
+    return b"".join(table[b] for b in line)[:width]
 
-    Anything else (palette, greyscale, 16-bit, interlaced) raises ValueError with the export hint.
+
+def png_read(data: bytes) -> Tuple[int, int, str, List[bytes]]:
+    """Decode a non-interlaced PNG to 8-bit rows. Returns (width, height, mode, rows), mode 'RGB' or 'RGBA'.
+
+    Read: 8-bit RGB and RGBA, greyscale of 1 to 8 bits, palette of 1 to 8 bits. A tRNS chunk is honoured:
+    the transparent grey or RGB colour it names, or the alpha it gives palette entries, makes the result
+    RGBA. Greyscale with alpha, 16-bit and interlaced PNGs raise ValueError with the export hint; a
+    malformed chunk raises ValueError saying what is wrong with it.
     """
+    data = bytes(data)
     if data[:8] != PNG_SIGNATURE:
         raise ValueError("not a PNG file (bad signature)")
     pos = 8
     ihdr = None
+    plte = None
+    trns = None
     idat = []
     while pos + 8 <= len(data):
         length, tag = struct.unpack_from(">I4s", data, pos)
@@ -205,9 +231,19 @@ def png_read(data: bytes) -> Tuple[int, int, str, List[bytes]]:
         crc = struct.unpack_from(">I", data, pos + 8 + length)[0]
         if crc != zlib.crc32(tag + body) & 0xFFFFFFFF:
             raise ValueError(f"PNG chunk {tag!r} fails its CRC: the file is corrupt")
+        if ihdr is None and tag != b"IHDR":
+            raise ValueError(f"PNG starts with a {tag!r} chunk instead of IHDR: the file is malformed")
         pos += 12 + length
         if tag == b"IHDR":
+            if ihdr is not None:
+                raise ValueError("PNG has a second IHDR chunk: the file is malformed")
+            if length != 13:
+                raise ValueError(f"PNG IHDR chunk is {length} bytes, expected 13: the file is malformed")
             ihdr = struct.unpack(">IIBBBBB", body)
+        elif tag == b"PLTE":
+            plte = body
+        elif tag == b"tRNS":
+            trns = body
         elif tag == b"IDAT":
             idat.append(body)
         elif tag == b"IEND":
@@ -215,25 +251,91 @@ def png_read(data: bytes) -> Tuple[int, int, str, List[bytes]]:
     if ihdr is None:
         raise ValueError("PNG has no IHDR chunk")
     width, height, depth, ctype, compression, filt, interlace = ihdr
-    if ctype not in (2, 6) or depth != 8 or interlace != 0:
-        what = []
-        if ctype not in (2, 6):
-            what.append(_PNG_COLOR_NAMES.get(ctype, f"colour type {ctype}"))
-        if depth != 8:
-            what.append(f"{depth}-bit")
-        if interlace != 0:
-            what.append("interlaced")
+    if ctype not in _PNG_DEPTHS:
+        raise ValueError(f"PNG IHDR gives colour type {ctype}, which does not exist: the file is malformed")
+    if depth not in _PNG_DEPTHS[ctype]:
+        raise ValueError(f"PNG IHDR gives bit depth {depth} for colour type {ctype}, which PNG does not allow: the file is malformed")
+    if width == 0 or height == 0:
+        raise ValueError(f"PNG IHDR gives a size of {width}x{height}: the file is malformed")
+    if interlace not in (0, 1):
+        raise ValueError(f"PNG IHDR gives interlace method {interlace}, which does not exist: the file is malformed")
+    what = []
+    if ctype == 4:
+        what.append("greyscale with alpha")
+    if depth == 16:
+        what.append("16-bit")
+    if interlace:
+        what.append("interlaced")
+    if what:
         raise ValueError(f"unsupported PNG ({', '.join(what)}): {PNG_HINT}")
     if compression != 0 or filt != 0:
         raise ValueError(f"unsupported PNG compression or filter method: {PNG_HINT}")
+    entries = 0
+    if ctype == 3:
+        if plte is None:
+            raise ValueError("palette PNG has no PLTE chunk: the file is malformed")
+        if len(plte) % 3 or not 3 <= len(plte) <= 768:
+            raise ValueError(f"PNG PLTE chunk is {len(plte)} bytes, not 1 to 256 three-byte entries: the file is malformed")
+        entries = len(plte) // 3
+    if trns is not None:
+        expected = {0: "2 bytes", 2: "6 bytes", 3: f"at most {entries} bytes (one per palette entry)"}.get(ctype)
+        if ctype in (4, 6):
+            trns = None          # not allowed with an alpha channel; the alpha channel already says it all
+        elif (ctype == 0 and len(trns) != 2) or (ctype == 2 and len(trns) != 6) or (ctype == 3 and len(trns) > entries):
+            raise ValueError(f"PNG tRNS chunk is {len(trns)} bytes, expected {expected}: the file is malformed")
     if not idat:
         raise ValueError("PNG has no image data")
     try:
         raw = zlib.decompress(b"".join(idat))
     except zlib.error as exc:
         raise ValueError(f"PNG image data does not inflate ({exc})")
-    bpp = 4 if ctype == 6 else 3
-    return width, height, "RGBA" if ctype == 6 else "RGB", _unfilter(raw, width, height, bpp)
+    channels = _PNG_CHANNELS[ctype]
+    stride = (width * channels * depth + 7) // 8
+    lines = _unfilter(raw, width, height, max(1, channels * depth // 8), stride)
+    if ctype == 6:
+        return width, height, "RGBA", lines
+    rows: List[bytes] = []
+    if ctype == 2:
+        if trns is None:
+            return width, height, "RGB", lines
+        key = tuple(v & 0xFF for v in struct.unpack(">HHH", trns))     # the spec has decoders mask to the depth
+        for line in lines:
+            row = bytearray(width * 4)
+            for c in range(3):
+                row[c::4] = line[c::3]
+            row[3::4] = bytes(0 if px == key else 255 for px in zip(line[0::3], line[1::3], line[2::3]))
+            rows.append(bytes(row))
+        return width, height, "RGBA", rows
+    if ctype == 0:
+        scale = 255 // ((1 << depth) - 1)
+        to_grey = bytes((v * scale) & 0xFF for v in range(256))
+        grey_key = struct.unpack(">H", trns)[0] & ((1 << depth) - 1) if trns is not None else None
+        for line in lines:
+            samples = _png_samples(line, depth, width)
+            grey = samples.translate(to_grey)
+            row = bytearray(width * (4 if trns is not None else 3))
+            step = len(row) // width
+            for c in range(3):
+                row[c::step] = grey
+            if trns is not None:
+                row[3::4] = bytes(0 if s == grey_key else 255 for s in samples)
+            rows.append(bytes(row))
+        return width, height, "RGBA" if trns is not None else "RGB", rows
+    # palette
+    pad = b"\x00" * (256 - entries)
+    tables = [plte[c::3] + pad for c in range(3)]
+    if trns is not None:
+        tables.append(trns + b"\xff" * (256 - len(trns)))
+    step = len(tables)
+    for y, line in enumerate(lines):
+        index = _png_samples(line, depth, width)
+        if max(index) >= entries:
+            raise ValueError(f"PNG row {y} uses palette entry {max(index)} but the PLTE chunk has {entries}: the file is malformed")
+        row = bytearray(width * step)
+        for c, table in enumerate(tables):
+            row[c::step] = index.translate(table)
+        rows.append(bytes(row))
+    return width, height, "RGBA" if trns is not None else "RGB", rows
 
 
 def _as_rgba(rows: Sequence[bytes], width: int) -> List[bytes]:
@@ -296,7 +398,10 @@ def decode_gpzp(blob: bytes) -> bytes:
 
 
 def encode_gpzp(payload: bytes) -> bytes:
-    """Header, fixed-Huffman level-9 raw DEFLATE stream, CRC-32 and length (no padding)."""
+    """Header, level-9 raw DEFLATE stream with zlib's Z_FIXED strategy, CRC-32 and length (no padding).
+
+    Z_FIXED never writes a dynamic-Huffman block, but zlib still writes a block stored (uncompressed) when
+    that is smaller, which happens for near-random data; `encoding_problem` catches that before a write."""
     payload = bytes(payload)
     c = zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_FIXED)
     stream = c.compress(payload) + c.flush()
@@ -414,10 +519,39 @@ def describe_blocks(stream: bytes) -> str:
 
 
 def fixed_huffman_only(stream: bytes) -> bool:
+    """True when every block of the raw DEFLATE stream is fixed-Huffman, as in every stock stream: False for
+    a dynamic or a stored block, and for a stream the walker cannot read."""
     try:
-        return all(kind != "dynamic" for kind, _ in deflate_blocks(stream))
+        return all(kind == "fixed" for kind, _ in deflate_blocks(stream))
     except ValueError:
         return False
+
+
+TOO_NOISY = "too noisy for the camera's encoding"
+
+
+def encoding_problem(gpzp: bytes, payload: Optional[bytes] = None) -> Optional[str]:
+    """Why a GPZP file must not be written into a frame slot, or None when it may be.
+
+    The file must read back (magic, stream, trailer CRC-32 and length, nothing after the trailer), inflate to
+    `payload` when one is given, and hold fixed-Huffman blocks only: the stock streams hold nothing else,
+    and nothing shows that the camera's inflater handles a stored or a dynamic block.
+    """
+    try:
+        g = parse_gpzp(gpzp)
+        blocks = deflate_blocks(gpzp[4: 4 + g.stream_len])
+    except ValueError as exc:
+        return f"the encoded file does not read back ({exc})"
+    if g.file_len != len(gpzp) or (payload is not None and g.payload != payload):
+        return "the encoded file does not read back to the data it was made from"
+    stored = sum(n for kind, n in blocks if kind == "stored")
+    if stored:
+        return (f"{TOO_NOISY}: zlib could only store {stored:,} bytes of it uncompressed "
+                f"(a stored DEFLATE block), and the camera's frames use fixed-Huffman blocks only")
+    other = sorted({kind for kind, _ in blocks if kind != "fixed"})
+    if other:
+        return f"the stream holds {' and '.join(other)} DEFLATE blocks, and the camera's frames use fixed-Huffman blocks only"
+    return None
 
 
 # --- Row-pair 4:2:0 <-> RGB(A) ----------------------------------------------------------------------------
@@ -654,9 +788,26 @@ def thumb_to_rgb(data: bytes) -> List[bytes]:
     return rows
 
 
-def rgb_to_thumb(rows: Sequence[bytes]) -> bytes:
+def thumb_to_rgba(data: bytes) -> List[bytes]:
+    """112-wide RGBA rows of a thumbnail: pixels of the key grey 0x8C71 are transparent (alpha 0, the grey
+    kept underneath), everything else opaque. rgb_to_thumb turns the transparent pixels back into the key."""
+    rgb = thumb_to_rgb(data)
+    out = []
+    for j, row in enumerate(rgb):
+        a = bytearray(THUMB_W * 4)
+        for c in range(3):
+            a[c::4] = row[c::3]
+        a[3::4] = bytes(0 if struct.unpack_from("<H", data, (j * THUMB_W + i) * 2)[0] == KEY_RGB565 else 255
+                        for i in range(THUMB_W))
+        out.append(bytes(a))
+    return out
+
+
+def rgb_to_thumb(rows: Sequence[bytes], keep_key_grey: bool = False) -> bytes:
     """Little-endian RGB565 from 112-wide RGB or RGBA rows. Transparent pixels (alpha below 128) become the
-    key grey; an opaque pixel that happens to pack to the key grey is nudged one blue level so it stays."""
+    key grey. An opaque pixel that happens to pack to the key grey is nudged one blue level so it stays
+    opaque, unless keep_key_grey is set: then it is taken as the key grey that was meant, which is how a
+    thumbnail someone supplies (or a thumb-n.png without alpha) marks its see-through area."""
     if len(rows) != THUMB_H:
         raise ValueError(f"thumbnail needs {THUMB_H} rows, got {len(rows)}")
     rows = _as_rgba(rows, THUMB_W)
@@ -669,7 +820,7 @@ def rgb_to_thumb(rows: Sequence[bytes]) -> bytes:
                 p = KEY_RGB565
             else:
                 p = rgb565(row[x], row[x + 1], row[x + 2])
-                if p == KEY_RGB565:
+                if p == KEY_RGB565 and not keep_key_grey:
                     p += 1
             struct.pack_into("<H", out, o, p)
             o += 2
@@ -818,6 +969,12 @@ class EncodedPart:
     entry: ResourceEntry
     data: bytes             # the complete GPZP file (no padding)
     rows: Optional[Tuple[int, int]] = None   # image rows this part covers
+    payload: Optional[bytes] = None          # what `data` must inflate to (None: not compared)
+
+    @property
+    def problem(self) -> Optional[str]:
+        """Why `data` must not be written even if it fits (see encoding_problem), or None."""
+        return encoding_problem(self.data, self.payload)
 
     @property
     def size(self) -> int:
@@ -837,13 +994,18 @@ class EncodedPart:
 
     def describe(self) -> str:
         head = f"{self.label}: {self.size:,} bytes, budget {self.budget:,}"
-        if self.fits:
-            return f"{head}: fits ({self.budget - self.size:,} spare)"
         if self.rows:
             hint = f"simplify that band of the frame (rows {self.rows[0]}-{self.rows[1]})"
         else:
             hint = "simplify the thumbnail (fewer colours, flat areas)"
-        return f"{head}: over by {self.over:,}; {hint}"
+        if not self.fits:
+            return f"{head}: over by {self.over:,}; {hint}"
+        problem = self.problem
+        if problem and problem.startswith(TOO_NOISY):
+            return f"{head}: cannot be written, {problem}; {hint}: flat colours, no noise, grain or photo texture"
+        if problem:
+            return f"{head}: cannot be written, {problem}"
+        return f"{head}: fits ({self.budget - self.size:,} spare)"
 
 
 class BudgetError(ValueError):
@@ -853,6 +1015,17 @@ class BudgetError(ValueError):
         self.parts = parts
         over = [p for p in parts if not p.fits]
         super().__init__(f"{len(over)} of {len(parts)} parts do not fit their slots:\n" + "\n".join("  " + p.describe() for p in parts))
+
+
+class EncodingError(ValueError):
+    """Raised when an encoded part fits but holds something other than fixed-Huffman blocks (or does not
+    read back); `parts` carries the whole table."""
+
+    def __init__(self, parts: List[EncodedPart]):
+        self.parts = parts
+        bad = [p for p in parts if p.problem]
+        super().__init__(f"{len(bad)} of {len(parts)} parts cannot be written as the camera's frames are encoded:\n"
+                         + "\n".join("  " + p.describe() for p in parts))
 
 
 @dataclass
@@ -868,10 +1041,18 @@ class ReplacePlan:
     def fits(self) -> bool:
         return all(p.fits for p in self.parts)
 
+    @property
+    def problems(self) -> List[EncodedPart]:
+        """The parts whose encoding must not be written (a stored block, or a file that does not read back)."""
+        return [p for p in self.parts if p.problem]
+
 
 def plan_replacement(image: bytes, slot: int, frame_rows: Sequence[bytes],
                      thumb_rows: Optional[Sequence[bytes]] = None) -> ReplacePlan:
-    """Convert and encode a frame (and its thumbnail) for `slot` without checking budgets or writing."""
+    """Convert and encode a frame (and its thumbnail) for `slot` without writing. Budgets and the encoding
+    are checked by apply_plan; `fits` and `problems` say beforehand what it will refuse.
+
+    A supplied thumbnail keeps pixels of the key grey as the key grey (rgb_to_thumb's keep_key_grey)."""
     fs = _slot_or_raise(image, slot)
     rows = _as_rgba(frame_rows, FRAME_W)
     if len(rows) != FRAME_H:
@@ -882,23 +1063,23 @@ def plan_replacement(image: bytes, slot: int, frame_rows: Sequence[bytes],
     parts = []
     for s, e in enumerate(fs.strips):
         strip = rowpair[s * STRIP_BYTES: (s + 1) * STRIP_BYTES]
-        parts.append(EncodedPart(f"strip {s}", e, encode_gpzp(strip), (s * STRIP_ROWS, (s + 1) * STRIP_ROWS - 1)))
+        parts.append(EncodedPart(f"strip {s}", e, encode_gpzp(strip), (s * STRIP_ROWS, (s + 1) * STRIP_ROWS - 1), strip))
     dropped = 0
     if thumb_rows is not None:
-        thumb = rgb_to_thumb(thumb_rows)
+        thumb = rgb_to_thumb(thumb_rows, keep_key_grey=True)
     else:
         thumb, dropped = make_thumbnail_fitting(rows, fs.thumb.budget)
-    parts.append(EncodedPart("thumbnail", fs.thumb, encode_gpzp(thumb)))
-    for p in parts:
-        if not fixed_huffman_only(p.data[4:-8]):
-            raise ValueError(f"{p.label}: zlib produced a non-fixed-Huffman block; refusing to write it")
+    parts.append(EncodedPart("thumbnail", fs.thumb, encode_gpzp(thumb), None, thumb))
     return ReplacePlan(slot, parts, nudged, transparent, len(mask) * (FRAME_W // 2), dropped)
 
 
 def apply_plan(image: bytes, plan: ReplacePlan) -> bytes:
-    """Write every part into its slot followed by 0xFF padding to the budget. Raises BudgetError first."""
+    """Write every part into its slot followed by 0xFF padding to the budget. Raises BudgetError when a part
+    does not fit and EncodingError when one holds anything but fixed-Huffman blocks, before writing any."""
     if not plan.fits:
         raise BudgetError(plan.parts)
+    if plan.problems:
+        raise EncodingError(plan.parts)
     buf = bytearray(image)
     for p in plan.parts:
         off = p.entry.offset
@@ -915,23 +1096,48 @@ def replace_frame(image: bytes, slot: int, frame_rows: Sequence[bytes],
 # --- Extract and preview (library side) ---------------------------------------------------------------------
 
 
-def extract(image: bytes, out_dir: Path) -> List[Path]:
-    """frame-n.png (RGBA), thumb-n.png (RGB) and the raw .gpzp files (header to trailer, no padding)."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    written = []
-    for n, fs in frame_slots(image).items():
+def _same_file(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve() or os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def extract(image: bytes, out_dir: Path, overwrite: bool = False, protect: Optional[Path] = None) -> List[Path]:
+    """frame-n.png and thumb-n.png (RGBA, transparent where see-through) and the raw .gpzp files (header to
+    trailer, no padding).
+
+    Nothing is written when a target file already exists, unless `overwrite`; `protect` (the input file) is
+    never replaced. Everything is decoded before the first write, so a damaged entry leaves the folder as it
+    was.
+    """
+    slots = frame_slots(image)
+    targets: List[Path] = []
+    for n, fs in slots.items():
+        targets += [out_dir / e.display_name.lower() for e in fs.entries]
+        targets += [out_dir / f"frame-{n}.png", out_dir / f"thumb-{n}.png"]
+    existing = [p for p in targets if p.exists()]
+    if protect is not None:
+        for p in existing:
+            if _same_file(p, protect):
+                raise ValueError(f"{p} is the input file; extract into another folder")
+    if existing and not overwrite:
+        shown = ", ".join(p.name for p in existing[:5]) + (f" and {len(existing) - 5} more" if len(existing) > 5 else "")
+        raise ValueError(f"{len(existing)} file(s) already exist in {out_dir}: {shown}; "
+                         "pass --overwrite to replace them or use an empty folder")
+    contents: List[bytes] = []
+    for n, fs in slots.items():
         for e in fs.entries:
-            g = read_entry(image, e)
-            p = out_dir / (e.display_name.lower())
-            p.write_bytes(image[e.offset: e.offset + g.file_len])
-            written.append(p)
-        p = out_dir / f"frame-{n}.png"
-        png_write(p, FRAME_W, FRAME_H, frame_to_rgba(read_frame(image, n)), "RGBA")
-        written.append(p)
-        p = out_dir / f"thumb-{n}.png"
-        png_write(p, THUMB_W, THUMB_H, thumb_to_rgb(read_thumbnail(image, n)), "RGB")
-        written.append(p)
-    return written
+            contents.append(image[e.offset: e.offset + read_entry(image, e).file_len])
+        for width, height, rows in ((FRAME_W, FRAME_H, frame_to_rgba(read_frame(image, n))),
+                                    (THUMB_W, THUMB_H, thumb_to_rgba(read_thumbnail(image, n)))):
+            buf = io.BytesIO()
+            png_write(buf, width, height, rows, "RGBA")
+            contents.append(buf.getvalue())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for p, data in zip(targets, contents):
+        p.write_bytes(data)
+    return targets
 
 
 def preview(image: bytes, slot: int, photo_rows: Sequence[bytes]) -> List[bytes]:
@@ -1024,7 +1230,7 @@ def handler(args) -> int:
             _print_list(image)
             return 0
         if action == "extract":
-            for p in extract(image, Path(args.out)):
+            for p in extract(image, Path(args.out), args.overwrite, protect=src):
                 print(f"wrote {p}")
             return 0
         out = Path(args.out)
@@ -1045,6 +1251,12 @@ def handler(args) -> int:
             _print_plan(plan)
             if not plan.fits:
                 print("error: the frame does not fit its slots; nothing written")
+                return 2
+            problems = plan.problems
+            if problems:
+                names = ", ".join(p.label for p in problems)
+                print(f"error: {names} cannot be written: the camera's frames hold fixed-Huffman blocks only "
+                      "(see the line above); nothing written")
                 return 2
             new_image = apply_plan(image, plan)
             what = f"frame {args.slot} replaced by {args.png}" + (f" with thumbnail {args.thumb}" if args.thumb else " with a generated thumbnail")
@@ -1067,6 +1279,7 @@ def register(subparsers) -> None:
     p.add_argument("--photo", help="preview: an 800x600 RGB or RGBA PNG")
     p.add_argument("--png", help="replace: an 800x600 RGBA PNG; transparent pixels show the photo")
     p.add_argument("--thumb", help="replace: a 112x80 PNG for the frame menu (default: made from the frame)")
-    p.add_argument("--overwrite", action="store_true", help="allow --out to replace an existing file (never the input)")
+    p.add_argument("--overwrite", action="store_true",
+                   help="extract: replace files already in --out; preview, replace: allow --out to replace an existing file (never the input)")
     p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="replace: actually write the modified image")
     p.set_defaults(func=handler)

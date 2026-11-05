@@ -96,7 +96,7 @@ what would be stripped, how the slot would be padded) and writes nothing; with i
 ```
 charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jpg --out logo.bin
 charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jpg --out logo.bin --strip-metadata --i-understand-this-is-a-mod
-charmera pack --input logo.bin --out out/ --i-understand-this-file-flashes-a-camera
+charmera pack --input logo.bin --out out/logo/ --i-understand-this-file-flashes-a-camera
 charmera verify out/JH_5408*.bin --stock my_backup.bin --allow-modified
 ```
 

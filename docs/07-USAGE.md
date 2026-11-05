@@ -28,11 +28,25 @@ record is current (and whether UI sounds are on), and whether it holds another o
 `verify` is the gate before a card. It checks the filename checksum, the stamp, the size rule, the magic, the build, and
 reports anything that differs from stock. A FAIL line means do not use the file.
 
+`--allow-modified` accepts a software region that differs from stock: any mod of the code or the resources needs it.
+Settings-only files, such as candidates A and C, pass without it. `stage` always uses it.
+Two things it does not accept. A changed image-sensor table (`sensor-table`) fails unless `--allow-unknown-build` is
+given, and `stage` never gives it: no toolkit mod changes that table, and the wrong one is what stops other editions
+from taking pictures. A damaged resource entry (`resource-slots`) always fails: every entry's slot must lie inside the
+resource area and the file, must not be erased, and must hold the kind its name says (a WAV with fmt and data chunks that fits its slot, a JPEG
+with an FF D9 end marker inside its slot, a GPZP stream that inflates, matches its CRC and length trailer and uses only
+fixed-Huffman blocks, a GPRS pack). The camera checks none of this, and it opens the boot logo at every boot before
+it reads the card, so a damaged logo can leave a camera the SD updater cannot reach. The rules are in
+[Image layout](11-FORMAT.md#resource-entries).
+
+`diff` compares each resource entry over the larger of its two slots, so an entry erased or cut off in one file is
+named (`ERASED in B`, `MISSING from B`) instead of being skipped.
+
 ## Commands that write files on your computer
 
 ```
-charmera pack --input my_backup.bin --out out/                       # prints the plan only
-charmera pack --input my_backup.bin --out out/ --i-understand-this-file-flashes-a-camera
+charmera pack --input my_backup.bin --out out/restore/               # prints the plan only
+charmera pack --input my_backup.bin --out out/restore/ --i-understand-this-file-flashes-a-camera
 charmera sounds mute my_backup.bin --out muted.bin --method settings  # prints the plan only
 charmera sounds mute my_backup.bin --out muted.bin --method both --i-understand-this-is-a-mod
 charmera sounds replace my_backup.bin --out custom.bin --slot IMG.WAV --wav shutter.wav --i-understand-this-is-a-mod
@@ -47,6 +61,15 @@ charmera frames replace my_backup.bin --slot 1 --png frame.png --out framed.bin 
 charmera frames replace my_backup.bin --slot 1 --png frame.png --thumb thumb.png --out framed.bin --i-understand-this-is-a-mod
 charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jpg --out logo.bin --strip-metadata --i-understand-this-is-a-mod
 ```
+
+`pack` takes a 2 MiB dump (trimmed to 0x1E0000), a 0x1E0000 update file, or a software-only image of exactly 0x170000
+bytes (padded with an erased settings bank and a zeroed photo directory; the plan shows the padding, and names any
+damaged resource entry that `verify` will refuse). It refuses any
+other length below 0x1E0000 as truncated, because padding a cut-off download would put 0xFF over part of the code or
+the resource pack. `--out` must be a folder on the computer: `pack` refuses one that has a DCIM folder (that is a card;
+put the file there with `stage`) or that already holds another `JH_*.bin`. `--factory-settings` keeps only the first
+CRC-valid settings record and erases the rest of the bank; it zeroes the photo directory only when that sector is
+erased, so stored photos stay unless you add `--blank-photos`. `--stamp` takes 12 ASCII digits 0-9.
 
 `settings set` keeps everything else in the record and leaves that record as the only one in the bank. `tweak apply`
 refuses any patch whose original bytes are not where it expects them, so it cannot land on the wrong build or on

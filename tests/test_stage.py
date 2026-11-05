@@ -5,6 +5,7 @@ flag, since a tmp_path is not a mount point). One test uses the real stock dump 
 points at it. No firmware bytes are embedded here.
 """
 import argparse
+import dataclasses
 import hashlib
 import os
 import shutil
@@ -15,9 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from charmera_toolkit import checksum, image, pack, settings, stage
+from charmera_toolkit import checksum, frames, image, pack, settings, stage
 
 STAMP = "202611041200"
+# Synthetic images carry no firmware bytes, so they hold this stand-in for the image-sensor table, and the
+# synthetic_build fixture makes the build identity accept it. Tests on the real dump use the real identity.
+SENSOR_START, SENSOR_END = image.ORIGINAL_2025.sensor_table
+SYNTHETIC_SENSOR_TABLE = bytes(range(SENSOR_END - SENSOR_START))
 
 
 # --- synthetic image (same shape as tests/test_core.py builds) -----------------------------------------------
@@ -39,6 +44,7 @@ def synthetic_image(records=(), with_sounds=True):
     img[image.ORIGINAL_2025.stamp_offset: image.ORIGINAL_2025.stamp_offset + 12] = image.ORIGINAL_2025.stamp.encode()
     img[image.ORIGINAL_2025.build_offset: image.ORIGINAL_2025.build_offset + 16] = image.ORIGINAL_2025.build_string
     img[image.ORIGINAL_2025.compiled_offset: image.ORIGINAL_2025.compiled_offset + 11] = image.ORIGINAL_2025.compiled
+    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
     if with_sounds:
         base = image.RESOURCE_BASE
         img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
@@ -58,7 +64,8 @@ def synthetic_image(records=(), with_sounds=True):
                        + b"data" + struct.pack("<I", len(data)) + data)
                 img[p: p + len(wav)] = wav
             else:
-                img[p: p + 8] = b"GPZP\x00\x00\x00\x00"
+                gpzp = frames.encode_gpzp(b"\x00" * 64)   # a real fixed-Huffman stream, as verify expects
+                img[p: p + len(gpzp)] = gpzp
             off += 24
             sector += 2
     for i, rec in enumerate(records):
@@ -84,7 +91,15 @@ def run(*argv):
 
 
 @pytest.fixture
-def update_file(tmp_path):
+def synthetic_build(monkeypatch):
+    """The original-series identity with the synthetic sensor table in place of the real one."""
+    fake = dataclasses.replace(image.ORIGINAL_2025, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest())
+    monkeypatch.setitem(image.KNOWN_BUILDS, fake.key, fake)
+    return fake
+
+
+@pytest.fixture
+def update_file(tmp_path, synthetic_build):
     """A correctly named update file built from a synthetic image, in its own folder."""
     payload = pack.prepare_payload(synthetic_image([make_record()]))
     name = checksum.build_update_name(payload, STAMP)
@@ -138,7 +153,10 @@ def test_happy_path_copies_and_verifies(update_file, card, confirmed, capsys):
     assert "Plan" in out and f"destination:  {dest}" in out
     assert "read back sha256 " + hashlib.sha256(update_file.read_bytes()).hexdigest() + ": matches" in out
     assert "not a mount point" in out                       # the override is announced
-    assert "delete the" in out and "every power-on" in out  # the camera steps are printed
+    low = out.lower()
+    assert "delete the update file" in low and "every power-on" in low          # the camera steps are printed
+    assert low.index("take the card out first") < low.index("hold the power key about a second")
+    assert "millennium" in low and "photos it stored there" in low
     # Tags mirror verify: no FAIL line anywhere.
     assert not any(line.startswith("FAIL") for line in out.splitlines())
 
@@ -427,6 +445,37 @@ def test_linux_removable_through_a_fake_sysfs(tmp_path):
     assert stage.linux_removable("/dev/mmcblk0p1", str(sysfs)) is True
     assert stage.linux_removable("/tmp/not-a-device", str(sysfs)) is None
     assert stage.linux_removable("/dev/absent9", str(sysfs)) is None
+
+
+def _renamed(update_file, data, stamp="202611041201"):
+    p = update_file.with_name(checksum.build_update_name(data, stamp).filename)
+    p.write_bytes(data)
+    return p
+
+
+def test_refuses_a_changed_sensor_table(update_file, card, confirmed, capsys):
+    """verify --allow-modified does not cover the sensor table, and stage never passes --allow-unknown-build."""
+    bad = bytearray(update_file.read_bytes()); bad[SENSOR_START + 4] ^= 1
+    src = _renamed(update_file, bytes(bad))
+    assert run(str(src), "--card", str(card), OVERRIDE, "--plan-only") == 1
+    out = capsys.readouterr().out
+    assert "FAIL sensor-table" in out and "verify failed" in out and "Plan" not in out
+    assert card_files(card) == [] and not confirmed
+
+
+def test_refuses_an_erased_or_damaged_resource_entry(update_file, card, confirmed, capsys):
+    data = update_file.read_bytes()
+    entries = image.resource_directory(data)
+    last = entries[-1]
+    beep = next(e for e in entries if e.display_name == "BEEP.WAV")
+    erased = bytearray(data); erased[last.offset: last.offset + 0x200] = b"\xff" * 0x200
+    riff = bytearray(data); riff[beep.offset: beep.offset + 4] = b"XIFF"
+    for i, bad in enumerate((erased, riff)):
+        src = _renamed(update_file, bytes(bad), f"20261104120{i + 2}")
+        assert run(str(src), "--card", str(card), OVERRIDE, "--plan-only") == 1
+        out = capsys.readouterr().out
+        assert "FAIL resource-slots" in out and "verify failed" in out
+    assert card_files(card) == [] and not confirmed
 
 
 # --- against the real stock image --------------------------------------------------------------------------------

@@ -20,7 +20,10 @@ FLASH_SIZE = 0x200000
 BLOCK_SIZE = 0x10000
 PAGE_SIZE = 0x100
 
-_NAME_RE = re.compile(r"^JH_(?P<product>\d{4})(?P<stamp>\d{12})_(?P<sum>[0-9A-Fa-f]{8})\.bin$")
+# [0-9], not \d: \d also matches Arabic-Indic, full-width and other Unicode digits, and the camera reads
+# fixed ASCII character positions.
+_NAME_RE = re.compile(r"^JH_(?P<product>[0-9]{4})(?P<stamp>[0-9]{12})_(?P<sum>[0-9A-Fa-f]{8})\.bin$")
+_STAMP_RE = re.compile(r"[0-9]{12}")
 
 
 def byte_sum(data: bytes) -> int:
@@ -47,7 +50,7 @@ class UpdateName:
 
 def parse_update_name(name: str) -> UpdateName:
     """Split an update filename into its parts. Raises ValueError with the reason when it does not fit."""
-    m = _NAME_RE.match(name)
+    m = _NAME_RE.fullmatch(name)
     if not m:
         raise ValueError(
             f"{name!r} is not an update filename: expected JH_5408<12 digits>_<8 hex>.bin "
@@ -65,8 +68,8 @@ def build_update_name(data: bytes, stamp: Optional[str] = None, product: str = "
     """Name a payload the way the camera expects. The stamp must differ from the running firmware's."""
     if stamp is None:
         stamp = now_stamp()
-    if len(stamp) != 12 or not stamp.isdigit():
-        raise ValueError("stamp must be 12 digits YYYYMMDDhhmm")
+    if not _STAMP_RE.fullmatch(stamp):
+        raise ValueError("stamp must be 12 ASCII digits 0-9, YYYYMMDDhhmm")
     if stamp == STOCK_TIMESTAMP:
         raise ValueError(
             f"stamp {STOCK_TIMESTAMP} equals the stock build stamp; the updater would ignore the file"

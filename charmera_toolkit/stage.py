@@ -43,14 +43,15 @@ NOT_FAT = {"ntfs", "ntfs3", "refs", "ext2", "ext3", "ext4", "btrfs", "xfs", "f2f
            "udf", "iso9660", "tmpfs", "overlay", "nfs", "nfs4", "cifs", "smbfs"}
 
 CAMERA_STEPS = [
-    "1. Camera off. Put the card in.",
+    "1. Camera off and unplugged from any cable. Put the card in.",
     "2. Hold the power key. Within its first five seconds the camera finds the file and the screen shows the",
     "   update progress (\"Upgrade NN%\", about 15 to 20 seconds). \"Program error\" means the checksum in the name",
-    "   did not match the file; nothing was erased, remove the card and run verify again.",
+    "   did not match the file: nothing was erased and the camera switches itself off. Take the card out and run",
+    "   verify again.",
     "3. When the progress has reached 100% and the screen stops changing (the updater waits there; it does not",
-    "   restart by itself), hold the power key until the camera switches off. Take the card out, then delete the",
-    "   update file from it before using that card in the camera again: the camera does not delete the file",
-    "   and would flash again at every power-on.",
+    "   restart by itself), take the card out first, then hold the power key about a second to switch off.",
+    "4. Delete the update file from the card before the card goes back into the camera: the camera does not",
+    "   delete it and would flash again at every power-on with that card in.",
 ]
 
 
@@ -421,8 +422,10 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path) -> None:
     print(f"  destination:  {dest}")
     print(f"  how:          written as {TEMP_NAME}, flushed to the card, renamed to the final name, read back and compared")
     print()
+    print("Only for the original 2025 series (matte body, yellow Kodak boot screen); never a Millennium or CLOT edition.")
     print("Charge the camera first: a power loss during programming leaves a camera that only a chip programmer can")
-    print("recover (docs/02-RECOVERY.md). Then, on the camera:")
+    print("recover (docs/02-RECOVERY.md). The update replaces everything in the camera's own memory, including the")
+    print("photos it stored there without a card; photos on the SD card are not touched. Then, on the camera:")
     for line in CAMERA_STEPS:
         print(f"  {line}")
     print()
@@ -459,6 +462,8 @@ def handler(args) -> int:
     card_given = (args.card or "").strip()
 
     # 1. verify, exactly as the verify command would, with modified software allowed (that is what mods are).
+    # Never --allow-unknown-build: an unknown build or a changed image-sensor table is refused here, and no flag
+    # accepts a damaged resource entry.
     print(f"verify {src.name}:")
     checks = verify_update(src, image, stock=stock, allow_modified=True, allow_unknown_build=False, allow_odd_size=False)
     if print_checks(checks):

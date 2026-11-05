@@ -10,6 +10,12 @@ on:
     branches: [main]
     paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
+# One run at a time: the publish step deletes and recreates the release, so two runs at once could leave an older
+# APK behind the link or fail half way. A run that starts while another is going waits for it instead of cancelling
+# it, so a publish is never cut off between the delete and the create.
+concurrency:
+  group: android-app-release
+  cancel-in-progress: false
 permissions:
   contents: write
 jobs:

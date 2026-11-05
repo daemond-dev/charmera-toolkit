@@ -37,7 +37,8 @@ Examples for every command are in the [Command reference](docs/07-USAGE.md).
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
 
 On a phone, the [Charmera Card app](android/README.md) checks an update file and puts it on the SD card
-([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)).
+([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk);
+the repository is private, so sign in to GitHub in the phone's browser first).
 
 Ground rules baked into the commands:
 

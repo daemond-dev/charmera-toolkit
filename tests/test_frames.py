@@ -199,7 +199,7 @@ def test_png_roundtrip_both_ways_with_pillow():
 
 def test_png_rejects_other_formats(tmp_path):
     Image = pytest.importorskip("PIL.Image")
-    for mode, word in (("L", "greyscale"), ("P", "palette"), ("I;16", "16-bit"), ("LA", "alpha")):
+    for mode, word in (("I;16", "16-bit"), ("LA", "greyscale with alpha")):
         buf = io.BytesIO()
         Image.new(mode, (6, 5)).save(buf, "PNG")
         with pytest.raises(ValueError) as exc:
@@ -223,6 +223,151 @@ def test_png_rejects_other_formats(tmp_path):
     p = tmp_path / "x.png"
     frames.png_write(p, 6, 5, rows, "RGB")
     assert frames.png_read(p.read_bytes())[:3] == (6, 5, "RGB")
+
+
+def _chunked_png(w, h, depth, ctype, lines, before_idat=(), ihdr=None):
+    """A PNG built by hand from packed rows (filter 0). `before_idat` holds (tag, body) chunks such as PLTE
+    and tRNS; `ihdr` replaces the IHDR body."""
+    body = ihdr if ihdr is not None else struct.pack(">IIBBBBB", w, h, depth, ctype, 0, 0, 0)
+    out = frames.PNG_SIGNATURE + frames._png_chunk(b"IHDR", body)
+    for tag, data in before_idat:
+        out += frames._png_chunk(tag, data)
+    raw = b"".join(b"\x00" + bytes(line) for line in lines)
+    return out + frames._png_chunk(b"IDAT", zlib.compress(raw)) + frames._png_chunk(b"IEND", b"")
+
+
+def _pack(samples, depth):
+    """Samples of `depth` bits packed most significant first, the last byte padded with zero bits."""
+    per = 8 // depth
+    out = bytearray()
+    for i in range(0, len(samples), per):
+        v = 0
+        group = list(samples[i: i + per])
+        for s in group + [0] * (per - len(group)):
+            v = (v << depth) | s
+        out.append(v)
+    return bytes(out)
+
+
+def test_png_reads_greyscale_palette_and_trns_like_pillow():
+    """Greyscale and palette PNGs at every bit depth Pillow writes, and the tRNS transparency of greyscale,
+    RGB and palette files: the rows match what Pillow decodes, RGBA whenever a tRNS chunk is present."""
+    Image = pytest.importorskip("PIL.Image")
+    rng = random.Random(11)
+    w, h = 13, 7
+    grey = Image.frombytes("L", (w, h), bytes(rng.choice((5, 9, 200)) for _ in range(w * h)))
+    rgb = Image.frombytes("RGB", (w, h), bytes(rng.choice((0, 10, 200)) for _ in range(w * h * 3)))
+    cases = [(grey, {}), (grey, {"transparency": 9}), (grey.convert("1"), {}), (rgb, {"transparency": (0, 0, 0)})]
+    for ncol in (2, 4, 16, 200):            # Pillow writes these at 1, 2, 4 and 8 bits per pixel
+        pal = Image.new("P", (w, h))
+        pal.putpalette([rng.randrange(256) for _ in range(ncol * 3)])
+        pal.putdata([rng.randrange(ncol) for _ in range(w * h)])
+        cases += [(pal, {}), (pal, {"transparency": 1}), (pal, {"transparency": bytes([0, 128])})]
+    seen = set()
+    for im, opts in cases:
+        buf = io.BytesIO()
+        im.save(buf, "PNG", **opts)
+        data = buf.getvalue()
+        seen.add((data[25], data[24]))      # IHDR colour type and bit depth
+        rw, rh, mode, rows = frames.png_read(data)
+        assert (rw, rh) == (w, h)
+        assert mode == ("RGBA" if opts else "RGB"), (im.mode, opts)
+        assert b"".join(rows) == Image.open(io.BytesIO(data)).convert(mode).tobytes(), (im.mode, opts)
+    assert {(0, 1), (0, 8), (2, 8), (3, 1), (3, 2), (3, 4), (3, 8)} <= seen
+    # an RGB file whose tRNS colour is black: black pixels come back transparent, the others opaque
+    rw, rh, mode, rows = frames.png_read(_chunked_png(2, 1, 8, 2, [bytes((0, 0, 0, 0, 0, 1))], [(b"tRNS", bytes(6))]))
+    assert mode == "RGBA" and rows == [bytes((0, 0, 0, 0, 0, 0, 1, 255))]
+
+
+def test_png_low_bit_greyscale_with_trns():
+    """2- and 4-bit greyscale scale to 0..255 and match tRNS on the raw sample, masked to the bit depth as
+    the PNG specification tells decoders to."""
+    w, h = 5, 3
+    for depth in (1, 2, 4, 8):
+        top = (1 << depth) - 1
+        samples = [[(x + 2 * y) % (top + 1) for x in range(w)] for y in range(h)]
+        data = _chunked_png(w, h, depth, 0, [_pack(r, depth) for r in samples], [(b"tRNS", struct.pack(">H", 0xFF00 | 1))])
+        rw, rh, mode, rows = frames.png_read(data)
+        assert (rw, rh, mode) == (w, h, "RGBA")
+        for y in range(h):
+            expect = b"".join(bytes([s * (255 // top)] * 3 + [0 if s == 1 else 255]) for s in samples[y])
+            assert rows[y] == expect, (depth, y)
+        rw, rh, mode, rows = frames.png_read(_chunked_png(w, h, depth, 0, [_pack(r, depth) for r in samples]))
+        assert mode == "RGB" and rows[0] == b"".join(bytes([s * (255 // top)] * 3) for s in samples[0])
+
+
+def test_png_malformed_chunks_are_messages(tmp_path, capsys):
+    """Every malformed header or chunk is a ValueError naming the problem, never a struct.error or an
+    IndexError, and the commands print it as an error instead of a traceback."""
+    line = bytes(6 * 3)
+    ihdr = struct.pack(">IIBBBBB", 6, 5, 8, 2, 0, 0, 0)
+    good = _chunked_png(6, 5, 8, 2, [line] * 5)
+    assert frames.png_read(good)[3] == [line] * 5
+    plte2 = (b"PLTE", bytes(6))
+    cases = {
+        "IHDR chunk is 12 bytes": _chunked_png(6, 5, 8, 2, [line] * 5, ihdr=ihdr[:12]),
+        "IHDR chunk is 14 bytes": _chunked_png(6, 5, 8, 2, [line] * 5, ihdr=ihdr + b"\x00"),
+        "instead of IHDR": frames.PNG_SIGNATURE + frames._png_chunk(b"tEXt", b"a\x00b") + good[8:],
+        "second IHDR": good[:33] + frames._png_chunk(b"IHDR", ihdr) + good[33:],
+        "colour type 5": _chunked_png(6, 5, 8, 5, [line] * 5),
+        "bit depth 4 for colour type 2": _chunked_png(6, 5, 4, 2, [line] * 5),
+        "0x5": _chunked_png(0, 5, 8, 2, [b""] * 5),
+        "interlace method 2": _chunked_png(6, 5, 8, 2, [line] * 5, ihdr=ihdr[:12] + b"\x02"),
+        "no PLTE": _chunked_png(6, 5, 8, 3, [bytes(6)] * 5),
+        "PLTE chunk is 4 bytes": _chunked_png(6, 5, 8, 3, [bytes(6)] * 5, [(b"PLTE", bytes(4))]),
+        "palette entry 3": _chunked_png(6, 5, 8, 3, [bytes((0, 1, 3, 0, 0, 0))] * 5, [plte2]),
+        "tRNS chunk is 3 bytes, expected 2": _chunked_png(6, 5, 8, 0, [bytes(6)] * 5, [(b"tRNS", bytes(3))]),
+        "tRNS chunk is 4 bytes, expected 6": _chunked_png(6, 5, 8, 2, [line] * 5, [(b"tRNS", bytes(4))]),
+        "tRNS chunk is 3 bytes, expected at most 2": _chunked_png(6, 5, 8, 3, [bytes(6)] * 5, [plte2, (b"tRNS", bytes(3))]),
+    }
+    for words, data in cases.items():
+        with pytest.raises(ValueError) as exc:
+            frames.png_read(data)
+        assert words in str(exc.value), (words, str(exc.value))
+    # a tRNS chunk next to an alpha channel is not allowed by PNG and changes nothing
+    rgba = _chunked_png(1, 1, 8, 6, [bytes((1, 2, 3, 200))], [(b"tRNS", bytes(6))])
+    assert frames.png_read(rgba) == (1, 1, "RGBA", [bytes((1, 2, 3, 200))])
+    # random damage inside the chunks, CRCs fixed up so the reader looks at the contents: ValueError or a result
+    rng = random.Random(9)
+    bases = [good, _chunked_png(6, 5, 2, 3, [_pack([0, 1, 2, 1, 0, 2], 2)] * 5, [(b"PLTE", bytes(range(9))), (b"tRNS", b"\x00")]),
+             _chunked_png(6, 5, 4, 0, [_pack([0, 1, 2, 15, 0, 3], 4)] * 5, [(b"tRNS", b"\x00\x03")]),
+             _chunked_png(6, 5, 8, 2, [line] * 5, [(b"tRNS", bytes(6))])]
+    for _ in range(600):
+        data = bytearray(rng.choice(bases))
+        spans, pos = [], 8
+        while pos < len(data):
+            ln = struct.unpack_from(">I", data, pos)[0]
+            spans.append((pos, ln))
+            pos += 12 + ln
+        pos, ln = rng.choice(spans)
+        body = bytearray(data[pos + 8: pos + 8 + ln])
+        if body and rng.random() < 0.6:
+            body[rng.randrange(len(body))] = rng.randrange(256)
+        elif rng.random() < 0.5:
+            body = body[: rng.randrange(len(body) + 1)]
+        else:
+            body += bytes(rng.randrange(256) for _ in range(rng.randrange(1, 4)))
+        tag = bytes(data[pos + 4: pos + 8])
+        data[pos: pos + 12 + ln] = frames._png_chunk(tag, bytes(body))
+        try:
+            frames.png_read(bytes(data))
+        except ValueError:
+            pass
+    # the commands that read PNGs print the problem and exit 2
+    img = synthetic_frame_image(slot=1)
+    src = tmp_path / "src.bin"
+    src.write_bytes(img)
+    short = tmp_path / "short_ihdr.png"
+    short.write_bytes(cases["IHDR chunk is 12 bytes"])
+    frame = tmp_path / "frame.png"
+    frames.png_write(frame, W, H, border_frame(), "RGBA")
+    for argv in (("replace", "--slot", "1", "--png", str(short)),
+                 ("replace", "--slot", "1", "--png", str(frame), "--thumb", str(short)),
+                 ("preview", "--slot", "1", "--photo", str(short))):
+        out = tmp_path / "out.bin"
+        assert run("frames", argv[0], str(src), *argv[1:], "--out", str(out), GATE) == 2, argv
+        text = capsys.readouterr().out
+        assert "error:" in text and "IHDR chunk is 12 bytes" in text and not out.exists()
 
 
 # --- GPZP container -------------------------------------------------------------------------------------------
@@ -266,6 +411,38 @@ def test_gpzp_container_synthetic():
         frames.decode_gpzp(b"RIFF" + blob[4:])
     with pytest.raises(ValueError):
         frames.decode_gpzp(blob[:20])
+
+
+def _gpzp(stream, payload):
+    return b"GPZP" + stream + struct.pack("<II", zlib.crc32(payload) & 0xFFFFFFFF, len(payload))
+
+
+def test_fixed_huffman_only_refuses_stored_blocks():
+    """Fixed-Huffman only means every block: a stored block, alone or after fixed ones, does not pass, and
+    encoding_problem says why a GPZP file holding one must not be written."""
+    text = b"".join(f"line {i} of the test, value {i * i}\n".encode() for i in range(400))
+    c = zlib.compressobj(0, zlib.DEFLATED, -15)
+    stored = c.compress(text) + c.flush()
+    assert {kind for kind, _ in frames.deflate_blocks(stored)} == {"stored"}
+    assert not frames.fixed_huffman_only(stored)
+    # a fixed block, then an empty stored block (what a full flush writes), then the final fixed block
+    c = zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_FIXED)
+    mixed = c.compress(text) + c.flush(zlib.Z_FULL_FLUSH) + c.compress(text) + c.flush()
+    assert [kind for kind, _ in frames.deflate_blocks(mixed)] == ["fixed", "stored", "fixed"]
+    assert not frames.fixed_huffman_only(mixed)
+    c = zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_FIXED)
+    fixed = c.compress(text) + c.flush()
+    assert frames.fixed_huffman_only(fixed)
+    assert frames.encoding_problem(_gpzp(fixed, text), text) is None
+    problem = frames.encoding_problem(_gpzp(stored, text), text)
+    assert "too noisy" in problem and f"{len(text):,} bytes" in problem and "stored" in problem
+    assert "stored" in frames.encoding_problem(_gpzp(mixed, text + text), text + text)
+    dyn = zlib.compressobj(9, zlib.DEFLATED, -15)
+    assert "dynamic" in frames.encoding_problem(_gpzp(dyn.compress(text) + dyn.flush(), text), text)
+    # a file that does not read back, or reads back to other data, is refused too
+    assert "does not read back" in frames.encoding_problem(_gpzp(fixed, text)[:-8] + bytes(8), text)
+    assert "does not read back" in frames.encoding_problem(_gpzp(fixed, text), text[:-1] + b"?")
+    assert "does not read back" in frames.encoding_problem(_gpzp(fixed, text) + b"\xff", text)
 
 
 def test_gpzp_roundtrip_on_every_stock_entry(stock_image):
@@ -577,6 +754,75 @@ def test_replace_cli_synthetic(tmp_path, capsys):
     check_replace_cli(synthetic_frame_image(slot=3), 3, tmp_path, capsys)
 
 
+def noise_band_frame(y0=200, y1=214, seed=11):
+    """See-through except rows y0..y1-1, which hold full-range random colour (a glitter band): the case where
+    zlib's Z_FIXED strategy stores most of that strip raw in a stored block."""
+    rng = random.Random(seed)
+    rows = transparent_rows()
+    for y in range(y0, y1):
+        px = rng.randbytes(W * 3)
+        for c in range(3):
+            rows[y][c::4] = px[c::3]
+        rows[y][3::4] = b"\xff" * W
+    return [bytes(r) for r in rows]
+
+
+def check_stored_band_refused(img, slot, tmp_path, capsys):
+    """replace must refuse the noise band even though strip 1 fits its budget: dry run and gated run both
+    exit 2 naming the band, and nothing is written."""
+    rows = noise_band_frame()
+    plan = frames.plan_replacement(img, slot, rows)
+    kinds = [kind for kind, _ in frames.deflate_blocks(plan.parts[1].data[4:-8])]
+    if ZLIB_NG and "stored" not in kinds:
+        pytest.skip("this zlib build does not store the noise band")
+    assert "stored" in kinds
+    assert plan.fits                                    # the budget alone would let it through
+    assert [p.label for p in plan.problems] == ["strip 1"]
+    line = plan.parts[1].describe()
+    assert "too noisy" in line and "stored" in line and "rows 200-399" in line and "fits" not in line
+    with pytest.raises(frames.EncodingError) as exc:
+        frames.apply_plan(img, plan)
+    assert "strip 1:" in str(exc.value)
+    with pytest.raises(ValueError):
+        frames.replace_frame(img, slot, rows)
+    src = tmp_path / "src.bin"
+    src.write_bytes(img)
+    png = tmp_path / "band.png"
+    frames.png_write(png, W, H, rows, "RGBA")
+    out = tmp_path / "band.bin"
+    for extra in ((), (GATE,)):
+        assert run("frames", "replace", str(src), "--slot", str(slot), "--png", str(png), "--out", str(out), *extra) == 2
+        text = capsys.readouterr().out
+        assert "too noisy" in text and "rows 200-399" in text and "strip 1 cannot be written" in text
+        assert "nothing written" in text and "dry run" not in text and not out.exists()
+
+
+def test_replace_refuses_stored_blocks_synthetic(tmp_path, capsys):
+    img = synthetic_frame_image(slot=3, budgets=(20480, 20480, 20480, 2048))
+    check_stored_band_refused(img, 3, tmp_path, capsys)
+    # the write path checks every part itself: a hand-altered plan cannot slip a bad file through
+    good = frames.plan_replacement(img, 3, border_frame())
+    assert good.problems == [] and frames.apply_plan(img, good)
+    part = good.parts[0]
+    original = part.data
+    dyn = zlib.compressobj(9, zlib.DEFLATED, -15)
+    for data, words in ((original[:-8] + bytes(8), "does not read back"),
+                        (frames.encode_gpzp(part.payload[:-1] + bytes([part.payload[-1] ^ 1])), "does not read back"),
+                        (_gpzp(dyn.compress(part.payload) + dyn.flush(), part.payload), "dynamic")):
+        part.data = data
+        assert part.fits and words in part.problem
+        with pytest.raises(frames.EncodingError, match=words):
+            frames.apply_plan(img, good)
+    part.data = original
+    assert frames.apply_plan(img, good)
+
+
+def test_replace_refuses_stored_blocks_on_stock(stock_image, tmp_path, capsys):
+    """Frame 3's middle band (F_3_001, 18,944 bytes) is one of the two stock slots big enough for a stored
+    block; a 14-row noise band reaches it and fits the budget."""
+    check_stored_band_refused(stock_image, 3, tmp_path, capsys)
+
+
 def test_list_extract_preview_cli_synthetic(tmp_path, capsys):
     img = synthetic_frame_image(slot=2)
     src = tmp_path / "src.bin"
@@ -595,7 +841,7 @@ def test_list_extract_preview_cli_synthetic(tmp_path, capsys):
     w, h, mode, rows = frames.png_read((out_dir / "frame-2.png").read_bytes())
     assert (w, h, mode) == (W, H, "RGBA")
     assert [r[3::4] for r in rows] == [r[3::4] for r in border_frame()]
-    assert frames.png_read((out_dir / "thumb-2.png").read_bytes())[:3] == (TW, TH, "RGB")
+    assert frames.png_read((out_dir / "thumb-2.png").read_bytes())[:3] == (TW, TH, "RGBA")
     capsys.readouterr()
     # preview
     photo = tmp_path / "photo.png"
@@ -627,6 +873,106 @@ def test_list_extract_preview_cli_synthetic(tmp_path, capsys):
     assert "no frames found" in capsys.readouterr().out
     assert run("frames", "extract", str(plain), "--out", str(tmp_path / "ex2")) == 0
     assert not list((tmp_path / "ex2").iterdir())
+
+
+def test_extract_refuses_to_overwrite(tmp_path, capsys):
+    """A second extract into the same folder must not destroy a PNG the user edited there: it refuses
+    before writing anything unless --overwrite is given, and never replaces the input file."""
+    img = synthetic_frame_image(slot=2)
+    src = tmp_path / "src.bin"
+    src.write_bytes(img)
+    out_dir = tmp_path / "ex"
+    assert run("frames", "extract", str(src), "--out", str(out_dir)) == 0
+    capsys.readouterr()
+    edited = out_dir / "frame-2.png"
+    frames.png_write(edited, W, H, border_frame((30, 90, 200), 32), "RGBA")
+    mine = edited.read_bytes()
+    assert run("frames", "extract", str(src), "--out", str(out_dir)) == 2
+    text = capsys.readouterr().out
+    assert "6 file(s) already exist" in text and "frame-2.png" in text and "--overwrite" in text and "wrote" not in text
+    assert edited.read_bytes() == mine
+    # one existing target is enough, and then nothing else is written either
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "thumb-2.png").write_bytes(b"mine")
+    with pytest.raises(ValueError, match="1 file"):
+        frames.extract(img, other)
+    assert [p.name for p in other.iterdir()] == ["thumb-2.png"] and (other / "thumb-2.png").read_bytes() == b"mine"
+    # --overwrite replaces them
+    assert run("frames", "extract", str(src), "--out", str(out_dir), "--overwrite") == 0
+    assert "wrote" in capsys.readouterr().out and edited.read_bytes() != mine
+    # never the input, even with --overwrite
+    inside = out_dir / "f_2_000.gpzp"
+    inside.write_bytes(img)
+    assert run("frames", "extract", str(inside), "--out", str(out_dir), "--overwrite") == 2
+    assert "is the input file" in capsys.readouterr().out and inside.read_bytes() == img
+    # a damaged entry stops extract before its first write
+    bad = bytearray(img)
+    e = frames.frame_slots(img)[2].strips[2]
+    bad[e.offset + 4: e.offset + 40] = b"\x00" * 36
+    fresh = tmp_path / "fresh"
+    with pytest.raises(ValueError):
+        frames.extract(bytes(bad), fresh)
+    assert not fresh.exists() or not list(fresh.iterdir())
+
+
+def test_thumbnail_extract_and_replace_keep_the_key(tmp_path, capsys):
+    """thumb-n.png marks the key grey as transparent, and a thumbnail passed back with --thumb keeps its
+    key pixels: transparent ones, and opaque ones of the key grey (an RGB thumbnail's way of saying it)."""
+    img = synthetic_frame_image(slot=2)
+    src = tmp_path / "src.bin"
+    src.write_bytes(img)
+    out_dir = tmp_path / "ex"
+    assert run("frames", "extract", str(src), "--out", str(out_dir)) == 0
+    orig = frames.read_thumbnail(img, 2)
+    key = [struct.unpack_from("<H", orig, 2 * i)[0] == frames.KEY_RGB565 for i in range(TW * TH)]
+    assert any(key) and not all(key)
+    w, h, mode, rows = frames.png_read((out_dir / "thumb-2.png").read_bytes())
+    assert (w, h, mode) == (TW, TH, "RGBA")
+    alpha = b"".join(r[3::4] for r in rows)
+    assert [a == 0 for a in alpha] == key and set(alpha) == {0, 255}
+    assert rows == frames.thumb_to_rgba(orig)
+    assert [bytes(b for i, b in enumerate(r) if i % 4 != 3) for r in rows] == frames.thumb_to_rgb(orig)   # grey kept
+    capsys.readouterr()
+    frame_png = str(out_dir / "frame-2.png")
+    rgb_thumb = tmp_path / "thumb-rgb.png"
+    frames.png_write(rgb_thumb, TW, TH, frames.thumb_to_rgb(orig), "RGB")
+    for n, thumb in enumerate((out_dir / "thumb-2.png", rgb_thumb)):
+        out = tmp_path / f"back{n}.bin"
+        assert run("frames", "replace", str(src), "--slot", "2", "--png", frame_png, "--thumb", str(thumb), "--out", str(out), GATE) == 0
+        capsys.readouterr()
+        assert frames.read_thumbnail(out.read_bytes(), 2) == orig, thumb
+    # the rule itself: a supplied thumbnail keeps the key grey, the generated one still nudges it
+    grey = [bytes((136, 140, 136, 255)) * TW] * TH
+    assert frames.rgb_to_thumb(grey, keep_key_grey=True) == struct.pack("<H", frames.KEY_RGB565) * (TW * TH)
+    assert frames.rgb_to_thumb(grey) == struct.pack("<H", frames.KEY_RGB565 + 1) * (TW * TH)
+
+
+def test_replace_honours_trns_transparency(tmp_path, capsys):
+    """The same design as RGBA, as RGB with a tRNS transparent colour (Pillow's transparency=, ImageMagick's
+    PNG24:) and as a palette with tRNS gives the same frame, see-through area included."""
+    Image = pytest.importorskip("PIL.Image")
+    img = synthetic_frame_image(slot=1)
+    rgba = border_frame((220, 40, 40), 24)          # see-through pixels are (0, 0, 0, 0)
+    ref = frames.plan_replacement(img, 1, rgba)
+    assert ref.transparent_pairs > 0
+    rgb_png = tmp_path / "trns-rgb.png"
+    Image.frombytes("RGBA", (W, H), b"".join(rgba)).convert("RGB").save(rgb_png, transparency=(0, 0, 0))
+    pal = Image.new("P", (W, H))
+    pal.putpalette([0, 0, 0, 220, 40, 40])
+    pal.putdata([1 if px[3] else 0 for px in zip(*[iter(b"".join(rgba))] * 4)])
+    pal_png = tmp_path / "trns-palette.png"
+    pal.save(pal_png, transparency=0)
+    src = tmp_path / "src.bin"
+    src.write_bytes(img)
+    for png in (rgb_png, pal_png):
+        rows = frames._load_png(png, W, H, "frame")
+        plan = frames.plan_replacement(img, 1, rows)
+        assert plan.transparent_pairs == ref.transparent_pairs, png
+        assert [p.data for p in plan.parts] == [p.data for p in ref.parts], png
+        assert run("frames", "replace", str(src), "--slot", "1", "--png", str(png), "--out", str(tmp_path / "x.bin")) == 0
+        text = capsys.readouterr().out
+        assert f"{ref.transparent_pairs:,} of 240,000 pixel pairs see-through" in text and "nothing is transparent" not in text
 
 
 def test_frames_help_and_registration():
@@ -742,3 +1088,23 @@ def test_stock_frames_survive_extract_and_replace(stock_image, tmp_path, capsys)
                 assert all(abs(a - c) <= 2 for a, c in zip(rp[b + off: b + off + W], orig[b + off: b + off + W])), (n, p)
         assert len(frames.read_thumbnail(new, n)) == frames.THUMB_BYTES
     assert src.read_bytes() == stock_image
+
+
+def test_stock_thumbnails_survive_extract_and_replace(stock_image, tmp_path, capsys):
+    """thumb-n.png passed back with --thumb gives the stock thumbnail word for word, key grey included
+    (PV001 holds 6,101 words of 0x8C71), and its stream fits the stock slot."""
+    src = tmp_path / "src.bin"
+    src.write_bytes(stock_image)
+    out_dir = tmp_path / "ex"
+    assert run("frames", "extract", str(src), "--out", str(out_dir)) == 0
+    capsys.readouterr()
+    for n in range(4):
+        orig = frames.read_thumbnail(stock_image, n)
+        keys = sum(1 for i in range(TW * TH) if struct.unpack_from("<H", orig, 2 * i)[0] == frames.KEY_RGB565)
+        if n == 1:
+            assert keys == 6101
+        out = tmp_path / f"thumb{n}.bin"
+        assert run("frames", "replace", str(src), "--slot", str(n), "--png", str(out_dir / f"frame-{n}.png"),
+                   "--thumb", str(out_dir / f"thumb-{n}.png"), "--out", str(out), GATE) == 0, n
+        assert "over by" not in capsys.readouterr().out
+        assert frames.read_thumbnail(out.read_bytes(), n) == orig, n

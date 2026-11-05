@@ -22,8 +22,10 @@ to the end before deciding anything.
    Edition (blue boot screen) or a CLOT edition, go to [section D](#d-wrong-edition) first, whatever else is wrong.
 2. Does the camera power on and get far enough to mount the SD card (it shows the live view, plays back
    photos, or reacts to a card)? Yes: [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card). No: [section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
-3. Was an update or a clip write interrupted (battery died, cable pulled, power cycled at "not
-   poweroff")? Read [section C](#c-an-interrupted-flash), which will send you to A or B.
+3. Was an update interrupted before it reached 100% (battery died, card pulled, camera switched off while
+   "Upgrade NN%" was still counting), or a clip write cut short (cable or clip pulled)? Read
+   [section C](#c-an-interrupted-flash), which will send you to A or B. An update that reached 100% and was
+   then switched off with the power key finished normally; that is how every update ends.
 
 ## A. The camera boots and the updater runs: restore through the SD card
 
@@ -31,16 +33,20 @@ The SD updater is the gentle route. It cannot help a camera that does not boot f
 card (VERIFIED from the SDK source: the updater is part of the firmware that is already running). The same
 steps, for a first flash of a modified file rather than a restore, are in [The first flash](01-FIRST-FLASH.md).
 
-What the updater does (VERIFIED from the SDK source and hardware reports):
+What the updater does (VERIFIED from the SDK source, the firmware itself and hardware reports; the long form
+is [Research report, section 4](13-PHASE1-REPORT.md#4-the-sd-updater-flow)):
 
-- It scans the card root for a file named `JH_5408<12-digit timestamp>_<8 hex digits>.bin`.
+- It looks only during the first 5 seconds after power-on, so the card must be in before the camera is
+  switched on, and only in the card root, for a file named `JH_5408<12-digit timestamp>_<8 hex digits>.bin`.
 - The 8 hex digits are the unsigned 32-bit sum of every byte of the file. That sum is the only integrity
   check. A wrong sum shows "Program error" on the screen and nothing is erased.
 - The 12-digit timestamp must differ from the stamp compiled into the running firmware
   (`202505201029` on the original series), or the file is ignored (VERIFIED, see
   `charmera_toolkit/checksum.py`).
 - With a correct sum it erases the flash in 64 KiB blocks from offset 0, programs 256-byte pages and
-  verifies them, then shows "not poweroff" and waits for the card to be removed.
+  verifies them. "Upgrade NN%" advances once per 64 KiB block. At 100% the camera stays on its last screen:
+  nothing reboots by itself, and the updater never deletes or renames the file. Holding the power key about a
+  second switches the camera off.
 - Published update files are `0x1E0000` bytes (30 blocks). Do not put a full 2 MiB dump on the card: the
   toolkit's `verify` refuses it, and one owner reports a bricked camera from doing so (REPORTED). `pack`
   trims your dump to the right size; the last 128 KiB are blank in every known dump, so nothing is lost.
@@ -50,7 +56,7 @@ Steps:
 1. Build the update file from your own backup. `pack` prints a plan first and writes nothing:
 
    ```
-   python -m charmera_toolkit pack --input <your backup>.bin --out out/
+   python -m charmera_toolkit pack --input <your backup>.bin --out out/restore/
    ```
 
    Read the plan. When it is what you expect, run the same command again with the gate flag that `pack`
@@ -68,24 +74,32 @@ Steps:
 3. Copy only that one `.bin` file to the root of the card the camera normally uses. Leave the `.sha256`
    and the manifest on the computer. `charmera stage` does this copy with its checks
    ([Putting the file on the card](04-STAGE.md)); from a phone, see [Using an Android phone](06-ANDROID.md).
+   Eject the card (Safely Remove, `udisksctl unmount`, the file manager's or Android's eject) before you take
+   it out of the reader or the phone.
 
-4. Put the card in, with a charged battery: an update that loses power part way is [section C](#c-an-interrupted-flash). Power on.
-   The updater finds the file and shows its progress on the screen.
+4. Check the body once more: original 2025 series only, matte with the yellow Kodak boot screen, never a
+   Millennium or CLOT edition ([section D](#d-wrong-edition)). Charge the battery fully and unplug the cable:
+   an update that loses power part way is [section C](#c-an-interrupted-flash). With the camera off, put
+   the card in, then power on. The updater finds the file and shows "Upgrade NN%" counting up, about 15 to 20
+   seconds in all.
 
-5. Do not power off and do not pull the card while it is programming. When the screen shows
-   "not poweroff" and the progress is complete, remove the card. The camera waits for exactly that.
+5. Do not power off and do not pull the card while it counts. At 100% the camera stays on its last screen
+   and does not reboot by itself. Take the card out, then hold the power key about a second until the camera
+   switches off.
 
-6. Power the camera off and on again. It should boot normally.
+6. Power the camera on without the card. It should boot normally.
 
-7. Delete the update file from the card before you use the card again. The updater looks for the file
-   whenever it mounts the card (VERIFIED), so leaving it there invites another run.
+7. Delete the update file from the card before you use the card again. The camera never deletes it, and
+   the updater looks at the card in the first 5 seconds after every power-on (VERIFIED), so a card left with
+   the file in it flashes again at the next power-on.
 
 If the screen shows "Program error": the byte sum in the filename does not match the file. Nothing was
-erased (VERIFIED). Power off, take the card out, delete the file, rebuild it with `pack` and check it with
-`verify` before trying again. A file renamed by hand or truncated by a bad copy is the usual cause.
+erased (VERIFIED), and the camera switches itself off. Take the card out, delete the file, rebuild it with
+`pack` and check it with `verify` before trying again. A file renamed by hand or truncated by a bad copy is
+the usual cause.
 
-If the camera powers off during step 5, the flash holds a partly erased or partly written firmware and the
-camera will most likely not boot. That is [section C](#c-an-interrupted-flash).
+If the camera loses power before 100% in step 5, the flash holds a partly erased or partly written firmware
+and the camera will most likely not boot. That is [section C](#c-an-interrupted-flash).
 
 ## B. The camera does not boot: read and write the flash chip directly
 

@@ -136,8 +136,16 @@ def explain_settings(a: bytes, b: bytes) -> List[str]:
     return lines
 
 
+def _erased(data: bytes) -> bool:
+    return bool(data) and data == b"\xff" * len(data)
+
+
 def explain_resources(a: bytes, b: bytes) -> List[str]:
-    """Entry-level view of the resource pack: which named resources differ."""
+    """Entry-level view of the resource pack: which named resources differ.
+
+    Each entry is compared over the larger of its two budgets. The last entry's budget comes from where the
+    data ends in that file, so an erased or cut-off last entry has a budget of 0 in that file; comparing over
+    the smaller budget would hide exactly that damage."""
     lines = []
     try:
         da, db = img.resource_directory(a), img.resource_directory(b)
@@ -154,17 +162,33 @@ def explain_resources(a: bytes, b: bytes) -> List[str]:
             continue
         if ea.offset != eb.offset:
             lines.append(f"  {name}: moved {ea.offset:#x} -> {eb.offset:#x}")
-        size = min(ea.budget or 0, eb.budget or 0)
+        size = max(ea.budget or 0, eb.budget or 0)
         pa = a[ea.offset: ea.offset + size]
         pb = b[eb.offset: eb.offset + size]
-        if pa != pb:
-            count, _, _ = differing_ranges(pa, pb, ea.offset)
-            lines.append(f"  {name}: {count} differing byte(s) within its {size} byte slot")
+        if pa == pb:
+            continue
+        count, _, _ = differing_ranges(pa, pb, ea.offset)
+        missing = abs(len(pa) - len(pb))
+        if _erased(pb) and not _erased(pa):
+            what = f"ERASED in B (all {len(pb)} bytes of its slot are 0xFF; {count} differ)"
+        elif _erased(pa) and not _erased(pb):
+            what = f"ERASED in A (all {len(pa)} bytes of its slot are 0xFF; {count} differ)"
+        else:
+            what = f"{count} differing byte(s) within its {size} byte slot"
+        if missing:
+            short = "B" if len(pb) < len(pa) else "A"
+            what += f", and {missing} byte(s) of it are MISSING from {short} (the file ends before the slot does)"
+        lines.append(f"  {name}: {what}")
     for name in names_b:
         if name not in names_a:
             lines.append(f"  {name}: only in B")
     if not lines:
-        lines.append("  every resource entry is byte-identical")
+        pack_a, pack_b = a[img.RESOURCE_BASE: img.SOFTWARE_END], b[img.RESOURCE_BASE: img.SOFTWARE_END]
+        if pack_a == pack_b:
+            lines.append("  every resource entry is byte-identical")
+        else:
+            lines.append("  every resource entry is byte-identical; the differing bytes lie outside the entries "
+                         "(pack header, directory, or the padding after the last entry)")
     return lines
 
 
@@ -204,7 +228,7 @@ def handler(args) -> int:
         if rd.name == "settings bank" and (rd.differing or rd.only_in):
             for line in explain_settings(a, b):
                 print(line)
-        if rd.name == "resource pack (GP+)" and rd.differing:
+        if rd.name == "resource pack (GP+)" and (rd.differing or rd.only_in):
             for line in explain_resources(a, b):
                 print(line)
     print(f"total: {total} differing byte(s) over the common length")

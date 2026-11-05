@@ -3,6 +3,7 @@
 #
 #   SDK=/path/to/android-sdk ./build.sh [versionName] [versionCode]
 #
+# versionName defaults to the one in VERSION, versionCode to the current UTC date and hour.
 # Needs the Android SDK with "platforms;android-35" and "build-tools;35.0.0", a JDK 17 or newer, and zip.
 # Signing: KEYSTORE, KS_ALIAS and KS_PASS name your key. Without them a throwaway key is made in out/; an APK
 # signed with a different key than the installed one cannot be installed over it (uninstall first).
@@ -12,7 +13,7 @@ cd "$(dirname "$0")"
 SDK=${SDK:-${ANDROID_HOME:-/opt/android/sdk}}
 BT=$SDK/build-tools/35.0.0
 AJ=$SDK/platforms/android-35/android.jar
-VER=${1:-0.1}
+VER=${1:-$(cat VERSION)}
 CODE=${2:-$(date -u +%y%m%d%H)}
 KEYSTORE=${KEYSTORE:-out/throwaway.keystore}
 KS_ALIAS=${KS_ALIAS:-charmera}
@@ -26,9 +27,11 @@ done
 rm -rf out/build out/test
 mkdir -p out/build/classes out/build/gen out/test
 
-echo "1/4 checker tests"
-javac -encoding UTF-8 -d out/test src/io/github/daemonddev/charmera/UpdateCheck.java test/UpdateCheckTest.java
+echo "1/4 checker and card tests"
+javac -encoding UTF-8 -d out/test src/io/github/daemonddev/charmera/UpdateCheck.java \
+    src/io/github/daemonddev/charmera/CardState.java test/UpdateCheckTest.java test/CardStateTest.java
 java -cp out/test UpdateCheckTest
+java -cp out/test io.github.daemonddev.charmera.CardStateTest
 
 echo "2/4 resources"
 "$BT/aapt2" compile --dir res -o out/build/res.zip

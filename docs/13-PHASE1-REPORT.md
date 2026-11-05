@@ -133,7 +133,7 @@ Works whenever the camera gets far enough to mount the card, which the reports s
 
 1. Build the update file from your own backup with `pack` (0x1E0000 bytes, fresh stamp, byte-sum name) and run `verify` on it.
 2. FAT32 card (the camera's exFAT formatting also works for reading the update, but FAT32 avoids the Android problem), only that one `JH_5408*.bin` in the root.
-3. Camera off, card in, power on. Screen shows "Upgrade 0%" to "100%" in roughly 15 to 20 seconds, then "not poweroff" style wait. Remove the card, power off with the button, power on.
+3. Camera off, card in, power on. Screen shows "Upgrade 0%" to "100%" in roughly 15 to 20 seconds, then stays on that screen (section 4 step 6). Remove the card, then hold the power key about a second to switch off; power on.
 4. Delete the file from the card; the camera would flash again on every boot with that card.
 
 Failure modes: wrong checksum in the name → "Program error", nothing erased, camera turns itself off (safe). Power loss during the 15 seconds → the chip is partly erased and the camera will not boot; only path 6.2 remains. A file whose length is not a multiple of 256 bytes gets stale bytes in its last page; a file shorter than 0x1E0000 moves the final erase into the settings bank or the photo area (section 4); keep to 0x1E0000. A full 2 MiB file → the final erase targets 0x210000, beyond the chip; what the Puya part does with that address is UNKNOWN and one owner reports a brick after an SD update, cause unconfirmed. Never send a 2 MiB file. The card must be inserted before power-on (the updater only arms in the first 5 seconds), and the file is never deleted by the camera.

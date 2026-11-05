@@ -64,30 +64,41 @@ a refused volume, a failed write or read-back); 2 a usage problem or no confirma
 
 ## The sequence on the camera
 
-Charge the camera first. Programming takes 15 to 20 seconds and a power loss in that window leaves a camera
-that only a chip programmer can bring back ([Recovery](02-RECOVERY.md)). Whether the updater runs on USB power without
-a battery is not known.
+Before you start: only an original 2025 series body (matte, yellow Kodak boot screen; never a Millennium or
+CLOT edition, [Recovery, section D](02-RECOVERY.md#d-wrong-edition)). Charge the battery fully, then unplug the
+cable. Programming takes 15 to 20 seconds and a power loss in that window leaves a camera that only a chip
+programmer can bring back ([Recovery](02-RECOVERY.md)). Whether the updater runs on USB power without a battery
+is not known. Any update file replaces the photos the camera stores in its own memory; the
+[flash candidates](03-FLASH-CANDIDATES.md) and any file packed with `--blank-photos` erase them.
 
 1. Camera off. Put the card in. Then, and only then, power on: the updater arms only during the first five
    seconds after power-on and does not notice a card inserted later.
-2. Hold the power key. The screen shows "Upgrade 0%" counting up to 100%. "Program error" means the checksum
-   in the name did not match the file; nothing was erased, remove the card and run `verify` again.
-3. At 100% the screen stops changing. The updater waits there and does not restart the camera by itself. Hold
-   the power key until the camera switches off. Take the card out. Then power on without the card and check
-   the boot screen, the live view and a shutter press.
-4. Delete the update file from the card before using that card in the camera again. Leave it there and the
-   camera flashes it again at every power-on. `stage` on the same card refuses until the old file is gone.
+2. Hold the power key. The screen shows "Upgrade 0%" counting up to 100%, one step per 64 KiB block.
+   "Program error" means the checksum in the name did not match the file; nothing was erased and the camera
+   switches itself off. Remove the card and run `verify` again.
+3. At 100% the camera stays on its last screen. Nothing reboots by itself, and the updater never deletes or
+   renames the file. Take the card out, then hold the power key about a second until the camera switches off.
+   Then power on without the card and check the boot screen, the live view and a shutter press.
+4. Delete the update file from the card before using that card in the camera again, and eject the card before
+   you take it out of the reader. Leave the file there and the camera flashes it again at every power-on.
+   `stage` on the same card refuses until the old file is gone.
 
-If the camera ignores the file (no "Upgrade" screen, normal boot): the stamp in the name equals the stamp of
-the firmware the camera is running. `verify` compares against the stock stamp only; a camera already running
-a modded build with the same stamp needs a file with a fresh one (`pack` without `--stamp` uses the current
-minute).
+If the camera ignores the file (no "Upgrade" screen, normal boot), the updater did not see it. The causes:
+the card went in after power-on (the updater looks only in the first five seconds); the file is in a folder
+instead of the card root; the name was changed on the way, so it no longer starts with `JH_5408` and the
+12-digit stamp (`stage` writes the exact name, a copy made by hand may not); or another `JH_5408*.bin` in the
+root was found first. Switch the camera off, take the card out, look at the card root on a computer, and run
+`stage` again: it refuses a card that holds another update file. The stamp is not the cause for a file
+`verify` passed. No toolkit command changes the stamp compiled into the firmware, so a camera on stock firmware
+or flashed with a toolkit-built file still runs `202505201029`, and `verify` refuses that stamp in a name.
 
 ## What the refusals mean
 
 | Message | Meaning | What to do |
 |---|---|---|
 | `FAIL ...` then `RESULT: verify failed` | The file itself is wrong: name checksum, stamp, size, build. | Rebuild it with `pack`; never rename an update file by hand. |
+| `FAIL sensor-table` | The image-sensor set-up table differs from the original 2025 series. No toolkit mod changes it. | Do not use the file: it was built from another edition's firmware or a damaged dump. |
+| `FAIL resource-slots` | A resource entry is erased, cut off or not the kind its name says, typically from a truncated download or a damaged dump. | Rebuilding from the same input does not help: get a complete dump (check its SHA-256) and build again. |
 | `... is not a mount point or drive root` | You gave a folder on the card, or the card is not mounted. | Give the mount point itself (`/run/media/deck/<label>`, `E:`). For a test on a plain folder add `--i-know-what-i-am-doing`. |
 | `... does not exist` / `... is not a directory` | Wrong path, card not inserted, or a device path (`/dev/sdb1`). | `stage` takes the mounted path, not the device; `card-check` and `card-fix` take the device. |
 | `... is not on removable media` | The mount is a fixed disk. | Check the path. `--i-know-what-i-am-doing` overrides if the card really shows up as fixed. |

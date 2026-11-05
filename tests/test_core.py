@@ -3,6 +3,8 @@
 Image-dependent tests run only when CHARMERA_STOCK_IMAGE points at a local original-series dump.
 Everything that writes uses synthetic images so no real firmware file is produced by the test run.
 """
+import dataclasses
+import hashlib
 import os
 import struct
 import zlib
@@ -10,7 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from charmera_toolkit import checksum, image, pack, settings, sounds, verify
+from charmera_toolkit import checksum, frames, image, pack, settings, sounds, verify
+
+
+# Synthetic images carry no firmware bytes, so they hold this stand-in for the image-sensor table, and the
+# synthetic_build fixture makes the build identity accept it. Tests on the real dump use the real identity.
+SENSOR_START, SENSOR_END = image.ORIGINAL_2025.sensor_table
+SYNTHETIC_SENSOR_TABLE = bytes(range(SENSOR_END - SENSOR_START))
+
+
+@pytest.fixture
+def synthetic_build(monkeypatch):
+    """The original-series identity with the synthetic sensor table in place of the real one."""
+    fake = dataclasses.replace(image.ORIGINAL_2025, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest())
+    monkeypatch.setitem(image.KNOWN_BUILDS, fake.key, fake)
+    return fake
 
 
 # --- checksum ------------------------------------------------------------------------------------------
@@ -49,6 +65,7 @@ def synthetic_image(records=(), with_sounds=True):
     img[image.ORIGINAL_2025.stamp_offset: image.ORIGINAL_2025.stamp_offset + 12] = image.ORIGINAL_2025.stamp.encode()
     img[image.ORIGINAL_2025.build_offset: image.ORIGINAL_2025.build_offset + 16] = image.ORIGINAL_2025.build_string
     img[image.ORIGINAL_2025.compiled_offset: image.ORIGINAL_2025.compiled_offset + 11] = image.ORIGINAL_2025.compiled
+    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
     if with_sounds:
         base = image.RESOURCE_BASE
         img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
@@ -67,7 +84,8 @@ def synthetic_image(records=(), with_sounds=True):
                 img[p: p + len(wav)] = wav
             else:
                 p = base + sector * 0x200
-                img[p: p + 8] = b"GPZP\x00\x00\x00\x00"
+                gpzp = frames.encode_gpzp(b"\x00" * 64)   # a real fixed-Huffman stream, as verify expects
+                img[p: p + len(gpzp)] = gpzp
             off += 24
             sector += 2
     for i, rec in enumerate(records):
@@ -208,7 +226,7 @@ def test_stock_image_mute_paths_do_not_touch_code(stock_image):
 # --- review follow-ups -------------------------------------------------------------------------------------
 
 
-def test_verify_tags_and_product_code(tmp_path, capsys):
+def test_verify_tags_and_product_code(tmp_path, capsys, synthetic_build):
     from charmera_toolkit import verify as verify_mod
     img = synthetic_image([make_record()])
     payload = pack.prepare_payload(img)
@@ -467,3 +485,260 @@ def test_pack_out_must_be_a_directory(tmp_path, capsys):
                    "--i-understand-this-file-flashes-a-camera"])
     assert rc == 2
     assert "--out must be a directory" in capsys.readouterr().out
+
+
+# --- flash-path hardening ----------------------------------------------------------------------------------
+
+
+def _named(tmp_path, payload, stamp="202611041200"):
+    p = tmp_path / checksum.build_update_name(payload, stamp).filename
+    p.write_bytes(payload)
+    return p
+
+
+def _entry(img, display_name):
+    return next(e for e in image.resource_directory(img) if e.display_name == display_name)
+
+
+def test_stamps_and_names_take_ascii_digits_only(tmp_path):
+    for stamp in ("٢٠٢٦١١٠٥٠٠٠٠",   # Arabic-Indic
+                  "２０２６１１０５００００",   # full-width
+                  "²⁰²⁶¹¹⁰⁵⁰⁰⁰⁰"):  # superscript
+        with pytest.raises(ValueError, match="ASCII"):
+            checksum.build_update_name(b"\x00" * 16, stamp)
+        name = f"JH_5408{stamp}_00000000.bin"
+        with pytest.raises(ValueError):
+            checksum.parse_update_name(name)
+        by = {c.name: c for c in verify.verify_update(tmp_path / name, b"\x00" * 16)}
+        assert not by["filename"].ok
+    with pytest.raises(ValueError):
+        checksum.parse_update_name("JH_5408202611041200_00000000.bin\n")
+    assert checksum.parse_update_name("JH_5408202611041200_0000ABCD.bin").checksum == 0xABCD
+
+
+def test_pack_refuses_a_non_ascii_stamp(tmp_path, capsys):
+    from charmera_toolkit import cli
+    src = tmp_path / "s.bin"; src.write_bytes(synthetic_image([make_record()]))
+    rc = cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "２" * 12,
+                   "--i-understand-this-file-flashes-a-camera"])
+    assert rc == 2 and "ASCII" in capsys.readouterr().out
+    assert not (tmp_path / "o").exists()
+
+
+def test_image_kind_calls_a_short_file_truncated():
+    assert image.image_kind(b"\xff" * checksum.FLASH_SIZE) == "dump"
+    assert image.image_kind(b"\xff" * checksum.UPDATE_FILE_SIZE) == "update"
+    assert image.image_kind(b"\xff" * image.SOFTWARE_END) == "software-only"
+    for n in (0, 0x100, image.RESOURCE_BASE, 0x166000, image.SOFTWARE_END - 0x100, image.SOFTWARE_END + 0x100, 0x1DFF00):
+        assert image.image_kind(b"\xff" * n) == "truncated", hex(n)
+    assert image.image_kind(b"\xff" * (checksum.UPDATE_FILE_SIZE + 0x100)) == "unknown"
+
+
+def test_pack_refuses_a_truncated_input_and_shows_the_padding(tmp_path, capsys):
+    from charmera_toolkit import cli
+    img = synthetic_image([make_record()])
+    for n in (image.RESOURCE_BASE, 0x166000, image.SOFTWARE_END - 0x100, image.SOFTWARE_END + 0x10000, checksum.UPDATE_FILE_SIZE - 0x100):
+        with pytest.raises(ValueError, match="looks truncated"):
+            pack.prepare_payload(img[:n])
+    cut = tmp_path / "partial_download.bin"; cut.write_bytes(img[:0x166000])
+    assert cli.main(["pack", "--input", str(cut), "--out", str(tmp_path / "o"), "--stamp", "202611050001",
+                     "--i-understand-this-file-flashes-a-camera"]) == 2
+    assert "looks truncated" in capsys.readouterr().out and not (tmp_path / "o").exists()
+    # exactly 0x170000 is a software-only image: accepted, and the plan says what was padded
+    sw = tmp_path / "software.bin"; sw.write_bytes(img[:image.SOFTWARE_END])
+    payload = pack.prepare_payload(img[:image.SOFTWARE_END])
+    assert len(payload) == checksum.UPDATE_FILE_SIZE and payload[:image.SOFTWARE_END] == img[:image.SOFTWARE_END]
+    assert cli.main(["pack", "--input", str(sw), "--out", str(tmp_path / "o"), "--stamp", "202611050001"]) == 0
+    out = capsys.readouterr().out
+    assert "PADDED with 458,752 bytes (0x170000..0x1e0000)" in out
+    full = tmp_path / "dump.bin"; full.write_bytes(img)
+    assert cli.main(["pack", "--input", str(full), "--out", str(tmp_path / "o"), "--stamp", "202611050001"]) == 0
+    assert "trimmed to 0x1e0000" in capsys.readouterr().out
+
+
+def test_pack_plan_reports_damaged_resources(tmp_path, capsys):
+    from charmera_toolkit import cli
+    img = bytearray(synthetic_image([make_record()]))
+    z = _entry(bytes(img), "ZZZ.GPZP")
+    img[z.offset: z.offset + 0x200] = b"\xff" * 0x200
+    src = tmp_path / "s.bin"; src.write_bytes(bytes(img))
+    for gate in ([], ["--i-understand-this-file-flashes-a-camera"]):
+        assert cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "202611050001", *gate]) == 2
+        out = capsys.readouterr().out
+        assert "resources:       DAMAGED" in out and "ZZZ.GPZP" in out and "Refusing to pack it" in out
+    assert not (tmp_path / "o").exists()                        # nothing written, even with the gate
+
+
+def test_verify_fails_a_changed_sensor_table_unless_allow_unknown_build(tmp_path, capsys, synthetic_build):
+    payload = pack.prepare_payload(synthetic_image([make_record()]))
+    by = {c.name: c for c in verify.verify_update(_named(tmp_path, payload), payload, allow_modified=True)}
+    assert by["sensor-table"].ok
+    bad = bytearray(payload); bad[SENSOR_START + 4] ^= 1
+    bad = bytes(bad)
+    p = _named(tmp_path, bad, "202611041201")
+    by = {c.name: c for c in verify.verify_update(p, bad, allow_modified=True)}
+    assert not by["sensor-table"].ok and by["sensor-table"].severity == "fail" and "stage never does" in by["sensor-table"].detail
+    by = {c.name: c for c in verify.verify_update(p, bad, allow_modified=True, allow_unknown_build=True)}
+    assert by["sensor-table"].severity == "warn"
+    args = type("A", (), {"file": str(p), "stock": None, "allow_modified": True, "allow_unknown_build": False, "allow_odd_size": False})
+    assert verify.handler(args) == 1
+    assert "FAIL sensor-table" in capsys.readouterr().out
+    args.allow_unknown_build = True
+    assert verify.handler(args) == 0
+    assert "WARN sensor-table" in capsys.readouterr().out
+
+
+def _gpzp_slot_problem(img, data):
+    """Put `data` in the last entry's slot (it runs to 0x16E000, so there is room) and check the image."""
+    z = _entry(img, "ZZZ.GPZP")
+    buf = bytearray(img)
+    span = max(0x400, len(data))
+    buf[z.offset: z.offset + span] = data + b"\xff" * (span - len(data))
+    assert len(buf) == len(img)
+    return verify.resource_problems(bytes(buf))
+
+
+def test_resource_problems_checks_every_entry_against_its_name():
+    img = synthetic_image([make_record()])
+    assert verify.resource_problems(img) == []
+    beep, z = _entry(img, "BEEP.WAV"), _entry(img, "ZZZ.GPZP")
+
+    def damaged(edit):
+        buf = bytearray(img); edit(buf); return verify.resource_problems(bytes(buf))
+
+    # an erased slot, a WAV that is not RIFF, an oversized RIFF size, a WAV without a data chunk
+    assert any("BEEP.WAV" in p and "erased" in p for p in damaged(lambda b: b.__setitem__(slice(beep.offset, beep.offset + beep.budget), b"\xff" * beep.budget)))
+    assert any("not a RIFF WAVE" in p for p in damaged(lambda b: b.__setitem__(slice(beep.offset, beep.offset + 1), b"X")))
+    assert any("RIFF size says" in p for p in damaged(lambda b: b.__setitem__(slice(beep.offset + 4, beep.offset + 8), struct.pack("<I", 0x2000))))
+    assert any("no data chunk" in p for p in damaged(lambda b: b.__setitem__(slice(beep.offset + 36, beep.offset + 40), b"junk")))
+    # GPZP: a stream that does not inflate, a bad trailer CRC, a dynamic-Huffman stream, a stored block, an erased last entry
+    good = frames.encode_gpzp(bytes(range(256)) * 4)
+    assert _gpzp_slot_problem(img, good) == []
+    assert any("corrupt" in p or "ends before" in p for p in _gpzp_slot_problem(img, good[:4] + b"\xff\xff" + good[6:]))
+    assert any("CRC" in p for p in _gpzp_slot_problem(img, good[:-8] + struct.pack("<II", 0, 1024)))
+    payload = bytes((i * i * 7919 >> 3) % 26 + 97 for i in range(4000))   # skewed letters: zlib picks a dynamic block
+    for strategy, kind in ((zlib.Z_DEFAULT_STRATEGY, "dynamic"), (None, "stored")):
+        if strategy is None:
+            c = zlib.compressobj(0, zlib.DEFLATED, -15)
+        else:
+            c = zlib.compressobj(9, zlib.DEFLATED, -15, 8, strategy)
+        stream = c.compress(payload) + c.flush()
+        blob = b"GPZP" + stream + struct.pack("<II", zlib.crc32(payload) & 0xFFFFFFFF, len(payload))
+        assert frames.parse_gpzp(blob).payload == payload
+        assert any(f"{kind} DEFLATE blocks" in p for p in _gpzp_slot_problem(img, blob)), kind
+    assert any("ZZZ.GPZP" in p and "erased" in p for p in damaged(lambda b: b.__setitem__(slice(z.offset, z.offset + 0x200), b"\xff" * 0x200)))
+    # a name of no known kind, a JPEG name over non-JPEG bytes, a JPEG without its end marker, a .PAK without GPRS
+    def rename(buf, new):
+        o = image.RESOURCE_BASE + 0x18 + 24 * z.index
+        buf[o: o + 20] = new.ljust(20, b"\x00")
+    assert any("no known kind" in p for p in damaged(lambda b: rename(b, b"ZZZBMP")))
+    assert any("not a JPEG" in p for p in damaged(lambda b: rename(b, b"ZZZJPG")))
+    def jpeg_without_eoi(buf):
+        rename(buf, b"ZZZJPG"); buf[z.offset: z.offset + 0x200] = b"\xff\xd8\xff\xe0" + b"\x00" * 0x1FC
+    assert any("no FF D9 end marker" in p for p in damaged(jpeg_without_eoi))
+    def jpeg_ok(buf):
+        rename(buf, b"ZZZJPG"); buf[z.offset: z.offset + 0x200] = b"\xff\xd8\xff\xe0" + b"\x00" * 0x1FA + b"\xff\xd9"
+    assert damaged(jpeg_ok) == []
+    assert any("not a GPRS pack" in p for p in damaged(lambda b: rename(b, b"ZZZPAK")))
+    def gprs_ok(buf):
+        rename(buf, b"ZZZPAK"); buf[z.offset: z.offset + 4] = b"GPRS"
+    assert damaged(gprs_ok) == []
+    # a slot that points past the resource area, and one that is empty because the next entry starts at the same sector
+    assert any("outside the resource area" in p for p in damaged(lambda b: b.__setitem__(
+        slice(image.RESOURCE_BASE + 0x18 + 24 * z.index + 20, image.RESOURCE_BASE + 0x18 + 24 * z.index + 24), struct.pack("<I", 0x800))))
+    assert any("empty slot" in p for p in damaged(lambda b: b.__setitem__(
+        slice(image.RESOURCE_BASE + 0x18 + 24 * beep.index + 20, image.RESOURCE_BASE + 0x18 + 24 * beep.index + 24),
+        struct.pack("<I", (_entry(img, "CLICK.WAV").offset - image.RESOURCE_BASE) // 0x200))))
+
+
+def test_verify_fails_damaged_resources_even_with_allow_modified(tmp_path, capsys, synthetic_build):
+    img = bytearray(synthetic_image([make_record()]))
+    z = _entry(bytes(img), "ZZZ.GPZP")
+    img[z.offset: z.offset + 0x200] = b"\xff" * 0x200
+    payload = pack.prepare_payload(bytes(img))
+    p = _named(tmp_path, payload)
+    by = {c.name: c for c in verify.verify_update(p, payload, allow_modified=True, allow_unknown_build=True, allow_odd_size=True)}
+    assert not by["resource-slots"].ok and by["resource-slots"].severity == "fail" and "ZZZ.GPZP" in by["resource-slots"].detail
+    args = type("A", (), {"file": str(p), "stock": None, "allow_modified": True, "allow_unknown_build": True, "allow_odd_size": True})
+    assert verify.handler(args) == 1
+    assert "FAIL resource-slots" in capsys.readouterr().out
+    clean = pack.prepare_payload(synthetic_image([make_record()]))
+    assert {c.name: c for c in verify.verify_update(_named(tmp_path, clean), clean, allow_modified=True)}["resource-slots"].ok
+
+
+def test_diff_reports_an_erased_last_resource_entry(tmp_path, capsys):
+    from charmera_toolkit import diff_cmd
+    a = pack.prepare_payload(synthetic_image([make_record()]))
+    z = _entry(a, "ZZZ.GPZP")
+    assert z.index == len(image.resource_directory(a)) - 1          # the last entry
+    b = bytearray(a); b[z.offset: z.offset + 0x200] = b"\xff" * 0x200
+    b = bytes(b)
+    assert _entry(b, "ZZZ.GPZP").budget == 0                       # its budget in B is 0: the old diff skipped it
+    lines = diff_cmd.explain_resources(a, b)
+    assert any("ZZZ.GPZP: ERASED in B" in line for line in lines)
+    assert not any("byte-identical" in line for line in lines)
+    (tmp_path / "a.bin").write_bytes(a); (tmp_path / "b.bin").write_bytes(b)
+    args = type("A", (), {"a": str(tmp_path / "a.bin"), "b": str(tmp_path / "b.bin"), "ranges": False})
+    assert diff_cmd.handler(args) == 1
+    out = capsys.readouterr().out
+    assert "ZZZ.GPZP: ERASED in B" in out and "every resource entry is byte-identical" not in out
+    # a raw cut-off file: the missing part of each entry is named
+    cut = a[: z.offset + 8]
+    assert any("ZZZ.GPZP" in line and "MISSING from B" in line for line in diff_cmd.explain_resources(a, cut))
+    # a change outside every entry is not called identical
+    hdr = bytearray(a); hdr[image.RESOURCE_BASE + 4] ^= 1
+    assert diff_cmd.explain_resources(a, bytes(hdr)) == [
+        "  every resource entry is byte-identical; the differing bytes lie outside the entries "
+        "(pack header, directory, or the padding after the last entry)"]
+
+
+def test_pack_out_refuses_a_card_or_a_folder_with_another_update_file(tmp_path, capsys):
+    from charmera_toolkit import cli
+    src = tmp_path / "s.bin"; src.write_bytes(synthetic_image([make_record()]))
+    gate = "--i-understand-this-file-flashes-a-camera"
+    card = tmp_path / "card"; (card / "DCIM").mkdir(parents=True)
+    assert cli.main(["pack", "--input", str(src), "--out", str(card), "--stamp", "202611050001", gate]) == 2
+    out = capsys.readouterr().out
+    assert "DCIM" in out and "charmera stage" in out
+    assert sorted(p.name for p in card.iterdir()) == ["DCIM"]
+    out_dir = tmp_path / "o"
+    assert cli.main(["pack", "--input", str(src), "--out", str(out_dir), "--stamp", "202611050001", gate]) == 0
+    first = sorted(p.name for p in out_dir.iterdir())
+    assert cli.main(["pack", "--input", str(src), "--out", str(out_dir), "--stamp", "202611050002", gate, "--overwrite"]) == 2
+    assert "already holds another update file" in capsys.readouterr().out
+    assert sorted(p.name for p in out_dir.iterdir()) == first
+    # the same name again is the existing rule: refused without --overwrite, replaced with it
+    assert cli.main(["pack", "--input", str(src), "--out", str(out_dir), "--stamp", "202611050001", gate]) == 2
+    assert cli.main(["pack", "--input", str(src), "--out", str(out_dir), "--stamp", "202611050001", gate, "--overwrite"]) == 0
+    # a lower-case jh_*.BIN counts too, as it does for stage
+    other = tmp_path / "o2"; other.mkdir(); (other / "jh_5408000000000000_00000000.BIN").write_bytes(b"x")
+    assert cli.main(["pack", "--input", str(src), "--out", str(other), "--stamp", "202611050001", gate]) == 2
+
+
+def test_factory_settings_keeps_photos_and_says_so(tmp_path, capsys):
+    import argparse
+    img = bytearray(synthetic_image([make_record(), make_record(ui_sound=3)]))
+    img[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 8] = struct.pack("<HHI", 0, 1, 0x100)
+    img[image.PHOTO_SLOTS[0]: image.PHOTO_SLOTS[0] + 4] = b"\xff\xd8\xff\xd9"
+    img = bytes(img)
+    out = pack.prepare_payload(img, factory_settings=True)
+    recs = settings.parse_settings(out)
+    assert len(recs) == 1 and recs[0].offset == settings.SETTINGS_BASE and recs[0].ui_sound == 5
+    assert out[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 8] == img[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 8]
+    assert image.stored_photos(out) == image.stored_photos(img) != []
+    both = pack.prepare_payload(img, factory_settings=True, blank_photos=True)
+    assert image.stored_photos(both) == [] and both[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 8] == b"\x00" * 8
+    parser = argparse.ArgumentParser(prog="charmera")
+    pack.register(parser.add_subparsers(dest="command"))
+    text = " ".join(parser._subparsers._group_actions[0].choices["pack"].format_help().split())
+    assert "stored photos are kept (add --blank-photos to remove them)" in text
+    assert "and zero the photo directory" not in text
+    assert "zeroes the photo directory only when that sector is erased" in " ".join(pack.prepare_payload.__doc__.split())
+
+
+def test_tweak_refuses_a_cut_off_image(tmp_path, capsys):
+    from charmera_toolkit import cli
+    src = tmp_path / "cut.bin"; src.write_bytes(synthetic_image([make_record()])[:0x166000])
+    assert cli.main(["tweak", "apply", str(src), "--enable", "recommended", "--out", str(tmp_path / "o.bin")]) == 2
+    assert "cut-off download" in capsys.readouterr().out
+    assert not (tmp_path / "o.bin").exists()
