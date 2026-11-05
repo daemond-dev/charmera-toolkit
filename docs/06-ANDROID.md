@@ -63,11 +63,14 @@ is where the camera looks.
 Card into the powered-off camera, then follow [step 5 of The first flash](01-FIRST-FLASH.md#5-flash-the-point-of-no-return): power on, wait for the update to
 finish, power off, take the card out, and delete the update file from it before the card goes back into the camera.
 
-## Through the camera's own USB port (untested)
+## Through the camera's own USB port
 
 When connected by USB the camera presents its card as a storage device (USB ID 1B3F:8301, "GENPLUS USB-MSDC
-DISK A"). With a USB-C OTG adapter the phone may be able to write to the card while it sits in the camera, which
-saves taking the card out. The same dirty-flag problem applies, and nobody has reported trying it.
+DISK A"), so the card can stay in the camera. The owner has confirmed that the drive appears on an Android phone
+connected over USB-C; writing an update file that way and flashing from it has not been tried yet. The steps,
+including why the camera must be unplugged and restarted afterwards, are in the app's README:
+[Through the camera's USB-C cable](../android/README.md#through-the-cameras-usb-c-cable). The same dirty-flag
+problem applies.
 
 ## What needs a computer
 

@@ -19,14 +19,35 @@ know the app; that is because it is not from the Play Store.
 
 1. **Choose update file.** Pick the `JH_5408…bin` file that `charmera pack` wrote, or open it from a file manager
    with "Open with" or "Share". The app checks it and lists each check, the way `charmera verify` does.
-2. **Choose the SD card.** Put the camera's card in the phone's slot or a USB card reader. In the picker, open the
-   card itself and tap "Use this folder" at its top level. The app remembers the card.
+2. **Choose the SD card.** Put the camera's card in the phone's slot or a USB card reader, or leave it in the camera
+   and connect the camera by cable ([below](#through-the-cameras-usb-c-cable)). In the picker, open the card itself
+   and tap "Use this folder" at its top level. The app remembers the card.
 3. **Write the file to the card.** The app refuses a card that already holds an update file, writes the file under
    a temporary name, renames it to the exact name the camera looks for, and reads it back to compare SHA-256.
 4. Eject the card in Android's storage settings, put it in the camera, and flash
    ([step 5 of The first flash](../docs/01-FIRST-FLASH.md#5-flash-the-point-of-no-return)).
 5. Afterwards, put the card back in the phone and tap **Remove update files**. The camera does not delete the file
    and would flash it again at every power-on.
+
+## Through the camera's USB-C cable
+
+The card can stay in the camera. Connected by USB, the camera presents its SD card as a USB drive (USB ID 1B3F:8301,
+"GENPLUS USB-MSDC DISK A"), and the owner has confirmed that the drive appears on an Android phone connected over
+USB-C. Writing an update file this way and then flashing from it has not been tried yet.
+
+1. Connect the camera to the phone with a USB-C data cable. The camera's card shows up as a USB drive.
+2. In the app, choose the update file as usual. Under **Choose the SD card**, pick the camera's drive in the picker
+   (it is listed with the phone's other storage, like a USB stick) and tap "Use this folder" at its top level.
+3. Tap **Write the file to the card**.
+4. Eject the drive in Android (Settings, Storage, the USB drive, Eject), then unplug the cable.
+5. Switch the camera off, then on again, with a charged battery. The camera only looks for the update file in the
+   first five seconds after power-on, so it does not notice a file added while it is running. Whether the updater
+   runs when the camera starts up while still plugged in is unknown, so unplug first.
+6. After the flash, connect the camera again and tap **Remove update files**.
+
+The same limits apply as with a card reader. If the camera last wrote to the card, Android may refuse the drive
+(the dirty flag, [SD card problems](../docs/05-CARDS.md)). If the drive does not appear at all, try another
+cable; a charge-only cable has no data lines.
 
 ## What it checks
 
