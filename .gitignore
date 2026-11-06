@@ -7,3 +7,4 @@ __pycache__/
 out/
 backups/
 MANIFEST.txt
+*.egg-info/
