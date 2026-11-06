@@ -20,6 +20,10 @@ The public firmware drives exactly one sensor, with no check of which one is fit
 fails. So a different sensor and a loose or damaged sensor ribbon look the same from the firmware's side. Only
 the sensor's markings or a dump from a matching camera can tell them apart.
 
+Two firmware builds are known: the public dump and the film-mods author's. They contain the same sensor init
+table, byte for byte; the film-mods author confirmed this from their own factory dump on 2026-11-06. So neither
+build has a program for any other sensor, and flashing either one would give this camera the same result.
+
 ## What was built
 
 - **The toolkit** (Python, Windows and Linux): the research report, `pack`, `verify` and `stage` for update
@@ -56,6 +60,12 @@ the sensor's markings or a dump from a matching camera can tell them apart.
 - **10:44 to 11:02.** I drafted the community post for Project-Sirius issue #2. You posted it.
 - **11:40.** You found github.com/Hyperlite-Media/charmera-film-mods, which I had not seen. It went public on
   11-04 at 16:29, a few hours before my survey finished, and I never searched again before the flash.
+- **11-06, later.** You opened Hyperlite-Media/charmera-film-mods#1. It asked the author to compare their sensor
+  init table with the public dump's, and to share an update file if the two differed.
+- **11-06, the author's reply.** In their dump the table is at 0xF5D34, which is +0xC8 as predicted. It is 124
+  bytes long, and its sha256 `aea3976b…` is identical to the public dump's, so their build won't help. They said
+  they would rather not give you anything to flash, because it can't fix a sensor difference and could make
+  things worse. Their advice is to confirm the sensor part first, and they offered to keep helping from there.
 
 ## What I got wrong
 
@@ -105,17 +115,20 @@ the sensor's markings or a dump from a matching camera can tell them apart.
    purchases from Reto's own store, so it most likely doesn't apply. The shop it came from is the place to ask.
    Say plainly that it was reflashed.
 2. **The community.** The request for a dump from a working original-series unit is posted in Project-Sirius #2.
-3. **The film-mods author.** Their camera works on a different build with the same stamp. I compared the
-   addresses their notes give with the public dump:
-   - In both builds the sensor code and tables have the same size and layout. Most of the public dump's extra
-     code is in other parts of the firmware.
-   - So their build most likely drives the same sensor, at roughly 65 to 80 percent.
-   - The register values themselves can't be checked without their dump.
-
-   The question worth asking the author is whether their sensor init table matches the public dump's: 124 bytes
-   at file offset 0xF5C6C, sha256 `aea3976b…`. Their build is worth trying only if it differs. Nothing from that
-   repo should go on this camera's card.
-4. **A replacement camera.** Read its chip before flashing anything.
+3. **The film-mods author's build is ruled out.** Their sensor init table is identical to the public dump's.
+   - They suggest identifying the sensor part first, from the marking on the sensor module or from an ID
+     register. The public firmware never reads a sensor ID, though, so on this camera the marking is the way.
+     That means opening the camera.
+   - If the part differs from what the firmware targets, the only fix is a dump from a unit carrying that
+     sensor.
+   - They are willing to keep helping once the sensor is known.
+   - Nothing from their repo goes on this camera's card. Their loader and payload are written for their build's
+     addresses, not the public dump's.
+4. **Identify the sensor.** Read the part marking on the sensor module or its ribbon and compare it with what
+   other owners report for the public firmware: an SP140A-family sensor (SuperPix), module marking KC28. A
+   different part confirms the mismatch and tells donors what to look for. The same part points to a loose or
+   damaged ribbon instead.
+5. **A replacement camera.** Read its chip before flashing anything.
 
 ## Open work in the toolkit
 
@@ -125,3 +138,35 @@ the sensor's markings or a dump from a matching camera can tell them apart.
 - Consider building official-size update files (0x169000 bytes) that leave the settings, the photos and the last
   block alone, unless there is a reason to write them.
 - Finish the 0.4 review fixes, then build, test and publish the app's text rewrite.
+- The toolkit identifies a build by its version stamp and checks the sensor table at a fixed offset
+  (`image.py`, 0xF5C6C). The stamp does not identify a build, and the table moves between builds. Find the table
+  by its content instead, and stop treating "original series" as proof that a camera matches the public dump.
+- The research report says the firmware ignores sensor write failures. More exactly, after 10 failed attempts
+  at one register it abandons the rest of that table, and the caller ignores the error. The sensor is started
+  from the start-up state at boot, before the card mounts.
+
+## Build comparison details
+
+These come from the public dump plus the addresses in film-mods' `docs/NOTES.md` and `mods/*.c`, and were checked
+twice independently. The film-mods author confirmed the sensor table result from their own dump.
+
+- **Fingerprints over 0x000000–0x168FFF.**
+  - Public dump: SHA-1 `d1f21227ab402bc842134070acc29a77041b4a63`, byte sum 0x0852B369.
+  - film-mods build: SHA-1 `91499bd3bff3acde053cb8c8255a73cdeb6e3d33`, byte sum 0x0852C329.
+  - Both carry the stamp 202505201029: at file 0x218C4 in the public dump, 0x218D0 in film-mods'.
+- **Address offsets.** Film-mods addresses are RAM, and file = RAM + 0x200. Public file offset minus film file
+  offset is:
+  - −0x18 in early code;
+  - −0xC from about RAM 0x1E240 to 0x30F08;
+  - +0x374 from RAM 0x645E4 to 0xF3940;
+  - −0xC8 for the sensor and image data from 0xF5764 to 0xF7FCC;
+  - −0xC0 for RAM variables.
+
+  The public dump's 0x380 extra bytes lie between film RAM 0x30F08 and 0x645E4, mostly unused Wi-Fi/lwIP code.
+- **Sensor bus.** The bus is bit-banged, with clock on GPIO 0x11 and data on GPIO 0x12. The write address is
+  0x78 (7-bit 0x3C), with 8-bit registers and page select through register 0xFD.
+- **Sensor tables.** A reset table (`fd 00 20 00 ff ff`) at public file 0xF5BFC, then the 61-write init table
+  at 0xF5C6C. That table is 124 bytes, sha256 `aea3976b…`, starts `fd 00 2f 1b` and ends `ff ff`. There is one
+  1280x720 mode. Exposure goes to page 1 registers 0x03/0x04 and gain to 0x24, latched by 0x01 = 1.
+- **One sensor only.** One sensor is registered at boot, with no probe. The read routines are never called, so
+  no ID is read. The "Check chip id fail" string belongs to the unused Wi-Fi driver.
