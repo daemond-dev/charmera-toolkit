@@ -32,6 +32,12 @@ jobs:
           accept-android-sdk-licenses: true
           packages: platform-tools   # the default also asks for the retired "tools" package, which is no longer served
       - run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Public stock dump for the tests (downloaded from upstream, never stored)
+        run: |
+          curl -fsSL --retry 5 -o "$RUNNER_TEMP/stock.bin" \
+            "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin"
+          echo "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f  $RUNNER_TEMP/stock.bin" | sha256sum -c -
+          echo "CHARMERA_STOCK_IMAGE=$RUNNER_TEMP/stock.bin" >> "$GITHUB_ENV"
       - name: Signing key
         id: key
         env:

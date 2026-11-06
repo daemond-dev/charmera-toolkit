@@ -53,6 +53,9 @@ public class MainActivity extends Activity {
      * asks for (looking at the card again) waits until it has.
      */
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+    /** Downloads run apart from card work, so a slow connection never holds up a card listing or a write. */
+    private static final ExecutorService NET = Executors.newSingleThreadExecutor();
+    private static final int SAVE_COPY = 4;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -61,6 +64,11 @@ public class MainActivity extends Activity {
     private TextView writeStatus;
     private Button writeButton;
     private Button cleanButton;
+    private Button downloadButton;
+    private Button saveButton;
+    /** The public stock dump once downloaded or picked and checked; kept so choosing again needs no new download. */
+    private byte[] stockDump;
+    private boolean downloading;
 
     private byte[] fileData;
     private UpdateCheck.Result fileCheck;
@@ -109,19 +117,28 @@ public class MainActivity extends Activity {
         col.addView(body("The app downloads the public stock firmware dump from GitHub (2 MiB), checks it, and makes the"
                 + " file you choose: C, A or B. These are the same reviewed files the computer toolkit makes, checked by"
                 + " their SHA-256; the app can make nothing else. Start with C."));
-        col.addView(button("Download and make the file", v -> downloadDump()));
-        col.addView(body("Offline, or already have the stock dump or an update file on the phone? Choose it instead. The"
-                + " stock dump is at " + Candidates.STOCK_DUMP_PAGE));
+        downloadButton = button("Download and make the file", v -> downloadDump());
+        col.addView(downloadButton);
+        TextView offline = body("Offline, or already have the stock dump or an update file on the phone? Choose it"
+                + " instead. The stock dump's page: " + Candidates.STOCK_DUMP_PAGE);
+        android.text.util.Linkify.addLinks(offline, android.text.util.Linkify.WEB_URLS);
+        col.addView(offline);
         col.addView(button("Use a file on the phone", v -> pickFile()));
         fileStatus = mono();
         col.addView(fileStatus);
+        saveButton = button("Save a copy to the phone", v -> saveCopy());
+        col.addView(saveButton);
 
         col.addView(heading("2. Connect the camera"));
         col.addView(body("Card in the camera. Connect the camera to the phone with a USB-C data cable; the camera shows its"
-                + " card as a drive (switch the camera on if no drive appears). Tap the button, open that drive in the"
-                + " picker and tap \"Use this folder\" at its top level, not inside DCIM.\n"
+                + " card as a drive. If no drive appears, do not switch the camera on with the card in, in case the card"
+                + " still holds an update file: take the card out, switch the camera on, wait 10 seconds, put the card"
+                + " back in, then connect. Tap the button, open that drive in the picker and tap \"Use this folder\" at"
+                + " its top level, not inside DCIM.\n"
                 + "A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10: from"
-                + " Android 11 on, Android does not let an app choose the top level of a card in the slot."));
+                + " Android 11 on, Android does not let an app choose the top level of a card in the slot. For the slot,"
+                + " use \"Save a copy to the phone\" in step 1, copy that file to the card's top level with the Files"
+                + " app, and skip steps 2 and 3."));
         col.addView(button("Choose the camera's drive", v -> pickCard()));
         cardStatus = mono();
         col.addView(cardStatus);
@@ -133,7 +150,8 @@ public class MainActivity extends Activity {
         col.addView(writeStatus);
 
         col.addView(heading("4. Flash"));
-        col.addView(body("1. Eject the drive in Android (Settings, Storage, the USB drive, Eject), then unplug the cable.\n"
+        col.addView(body("1. Eject the drive in Android (Settings, Storage, the USB drive, Eject), then unplug the cable."
+                + " With a card reader or the phone's slot: eject, then put the card into the camera.\n"
                 + "2. Switch the camera off, then on again, with the card still in it. The camera looks for the file in"
                 + " its first five seconds and shows the update progress. Do not touch anything until it reaches 100%.\n"
                 + "3. The camera stays on its last screen and does not delete the file. Take the card out first, then"
@@ -249,6 +267,8 @@ public class MainActivity extends Activity {
         boolean cardOk = card != null && card.state.writable();
         writeButton.setEnabled(idle && fileOk && cardOk);
         cleanButton.setEnabled(idle && card != null && card.state.listed && !card.state.updateFiles.isEmpty());
+        downloadButton.setEnabled(idle && !downloading);
+        saveButton.setEnabled(idle && fileOk);
     }
 
     private void dismissDialog() {
@@ -278,18 +298,87 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** The file and check the save was started for; the copy written is exactly these bytes. */
+    private byte[] saveData;
+    private UpdateCheck.Result saveCheck;
+
+    /** Save the checked update file where the owner chooses, for copying to a card the app cannot reach. */
+    private void saveCopy() {
+        if (busy || dialog != null || UpdateCheck.confirms(fileCheck, fileData) != null) {
+            return;
+        }
+        saveData = fileData;
+        saveCheck = fileCheck;
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/octet-stream");
+        i.putExtra(Intent.EXTRA_TITLE, fileCheck.cardName);
+        try {
+            startActivityForResult(i, SAVE_COPY);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            fileStatus.setText("This phone has no app to save a file with (" + why(e) + ").");
+        }
+    }
+
+    private void writeCopy(Uri uri) {
+        final byte[] data = saveData;
+        final UpdateCheck.Result check = saveCheck;
+        saveData = null;
+        saveCheck = null;
+        if (data == null || UpdateCheck.confirms(check, data) != null) {
+            return;
+        }
+        writeStatus.setText("Saving a copy…");
+        WORKER.execute(() -> {
+            String text;
+            try {
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
+                    if (out == null) {
+                        throw new IOException("the other app gave nothing to write to");
+                    }
+                    out.write(data);
+                }
+                String sha = sha256Of(uri);
+                String name = displayName(uri);
+                if (!check.sha256.equals(sha)) {
+                    text = "The saved copy reads back differently (SHA-256 " + sha + "); do not use it.";
+                } else if (!check.cardName.equals(name)) {
+                    text = "Saved and read back, but as \"" + name + "\". Rename it to " + check.cardName
+                            + " exactly before copying it to the card, or the camera will not find it.";
+                } else {
+                    text = "Saved " + name + " and read it back: it matches. Copy it to the card's top level with the"
+                            + " Files app, then choose the copy in step 1 to have it checked there.";
+                }
+            } catch (IOException | RuntimeException e) {
+                text = "Could not save the copy: " + why(e);
+            }
+            final String tt = text;
+            ui.post(() -> {
+                if (gone()) {
+                    return;
+                }
+                writeStatus.setText(tt);
+            });
+        });
+    }
+
     /** Download the public stock dump from its pinned upstream address, then ask which candidate to make. */
     private void downloadDump() {
         dismissDialog();
         final int request = ++fileRequest;
-        fileStatus.setText("Downloading the stock dump from GitHub (2 MiB)…");
         fileData = null;
         fileCheck = null;
         if (!busy) {
             writeStatus.setText("");
         }
+        if (stockDump != null) {               // already downloaded and checked: choose again without a new download
+            chooseCandidate(stockDump, request);
+            return;
+        }
+        fileStatus.setText("Downloading the stock dump from GitHub (2 MiB)…");
+        downloading = true;
         updateButtons();
-        WORKER.execute(() -> {
+        NET.execute(() -> {
             byte[] dump = null;
             String problem = null;
             try {
@@ -300,13 +389,21 @@ public class MainActivity extends Activity {
             final byte[] d = dump;
             final String p = problem;
             ui.post(() -> {
-                if (gone() || request != fileRequest) {
+                if (gone()) {
+                    return;
+                }
+                downloading = false;
+                if (d != null) {
+                    stockDump = d;
+                }
+                if (request != fileRequest) {
+                    updateButtons();
                     return;
                 }
                 if (d == null) {
                     fileStatus.setText("Could not get the stock dump: " + p + "\nCheck the connection and try again, or"
-                            + " download it in the browser from " + Candidates.STOCK_DUMP_PAGE + " and choose it with"
-                            + " \"Use a file on the phone\".");
+                            + " download it in the browser from the page linked above and choose it with \"Use a file on"
+                            + " the phone\".");
                     updateButtons();
                     return;
                 }
@@ -332,9 +429,14 @@ public class MainActivity extends Activity {
     }
 
     private void chooseCandidate(byte[] dump, int request) {
+        stockDump = dump;
         if (dialog != null) {
+            fileStatus.setText("The stock dump is downloaded and checked. Tap \"Download and make the file\" to choose"
+                    + " which file to make.");
+            updateButtons();
             return;
         }
+        final boolean[] picked = {false};
         final Candidates.Kind[] kinds = Candidates.Kind.values();
         String[] labels = new String[kinds.length];
         for (int i = 0; i < kinds.length; i++) {
@@ -344,7 +446,10 @@ public class MainActivity extends Activity {
                 + " file to make.");
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle("Which file?")
-                .setItems(labels, (di, which) -> buildCandidate(dump, kinds[which], request))
+                .setItems(labels, (di, which) -> {
+                    picked[0] = true;
+                    buildCandidate(dump, kinds[which], request);
+                })
                 .setNegativeButton("Cancel", null)
                 .create();
         d.setOnDismissListener(di -> {
@@ -352,6 +457,10 @@ public class MainActivity extends Activity {
                 dialog = null;
             }
             if (!gone()) {
+                if (!picked[0] && request == fileRequest) {
+                    fileStatus.setText("No file made yet. Tap \"Download and make the file\" to choose (no new download"
+                            + " is needed).");
+                }
                 updateButtons();
             }
         });
@@ -435,9 +544,17 @@ public class MainActivity extends Activity {
             byte[] stock = null;
             try {
                 data = readAll(getContentResolver().openInputStream(uri));
-                stock = Candidates.isStockDump(data) ? Candidates.stockDump(data) : null;
+                stock = data.length == Candidates.DUMP_SIZE && Candidates.isStockDump(data) ? Candidates.stockDump(data) : null;
                 if (stock != null) {
                     text = "";
+                } else if (data.length == Candidates.DUMP_SIZE) {
+                    String why = "";
+                    try {
+                        Candidates.stockDump(data);
+                    } catch (IllegalArgumentException e) {
+                        why = e.getMessage();
+                    }
+                    text = name + "\nThis is a 2 MiB dump, but " + why + "\nA dump never goes on a card as it is.";
                 } else {
                     result = UpdateCheck.check(name, data);
                     text = name + "\n" + data.length + " bytes, SHA-256 " + result.sha256 + "\n\n" + result.report()
@@ -509,8 +626,8 @@ public class MainActivity extends Activity {
             startActivityForResult(i, PICK_CARD);
         } catch (ActivityNotFoundException | SecurityException e) {
             cardStatus.setText("This phone has no folder picker (" + why(e) + "), so the app cannot reach the card."
-                    + " Copy the update file to the card's top level with the Files app, then choose that copy in step 1"
-                    + " to have it checked.");
+                    + " Save the update file with \"Save a copy to the phone\", copy it to the card's top level with the"
+                    + " Files app, then choose that copy in step 1 to have it checked.");
         }
     }
 
@@ -536,7 +653,8 @@ public class MainActivity extends Activity {
         Uri uri = data.getData();
         if (request == PICK_FILE) {
             loadFile(uri);
-
+        } else if (request == SAVE_COPY) {
+            writeCopy(uri);
         } else if (request == PICK_CARD) {
             if (!DocumentsContract.isTreeUri(uri)) {
                 tree = null;

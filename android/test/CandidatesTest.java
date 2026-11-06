@@ -44,8 +44,13 @@ public final class CandidatesTest {
         expect("a synthetic dump never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.C), "not the reviewed"));
 
         String real = System.getenv("CHARMERA_STOCK_IMAGE");
-        if (real != null && !real.isEmpty()) {
-            byte[] dump = Candidates.stockDump(Files.readAllBytes(Paths.get(real)));
+        byte[] given = real == null || real.isEmpty() ? null : Files.readAllBytes(Paths.get(real));
+        if (given == null) {
+            System.out.println("CandidatesTest: real-dump checks SKIPPED (set CHARMERA_STOCK_IMAGE to the public stock dump)");
+        } else if (!Candidates.isStockDump(given)) {
+            System.out.println("CandidatesTest: real-dump checks SKIPPED (CHARMERA_STOCK_IMAGE is not the public stock dump)");
+        } else {
+            byte[] dump = Candidates.stockDump(given);
             for (Candidates.Kind k : Candidates.Kind.values()) {
                 byte[] out = Candidates.build(dump, k);   // throws unless the SHA-256 is the reviewed one
                 UpdateCheck.Result r = UpdateCheck.check(k.fileName, out);

@@ -129,7 +129,7 @@ When connected by USB the camera presents its card as a storage device (USB ID 1
 DISK A"), so the card can stay in the camera. The owner has confirmed that the drive appears on an Android phone
 connected over USB-C; writing an update file that way and flashing from it has not been tried yet. The same
 dirty-flag problem applies. The app's screens for this route are in its README:
-[Through the camera's USB-C cable](../android/README.md#through-the-cameras-usb-c-cable).
+[the app's five steps](../android/README.md#use).
 
 1. Connect the camera to the phone with a USB-C data cable, pick the camera's drive in the app and write the
    file, as for a card reader.
