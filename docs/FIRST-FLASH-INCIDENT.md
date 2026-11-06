@@ -101,8 +101,9 @@ the sensor's markings or a dump from a matching camera can tell them apart.
 
 ## Routes to a working camera
 
-1. **Reto.** File a ticket at https://www.kodak.retopro.co/pages/help-ticket. A purchase from Reto's own store
-   within 30 days qualifies for an exchange. Say plainly that it was reflashed.
+1. **The seller.** The camera was bought in Japan in November 2026. Reto's 30-day exchange covers only
+   purchases from Reto's own store, so it most likely doesn't apply. The shop it came from is the place to ask.
+   Say plainly that it was reflashed.
 2. **The community.** The request for a dump from a working original-series unit is posted in Project-Sirius #2.
 3. **The film-mods author.** Their camera works on a different build with the same stamp. I compared the
    addresses their notes give with the public dump:
