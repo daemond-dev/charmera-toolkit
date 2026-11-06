@@ -5,17 +5,22 @@ import java.util.List;
 import java.util.zip.CRC32;
 
 /**
- * Makes the three reviewed flash candidates (docs/03-FLASH-CANDIDATES.md) from the public stock dump, the same way
- * the toolkit's recipe does on a computer, so no computer is needed. No firmware is shipped in the app: the owner
- * downloads the public dump, and this class accepts only that exact file (by SHA-256).
+ * Makes the published stock restore file from the public stock dump, the same way the toolkit does on a computer, so
+ * no computer is needed. No firmware is shipped in the app: the owner downloads the public dump, and this class
+ * accepts only that exact file (by SHA-256). The three withdrawn candidates C, A and B (docs/03-FLASH-CANDIDATES.md)
+ * are still described here so that a copy picked from the phone is recognised and refused.
  *
- * The result is accepted only when its SHA-256 equals the reviewed file's, so this path can produce nothing but
- * those three files. No Android imports: it runs on a plain JVM for the tests in android/test.
+ * The result is accepted only when its SHA-256 equals the published or reviewed file's, so this path can produce
+ * nothing else. No Android imports: it runs on a plain JVM for the tests in android/test.
  */
 public final class Candidates {
 
     /** The public stock dump: benbadio/keychain-camera-plus, dumps/charmera_stock_latest.bin (2 MiB). */
     public static final String STOCK_DUMP_SHA256 = "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f";
+    /** The other public dump of the same build: Khimira/Project-Sirius, Original_Firmware.bin. */
+    public static final String SIRIUS_DUMP_SHA256 = "720ed0b65c91b149b0916498732b0ecf40227736ef5e3c126c487a7b5253436c";
+    /** Every public dump: a copy of someone else's camera, never a backup of the owner's. */
+    public static final String[] PUBLIC_DUMP_SHA256S = {STOCK_DUMP_SHA256, SIRIUS_DUMP_SHA256};
     /** Where it is downloaded from: the upstream repository at a fixed commit, so the address never changes. */
     public static final String STOCK_DUMP_DOWNLOAD = "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/"
             + "209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin";
@@ -35,21 +40,24 @@ public final class Candidates {
             Arrays.asList("BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV");
 
     /**
-     * What the app can make. RESTORE is the published stock restore file, which several owners have flashed with
-     * working cameras: the stock dump's first 0x1E0000 bytes, under its published name. C, A and B are withdrawn and
-     * not offered: C (one settings record, the factory one, and erased stored photos) left a camera stuck on the mode
-     * menu, and A and B use the same settings.
+     * What the app can make. RESTORE is the published stock restore file: the stock dump's first 0x1E0000 bytes, under
+     * its published name. C, A and B are withdrawn and not offered: they are the same software with other settings,
+     * and when C was flashed on a camera that then froze in photo and video mode, the restore file froze it the same
+     * way. The cause is most likely a firmware that does not fit that camera's image sensor, which no file made from
+     * the public dump can fix; a copy of C, A or B picked from the phone is recognised and refused.
      */
     public enum Kind {
-        RESTORE(true, "The stock restore file: the published file several owners have flashed with working cameras."
-                + " It is exactly what was dumped from a working camera, with that camera's settings and the 2 photos"
-                + " it kept in its own memory. It puts a camera back to stock.",
+        RESTORE(true, "The stock restore file: the first part of the public dump, under its published name. It is a"
+                + " copy of one working camera's memory, with that camera's settings; its two stored photos come along"
+                + " unlisted. Several owners have flashed it back onto cameras that already ran this build. It did not"
+                + " fit every original-series camera: one was left unable to take pictures by it.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906"),
-        C(false, "Candidate C (withdrawn: it left a camera stuck on its mode menu).",
+        C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
+                + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
-        A(false, "Candidate A (withdrawn: it has the same settings as C).",
+        A(false, "Candidate A (withdrawn: the same software as C with camera sounds off).",
                 "JH_5408202611050001_0FB74D14.bin", "c4822cd7eed63169d80c5105811ab6492444793fafcc7a96e809869f2e5ccda7"),
-        B(false, "Candidate B (withdrawn: it has the same settings as C).",
+        B(false, "Candidate B (withdrawn: the same software as A with silenced sound data).",
                 "JH_5408202611050002_0FB0BD3C.bin", "32a7f54e5090050d099681c33378e3d23822a736279ea78f9f3442a45edc3979");
 
         /** Whether the app offers it. */

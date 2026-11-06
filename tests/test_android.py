@@ -189,3 +189,26 @@ def test_app_candidates_match_the_documented_ones():
     commit = "209c25a47ce91c805b663edb6e18861b367a5a1b"
     assert java.count(commit) == 2      # the download and the page point at the same fixed commit
 
+
+def test_app_writes_nothing_without_a_backup_of_the_camera():
+    """The hard stop: Write and Save a copy need a backup on record and a check compared with it; the write path
+    checks it again on the worker; the app's README says so."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    buttons = _bodies(java, "private void updateButtons()")[0]
+    assert "backup != null && fileCheck.compared" in buttons
+    assert "writeButton.setEnabled(idle && fileOk && cardOk)" in buttons and "saveButton.setEnabled(idle && fileOk)" in buttons
+    assert "ejectButton.setEnabled(!busy)" in buttons
+    for opener in ("private void confirmWrite()", "private void saveCopy()"):
+        assert "backup == null" in _bodies(java, opener)[0], opener
+    report = _bodies(java, "private String writeAndReport(")[0]
+    assert "!check.compared" in report and report.index("!check.compared") < report.index("readCard(t)")
+    load = _bodies(java, "private void loadBackup(")[0]
+    assert "UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S)" in load
+    # a new write clears the old removal result, and the other way round; a new drive clears both
+    assert 'cleanStatus.setText("")' in _bodies(java, "private void write(")[0]
+    assert 'writeStatus.setText("")' in _bodies(java, "private void clean(")[0]
+    result = _bodies(java, "protected void onActivityResult(")[0]
+    assert 'writeStatus.setText("");\n                cleanStatus.setText("");' in result
+    readme = ANDROID_README.read_text(encoding="utf-8")
+    assert re.search(r"No backup of your own camera, no flash", readme)
+    assert "Choose this camera's backup" in readme and "Choose this camera's backup" in java

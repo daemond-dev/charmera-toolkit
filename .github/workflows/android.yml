@@ -84,7 +84,7 @@ jobs:
           # download link keeps working even if GitHub fails part way. Server errors are retried.
           VER=$(cat android/VERSION)
           TITLE="Charmera Card for Android $VER (build ${{ github.run_number }})"
-          NOTES="Puts a verified Charmera update file on an SD card from an Android phone (7.0 or later). Download charmera-card.apk on the phone, open it, and allow the install. What it does and what it cannot do: android/README.md."
+          NOTES="Puts a verified Charmera update file on an SD card from an Android phone (7.0 or later). It writes nothing without a dump of that camera's own flash chip, and compares the update file with it. Download charmera-card.apk on the phone, open it, and allow the install. What it does and what it cannot do: android/README.md."
           retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i * 15)); done; return 1; }
           # Each step can be repeated safely, so a server error never leaves a half-made release behind:
           # create the release only if it is missing (gh also finds a draft by its tag), replace the APK,
