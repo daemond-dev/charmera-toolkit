@@ -1,8 +1,11 @@
 """Reading a Charmera flash image: header, flash map, build identity, resources, sounds, settings, photos.
 
-Everything here is read-only and works on a full 2 MiB dump, a 0x1E0000-byte update file, or a
-software-only image of exactly 0x170000 bytes (the layout of the first 0x170000 bytes is the same in all
-three). Any other length below 0x1E0000 is reported as 'truncated'.
+Everything here is read-only and works on a full 2 MiB dump, a 0x1E0000-byte update file, an official-size
+update file of 0x169000 bytes, or a software-only image of exactly 0x170000 bytes (the layout of the first
+0x169000 bytes is the same in all four). Any other length below 0x1E0000 is reported as 'truncated'.
+
+Build identity is read from the content, never from a fixed offset, and the version stamp is not treated
+as an identity: see the "Known builds" section.
 
 Status labels in comments: VERIFIED = checked against both public dumps and the firmware code by the
 research pass; INFERRED = consistent with the evidence but not proven on hardware; UNKNOWN = guess.
@@ -10,12 +13,13 @@ research pass; INFERRED = consistent with the evidence but not proven on hardwar
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from . import settings as settings_mod
-from .checksum import FLASH_SIZE, UPDATE_FILE_SIZE, byte_sum
+from .checksum import FLASH_SIZE, OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, byte_sum
 
 # --- Fixed layout (file offsets) ----------------------------------------------------------------------
 HEADER_SIZE = 0x200          # VERIFIED: 'SPII' header, ARM vector table starts at 0x200
@@ -34,47 +38,79 @@ USER_AREA_END = 0x1E0000     # VERIFIED: 0x1E0000..0x200000 is 0xFF in every kno
 SPII_MAGIC = b"SPII"
 
 # --- Known builds -------------------------------------------------------------------------------------
+#
+# What identifies a firmware build, and what does not. The 12-digit stamp the updater compares against
+# (`202505201029`) is carried by at least two different builds: the public dump and the build on the
+# charmera-film-mods author's camera (confirmed by that author from their own dump, 2026-11-06). The strings
+# `JH5408  20250520` and `Oct 14 2025`, the yellow boot screen and the "original series" body do not tell
+# them apart either. Only a fingerprint over the software itself does, and even that says which public
+# image a file was made from, not whether it fits the camera it goes into: the two known builds drive the
+# same sensor with the same 61-write table, and a camera fitted with another sensor needs a build nobody has.
+
+CODE_AREA_END = 0x120000          # boot header, code, read-only and initialised data, and the padding below the pack
 
 
 @dataclass(frozen=True)
 class KnownBuild:
     key: str
     label: str
-    stamp: str                 # the 12-digit stamp the updater compares against
-    stamp_offset: int
-    build_string: bytes
-    build_offset: int
-    compiled: bytes
-    compiled_offset: int
-    software_sha256: str       # sha256 of bytes 0..0x170000 (code, data and resources, unmodified)
-    code_sha256: str           # sha256 of bytes 0x200..0x100000 (code and read-only data only)
-    sensor_table: tuple        # (start, end) of the sensor init register table
-    sensor_table_sha256: str   # sha256 of that table: the edition-sensitive part of the image
+    source: str
+    status: str                    # VERIFIED: hashed here from the dump. REPORTED: fingerprint published by its owner.
+    stamp: str                     # the 12-digit stamp compiled into it (the same in both known builds)
+    official_sha1: str             # SHA-1 of bytes 0..0x169000 (the span official updates write)
+    official_byte_sum: int         # the camera's own checksum over the same span
+    sensor_table_sha256: str       # SHA-256 of the 124-byte sensor init table (identical in both known builds)
+    software_sha256: Optional[str] = None   # SHA-256 of bytes 0..0x170000, when the dump is public
+    code_sha256: Optional[str] = None       # SHA-256 of bytes 0x200..0x100000 (code and read-only data)
+    official_sha256: Optional[str] = None   # SHA-256 of bytes 0..0x169000
+    # Where the marks lie in that build's image, for telling a modified copy of it apart from another build.
+    # None = not published for that build.
+    stamp_offset: Optional[int] = None
+    build_offset: Optional[int] = None
+    sensor_table_offset: Optional[int] = None
 
 
-ORIGINAL_2025 = KnownBuild(
-    key="original-2025",
-    label="Original 2025 series (matte body, yellow Kodak boot screen), build JH5408 20250520",
+PUBLIC_BUILD = KnownBuild(
+    key="public-dump",
+    label="the public dump's build (benbadio/keychain-camera-plus and Khimira/Project-Sirius dumps, stamp 202505201029)",
+    source="benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin at commit 209c25a; Khimira/Project-Sirius Original_Firmware.bin",
+    status="VERIFIED",
     stamp="202505201029",
-    stamp_offset=0x218C4,
-    build_string=b"JH5408  20250520",
-    build_offset=0x18964,
-    compiled=b"Oct 14 2025",
-    compiled_offset=0xF3978,
+    official_sha1="d1f21227ab402bc842134070acc29a77041b4a63",
+    official_byte_sum=0x0852B369,
+    sensor_table_sha256="aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
     software_sha256="fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8",
     code_sha256="297506be352e2efb0e9231936197c0798f2633dd27a005ae64a0b3ad547d33f6",
-    sensor_table=(0xF5C6C, 0xF5CE8),
-    sensor_table_sha256="aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
+    official_sha256="bffddd53d01a42725d63aa08dff5585433604a680a85520b23f3e176ae80f745",
+    stamp_offset=0x218C4,
+    build_offset=0x18964,
+    sensor_table_offset=0xF5C6C,
 )
 
-KNOWN_BUILDS = {ORIGINAL_2025.key: ORIGINAL_2025}
+FILM_MODS_BUILD = KnownBuild(
+    key="film-mods",
+    label="the charmera-film-mods author's build (same stamp 202505201029, different bytes; fingerprint reported by its owner)",
+    source="Hyperlite-Media/charmera-film-mods: the author's factory dump, not public; fingerprint from issue #1 (2026-11-06)",
+    status="REPORTED",
+    stamp="202505201029",
+    official_sha1="91499bd3bff3acde053cb8c8255a73cdeb6e3d33",
+    official_byte_sum=0x0852C329,
+    sensor_table_sha256="aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
+    stamp_offset=0x218D0,
+    sensor_table_offset=0xF5D34,
+)
+
+KNOWN_BUILDS = {b.key: b for b in (PUBLIC_BUILD, FILM_MODS_BUILD)}
+
+# The stamp both known builds carry. A file name with this stamp is ignored by a camera running either build.
+SHARED_STAMP = "202505201029"
 
 # Public full dumps, for reference only. Never redistributed by this toolkit.
 PUBLIC_DUMPS: Dict[str, str] = {
     "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f":
-        "benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin (original series)",
+        "benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin (the public dump's build)",
     "720ed0b65c91b149b0916498732b0ecf40227736ef5e3c126c487a7b5253436c":
-        "Khimira/Project-Sirius Original_Firmware.bin (original series)",
+        "Khimira/Project-Sirius Original_Firmware.bin (the public dump's build)",
 }
 
 # --- Header -------------------------------------------------------------------------------------------
@@ -104,46 +140,221 @@ def parse_header(image: bytes) -> SpiiHeader:
     return SpiiHeader(magic=bytes(image[:4]), words=words, reg_init=pairs)
 
 
+# --- Build marks, found by content ----------------------------------------------------------------------
+#
+# Nothing here reads a fixed offset. The marks move between builds (the stamp is at 0x218C4 in the public
+# dump and 0x218D0 in the film-mods build; the sensor table at 0xF5C6C and 0xF5D34), so each one is found by
+# what it looks like, and the sensor table is cross-checked against the code that points at it.
+
+# The sensor's reset table: page select (register 0xFD = 0), register 0x20 = 0, end marker. VERIFIED in the
+# public dump at 0xF5BFC, confirmed at +0xC8 in the film-mods build by its author.
+SENSOR_RESET_TABLE = bytes.fromhex("fd002000ffff")
+SENSOR_TABLE_END = b"\xff\xff"
+SENSOR_PAGE_REGISTER = 0xFD
+_STAMP_RE = re.compile(rb"(?<![0-9])([0-9]{12})\x00")
+_BUILD_STRING_RE = re.compile(rb"JH5408 +[0-9]{8}")
+_COMPILED_RE = re.compile(rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ 0-9][0-9] 20[0-9]{2}(?=\x00)")
+_UPDATE_PATTERN = b"*.bin\x00"
+
+
+@dataclass(frozen=True)
+class SensorTables:
+    reset: tuple               # (start, end) file offsets of the reset table
+    init: tuple                # (start, end) file offsets of the init table, end marker included
+    pairs: int                 # (register, value) writes in the init table, end marker excluded
+    sha256: str                # of the init table bytes, end marker included
+    bus_address: Optional[int]  # the write address the config struct after the reset table names (0x78 here); INFERRED
+    referenced_from: Optional[int]  # file offset of the code literal holding the init table's RAM address, or None
+
+    @property
+    def init_bytes_len(self) -> int:
+        return self.init[1] - self.init[0]
+
+
+@dataclass(frozen=True)
+class BuildMarks:
+    stamp: Optional[str] = None
+    stamp_offset: Optional[int] = None
+    build_string: Optional[bytes] = None
+    build_offset: Optional[int] = None
+    compiled: Optional[bytes] = None
+    compiled_offset: Optional[int] = None
+    sensor: Optional[SensorTables] = None
+
+    @property
+    def complete(self) -> bool:
+        """The three marks every Charmera build is expected to carry."""
+        return self.stamp is not None and self.build_string is not None and self.sensor is not None
+
+
+def _register_table_end(image: bytes, start: int, limit: int = 2048) -> Optional[int]:
+    """End (exclusive, marker included) of a (register, value) pair table that starts at `start`, or None."""
+    p = start
+    stop = min(len(image) - 1, start + limit)
+    while p < stop:
+        if image[p: p + 2] == SENSOR_TABLE_END:
+            return p + 2
+        p += 2
+    return None
+
+
+def _literal_offset(image: bytes, ram_address: int, end: int) -> Optional[int]:
+    """File offset of a little-endian word holding ram_address in the code area, or None."""
+    needle = struct.pack("<I", ram_address)
+    i = image.find(needle, HEADER_SIZE, end)
+    return None if i < 0 else i
+
+
+def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
+    """Locate the sensor reset table and the init table the firmware writes to the image sensor at boot.
+
+    The reset table is found by its exact bytes. The init table is the first (register, value) table after
+    it that starts with a page select, holds at least 16 writes, switches page at least once more and ends
+    with the ff ff marker. Both must lie in the code area. When more than one spot fits, the one whose init
+    table the code refers to by address (a literal of RAM address = file offset - 0x200) wins.
+    """
+    end = min(len(image), CODE_AREA_END)
+    candidates = []
+    i = image.find(SENSOR_RESET_TABLE, HEADER_SIZE, end)
+    while 0 <= i < end:
+        reset = (i, i + len(SENSOR_RESET_TABLE))
+        p = reset[1]
+        found = None
+        while p < min(end, reset[1] + 0x400):
+            if image[p] == SENSOR_PAGE_REGISTER and image[p + 1] == 0:
+                e = _register_table_end(image, p)
+                if e is not None and e <= end:
+                    pairs = (e - p) // 2 - 1
+                    pages = sum(1 for k in range(p + 2, e - 2, 2) if image[k] == SENSOR_PAGE_REGISTER)
+                    if pairs >= 16 and pages >= 1:
+                        found = (p, e, pairs)
+                        break
+            p += 2
+        if found:
+            s, e, pairs = found
+            ref = _literal_offset(image, s - VA_OFFSET, end)
+            bus_at = (reset[1] + 3) & ~3
+            bus = struct.unpack_from("<I", image, bus_at)[0] if bus_at + 4 <= len(image) else None
+            candidates.append(SensorTables(reset, (s, e), pairs, hashlib.sha256(image[s:e]).hexdigest(),
+                                           bus if bus is not None and 0 < bus < 0x100 else None, ref))
+        i = image.find(SENSOR_RESET_TABLE, i + 1, end)
+    if not candidates:
+        return None
+    referenced = [c for c in candidates if c.referenced_from is not None]
+    return (referenced or candidates)[0]
+
+
+def find_marks(image: bytes) -> BuildMarks:
+    """The build marks, each found by its content in the code area. Any of them may be missing."""
+    code = bytes(image[:min(len(image), CODE_AREA_END)])
+    stamp = stamp_off = None
+    stamps = list(_STAMP_RE.finditer(code))
+    near = [m for m in stamps if _UPDATE_PATTERN in code[max(0, m.start(1) - 64): m.start(1)]]
+    pick = near[0] if near else (stamps[0] if len(stamps) == 1 else None)
+    if pick:
+        stamp, stamp_off = pick.group(1).decode("ascii"), pick.start(1)
+    b = _BUILD_STRING_RE.search(code)
+    c = _COMPILED_RE.search(code)
+    return BuildMarks(
+        stamp=stamp, stamp_offset=stamp_off,
+        build_string=b.group(0) if b else None, build_offset=b.start() if b else None,
+        compiled=c.group(0) if c else None, compiled_offset=c.start() if c else None,
+        sensor=find_sensor_tables(image),
+    )
+
+
 # --- Build identity -----------------------------------------------------------------------------------
 
 
 @dataclass
 class BuildMatch:
-    build: Optional[KnownBuild]
+    marks: BuildMarks
+    build: Optional[KnownBuild]        # the known build this image is, or was made from
+    modified: bool                     # True when it is that build with changes (a mod, or another camera's state)
     checks: Dict[str, bool] = field(default_factory=dict)
 
     @property
-    def series(self) -> str:
-        return self.build.key if self.build else "unknown"
+    def charmera(self) -> bool:
+        """Charmera firmware of some build: the build string, the stamp and a sensor table were all found."""
+        return self.marks.complete
+
+    @property
+    def identity(self) -> str:
+        if self.build is not None:
+            return self.build.key + ("-modified" if self.modified else "")
+        return "charmera-unknown-build" if self.charmera else "not-charmera"
+
+    @property
+    def label(self) -> str:
+        if self.build is not None:
+            return self.build.label + (" with changes" if self.modified else "")
+        if self.charmera:
+            return "Charmera firmware of a build this toolkit does not know (no public image has this fingerprint)"
+        return "not a known Charmera build (build marks missing)"
 
     @property
     def exact(self) -> bool:
-        return self.build is not None and all(self.checks.values())
+        return self.build is not None and not self.modified
 
 
 def software_sha256(image: bytes) -> str:
     return hashlib.sha256(image[:SOFTWARE_END]).hexdigest()
 
 
-def detect_build(image: bytes) -> BuildMatch:
-    """Identify the firmware build from its stamps and the software-region hash.
+def official_fingerprint(image: bytes) -> Optional[tuple]:
+    """(sha256, sha1, byte sum) of bytes 0..0x169000, the span official updates write, or None if shorter."""
+    if len(image) < OFFICIAL_UPDATE_SIZE:
+        return None
+    span = image[:OFFICIAL_UPDATE_SIZE]
+    return hashlib.sha256(span).hexdigest(), hashlib.sha1(span).hexdigest(), byte_sum(span)
 
-    A modified image (sounds replaced, patches applied) keeps its stamps but changes the hash; the
-    caller decides whether that is acceptable. Anything whose stamps do not match is 'unknown'.
+
+def match_known_build(image: bytes) -> Optional[KnownBuild]:
+    """The known build whose fingerprint over 0..0x169000 this image carries, unmodified, or None."""
+    fp = official_fingerprint(image)
+    if fp is None:
+        return None
+    sha256, sha1, s = fp
+    for b in KNOWN_BUILDS.values():
+        if b.official_sha256 is not None and b.official_sha256 == sha256:
+            return b
+        if b.official_sha1 == sha1 and b.official_byte_sum == s:
+            return b
+    return None
+
+
+def detect_build(image: bytes) -> BuildMatch:
+    """Say which build an image is, from its content, and what that does and does not prove.
+
+    An exact fingerprint over bytes 0..0x169000 names a known build. Failing that, the marks' offsets name
+    the known build a modified image was made from (a mod keeps the stamp, the build string and the sensor
+    table where they were). Images with marks at other offsets are Charmera firmware of an unknown build;
+    images without marks are not Charmera firmware. The stamp alone never identifies a build.
     """
-    for build in KNOWN_BUILDS.values():
-        checks = {
-            "stamp": image[build.stamp_offset: build.stamp_offset + 12] == build.stamp.encode(),
-            "build_string": image[build.build_offset: build.build_offset + len(build.build_string)] == build.build_string,
-            "compiled": image[build.compiled_offset: build.compiled_offset + len(build.compiled)] == build.compiled,
-        }
-        if checks["stamp"] and checks["build_string"]:
-            checks["code_sha256"] = len(image) >= 0x100000 and hashlib.sha256(image[0x200:0x100000]).hexdigest() == build.code_sha256
-            s, e = build.sensor_table
-            checks["sensor_table"] = len(image) >= e and hashlib.sha256(image[s:e]).hexdigest() == build.sensor_table_sha256
-            checks["software_sha256"] = len(image) >= SOFTWARE_END and software_sha256(image) == build.software_sha256
-            return BuildMatch(build, checks)
-    return BuildMatch(None, {})
+    marks = find_marks(image)
+    exact = match_known_build(image)
+    build, modified = exact, False
+    if build is None and marks.complete:
+        for b in KNOWN_BUILDS.values():
+            same = [marks.stamp_offset == b.stamp_offset if b.stamp_offset is not None else None,
+                    marks.build_offset == b.build_offset if b.build_offset is not None else None,
+                    marks.sensor.init[0] == b.sensor_table_offset if b.sensor_table_offset is not None else None]
+            known = [x for x in same if x is not None]
+            if known and all(known) and marks.stamp == b.stamp:
+                build, modified = b, True
+                break
+    checks = {
+        "build_string": marks.build_string is not None,
+        "stamp": marks.stamp is not None,
+        "compiled": marks.compiled is not None,
+        "sensor_table": marks.sensor is not None,
+        "sensor_table_referenced": marks.sensor is not None and marks.sensor.referenced_from is not None,
+        "sensor_table_known": marks.sensor is not None and marks.sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()},
+        "code_sha256": len(image) >= 0x100000 and hashlib.sha256(image[0x200:0x100000]).hexdigest() == PUBLIC_BUILD.code_sha256,
+        "software_sha256": len(image) >= SOFTWARE_END and software_sha256(image) == PUBLIC_BUILD.software_sha256,
+        "fingerprint": exact is not None,
+    }
+    return BuildMatch(marks, build, modified, checks)
 
 
 def updater_extra_erase(file_len: int) -> int:
@@ -156,9 +367,10 @@ def updater_extra_erase(file_len: int) -> int:
 
 def describe_erase_target(off: int) -> str:
     if off >= FLASH_SIZE:
-        return "beyond the 2 MiB chip (what the flash does with that address is unknown; a brick is reported)"
+        return "beyond the 2 MiB chip (the address wraps to block 1 and bricks the camera: confirmed by the film-mods author on hardware)"
     if SETTINGS_BASE <= off < 0x180000:
-        return "the settings bank: the camera will reset to defaults and blank its photo directory"
+        return ("the settings bank and the photo directory: at the next start the camera applies factory defaults and writes an "
+                "empty photo list, so the photos stored in its own memory stay but are no longer listed")
     if 0x180000 <= off < 0x1CB000:
         return "the internal photo area: a stored photo is partly erased while the directory still lists it"
     if 0x1CB000 <= off < USER_AREA_END:
@@ -168,17 +380,19 @@ def describe_erase_target(off: int) -> str:
     return "inside the software or resource area"
 
 
-def embedded_stamp(image: bytes, build: KnownBuild = ORIGINAL_2025) -> str:
-    return image[build.stamp_offset: build.stamp_offset + 12].decode("ascii", "replace")
+def embedded_stamp(image: bytes) -> str:
+    """The 12-digit stamp compiled into the firmware, found by content; '' when there is none."""
+    return find_marks(image).stamp or ""
 
 
 # --- Image kind ---------------------------------------------------------------------------------------
 
 
 def image_kind(image: bytes) -> str:
-    """'dump' (2 MiB), 'update' (0x1E0000), 'software-only' (exactly 0x170000: code, data and the whole
-    resource pack), 'truncated' (any other length below 0x1E0000: a cut-off download or an incomplete
-    read, which would leave part of the code or resource pack erased), or 'unknown'."""
+    """'dump' (2 MiB), 'update' (0x1E0000, the published size), 'official-update' (0x169000, where official
+    updates and the film-mods files end: code, data and the whole resource pack, nothing of the camera's own
+    area), 'software-only' (exactly 0x170000), 'truncated' (any other length below 0x1E0000: a cut-off
+    download or an incomplete read, which would leave part of the code or resource pack erased), or 'unknown'."""
     n = len(image)
     if n == FLASH_SIZE:
         return "dump"
@@ -186,6 +400,8 @@ def image_kind(image: bytes) -> str:
         return "update"
     if n == SOFTWARE_END:
         return "software-only"
+    if n == OFFICIAL_UPDATE_SIZE:
+        return "official-update"
     if n < UPDATE_FILE_SIZE:
         return "truncated"
     return "unknown"
@@ -399,11 +615,14 @@ def summarize(image: bytes) -> dict:
         "magic_ok": hdr.magic_ok,
         "header_words": hdr.words,
         "reg_init": hdr.reg_init,
-        "series": build.series,
-        "series_label": build.build.label if build.build else "not a known build",
-        "series_checks": build.checks,
-        "embedded_stamp": embedded_stamp(image) if len(image) > ORIGINAL_2025.stamp_offset + 12 else "",
+        "identity": build.identity,
+        "identity_label": build.label,
+        "identity_checks": build.checks,
+        "build": build,
+        "marks": build.marks,
+        "embedded_stamp": build.marks.stamp or "",
         "software_sha256": software_sha256(image) if len(image) >= SOFTWARE_END else None,
+        "official_fingerprint": official_fingerprint(image),
         "public_dump": PUBLIC_DUMPS.get(hashlib.sha256(image).hexdigest()),
         "resources": resource_directory(image),
         "resources_end": find_resources_end(image) if len(image) > RESOURCE_BASE else None,

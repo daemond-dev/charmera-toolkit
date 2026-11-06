@@ -16,10 +16,16 @@ import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
 /**
- * The checks `charmera verify` makes, for the one file size the toolkit produces (0x1E0000 bytes). No Android
- * imports, so it runs on a plain JVM for the tests in android/test.
+ * The checks `charmera verify` makes, for the two update-file sizes the camera is known to take: 0x1E0000 bytes (the
+ * community files) and 0x169000 bytes (official updates). No Android imports, so it runs on a plain JVM for the tests in
+ * android/test.
  *
  * A file passes only when every FAIL-level check passes. WARN lines are shown and do not block.
+ *
+ * Every check looks at the file. None looks at the camera. The one thing that does say something about a particular
+ * camera is a dump of that camera's own flash chip: given as the reference, the file's image-sensor program and its
+ * software are compared with it. Without one, the sensor line is a warning that cannot be cleared: two different
+ * builds carry the same version stamp, and the public build does not fit every original-series camera.
  *
  * Every line is written for the owner reading it on a phone: a plain title and text, and any numbers, sums or
  * offsets below it as a labelled detail. Result.verdict() is the one-line answer for the top of the report.
@@ -27,7 +33,11 @@ import java.util.zip.Inflater;
 public final class UpdateCheck {
 
     public static final int UPDATE_SIZE = 0x1E0000;
+    /** Where official updates and the film-mods files end: code, data and the resource pack, nothing of the camera's own area. */
+    public static final int OFFICIAL_SIZE = 0x169000;
     public static final String PRODUCT = "5408";
+    /** The stamp both known builds carry (the public dump and the film-mods author's build): it identifies neither. */
+    public static final String SHARED_STAMP = "202505201029";
 
     static final int SOFTWARE_END = 0x170000;
     static final int SETTINGS_BASE = 0x170000;
@@ -44,53 +54,61 @@ public final class UpdateCheck {
     static final int DIRECTORY_ENTRY = 24;
     static final int MAX_LISTED_PROBLEMS = 8;
     static final int[] PHOTO_SLOTS = {0x180000, 0x1A5800};
+    /** File offset = RAM address + this. */
+    static final int VA_OFFSET = 0x200;
 
-    /** sha256 of bytes 0..0x120000 (CODE_AREA_END) of the original 2025 series stock dump; tests/test_android.py checks it. */
-    static final String ORIGINAL_2025_CODE_AREA_SHA256 = "a96b29c21a6c20d66df4636797cb13224e06cdb223c3cf6a7ef06dde6a9c0dc7";
+    /** The sensor's reset table: page select 0, register 0x20 = 0, end marker. The init table follows it. */
+    public static final byte[] SENSOR_RESET_TABLE = {(byte) 0xFD, 0, 0x20, 0, (byte) 0xFF, (byte) 0xFF};
+    static final int SENSOR_PAGE_REGISTER = 0xFD;
 
-    /** What identifies a firmware build. The real one is ORIGINAL_2025; tests make their own. */
+    /** sha256 of bytes 0..0x120000 (CODE_AREA_END) of the public dump; tests/test_android.py checks it. */
+    static final String PUBLIC_CODE_AREA_SHA256 = "a96b29c21a6c20d66df4636797cb13224e06cdb223c3cf6a7ef06dde6a9c0dc7";
+
+    /**
+     * What identifies a firmware build: fingerprints over its bytes, never the version stamp. The real one is
+     * PUBLIC_BUILD; tests make their own. The mark offsets say where that build keeps its marks, so a changed copy of
+     * it can be told from another build (which keeps them elsewhere: the film-mods build has its stamp at 0x218D0).
+     */
     public static final class Build {
-        /** The edition in the owner's words, as the report shows it: "original 2025 series (matte body, ...)". */
+        /** The build in the owner's words, as the report shows it. */
         final String label;
+        /** The stamp compiled into it: a file name with this stamp is ignored by a camera running the build. */
         final String stamp;
-        final int stampOffset;
-        final byte[] buildString;
-        final int buildOffset;
-        final byte[] compiled;
-        final int compiledOffset;
         /** sha256 of bytes 0..0x170000: header, code, data and resources. */
         final String softwareSha256;
         /** sha256 of bytes 0..0x120000: header, code and data, everything below the resource pack. */
         final String codeAreaSha256;
-        final int sensorStart;
-        final int sensorEnd;
+        /** sha256 of bytes 0..0x169000: what an official update writes. */
+        final String officialSha256;
+        /** sha256 of the sensor init table, end marker included. */
         final String sensorSha256;
+        final int stampOffset;
+        final int buildOffset;
+        final int sensorOffset;
 
-        public Build(String label, String stamp, int stampOffset, String buildString, int buildOffset, String compiled,
-                     int compiledOffset, String softwareSha256, String codeAreaSha256, int sensorStart, int sensorEnd,
-                     String sensorSha256) {
+        public Build(String label, String stamp, String softwareSha256, String codeAreaSha256, String officialSha256,
+                     String sensorSha256, int stampOffset, int buildOffset, int sensorOffset) {
             this.label = label;
             this.stamp = stamp;
-            this.stampOffset = stampOffset;
-            this.buildString = buildString.getBytes(StandardCharsets.US_ASCII);
-            this.buildOffset = buildOffset;
-            this.compiled = compiled.getBytes(StandardCharsets.US_ASCII);
-            this.compiledOffset = compiledOffset;
             this.softwareSha256 = softwareSha256;
             this.codeAreaSha256 = codeAreaSha256;
-            this.sensorStart = sensorStart;
-            this.sensorEnd = sensorEnd;
+            this.officialSha256 = officialSha256;
             this.sensorSha256 = sensorSha256;
+            this.stampOffset = stampOffset;
+            this.buildOffset = buildOffset;
+            this.sensorOffset = sensorOffset;
         }
     }
 
-    /** Values from charmera_toolkit/image.py (the code-area hash from the stock dump itself); keep them in step. */
-    public static final Build ORIGINAL_2025 = new Build(
-            "original 2025 series (matte body, yellow Kodak boot screen)",
-            "202505201029", 0x218C4, "JH5408  20250520", 0x18964, "Oct 14 2025", 0xF3978,
+    /** Values from charmera_toolkit/image.py (PUBLIC_BUILD, hashed from the stock dump itself); keep them in step. */
+    public static final Build PUBLIC_BUILD = new Build(
+            "the public dump's build (the one several owners' cameras run, and the one the stock restore file is)",
+            SHARED_STAMP,
             "fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8",
-            ORIGINAL_2025_CODE_AREA_SHA256,
-            0xF5C6C, 0xF5CE8, "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755");
+            PUBLIC_CODE_AREA_SHA256,
+            "bffddd53d01a42725d63aa08dff5585433604a680a85520b23f3e176ae80f745",
+            "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
+            0x218C4, 0x18964, 0xF5C6C);
 
     /** JH_ + 4-digit product + 12-digit stamp + _ + 8 hex digits, anywhere in the name (copies get " (1)" added). */
     static final Pattern NAME = Pattern.compile("JH_(\\d{4})(\\d{12})_([0-9A-Fa-f]{8})");
@@ -101,6 +119,11 @@ public final class UpdateCheck {
     static final String RESTORE_INSTEAD = "To restore the camera, tap \"Download the stock restore file\" instead.";
     /** The same, plus the way to a working mod. */
     static final String INSTEAD = RESTORE_INSTEAD + " For a mod, make the file again with charmera pack on a computer.";
+    /** What a build match does and does not prove. Every build line carries it. */
+    static final String NOT_THE_CAMERA = "A build match says which public image the file was made from, not whether it fits"
+            + " your camera: only a dump of your camera's own chip does.";
+    /** How the backup gets into the app; the button is named as MainActivity labels it. */
+    static final String BACKUP_STEP = "Choose that dump with \"Choose this camera's backup\" in step 0 and the app compares them.";
 
     public static final class Line {
         public final Level level;
@@ -129,6 +152,58 @@ public final class UpdateCheck {
         }
     }
 
+    /** The build marks found in a file by their content, never at a fixed offset. -1 and null mean not found. */
+    public static final class Marks {
+        public final String stamp;
+        public final int stampOffset;
+        public final String buildString;
+        public final int buildOffset;
+        public final int resetStart;
+        public final int sensorStart;
+        public final int sensorEnd;
+        public final int sensorPairs;
+        public final String sensorSha256;
+        /** The code literal holding the init table's RAM address, or -1 when no code refers to it. */
+        public final int referencedFrom;
+        /** The sensor's bus write address from the config struct after the reset table, or -1. */
+        public final int busAddress;
+
+        Marks(String stamp, int stampOffset, String buildString, int buildOffset, int resetStart, int sensorStart,
+              int sensorEnd, int sensorPairs, String sensorSha256, int referencedFrom, int busAddress) {
+            this.stamp = stamp;
+            this.stampOffset = stampOffset;
+            this.buildString = buildString;
+            this.buildOffset = buildOffset;
+            this.resetStart = resetStart;
+            this.sensorStart = sensorStart;
+            this.sensorEnd = sensorEnd;
+            this.sensorPairs = sensorPairs;
+            this.sensorSha256 = sensorSha256;
+            this.referencedFrom = referencedFrom;
+            this.busAddress = busAddress;
+        }
+
+        /** The three marks every Charmera build carries. */
+        public boolean complete() {
+            return stamp != null && buildString != null && sensorStart >= 0;
+        }
+
+        /** Which of the three are missing, in plain words, or "". */
+        String missing() {
+            List<String> out = new ArrayList<>();
+            if (buildString == null) {
+                out.add("the build string");
+            }
+            if (stamp == null) {
+                out.add("the version stamp");
+            }
+            if (sensorStart < 0) {
+                out.add("the image sensor's set-up table");
+            }
+            return String.join(", ", out);
+        }
+    }
+
     public static final class Result {
         public final List<Line> lines;
         /** True when no FAIL line was produced. */
@@ -137,14 +212,14 @@ public final class UpdateCheck {
         public final String cardName;
         public final String sha256;
         public final int size;
-        /** The edition the file was checked against, in plain words, or null. */
-        final String edition;
+        /** True when the file was compared with a dump of the camera (the owner's backup). */
+        public final boolean compared;
 
         Result(List<Line> lines, String cardName, String sha256, int size) {
-            this(lines, cardName, sha256, size, null);
+            this(lines, cardName, sha256, size, false);
         }
 
-        Result(List<Line> lines, String cardName, String sha256, int size, String edition) {
+        Result(List<Line> lines, String cardName, String sha256, int size, boolean compared) {
             boolean failed = false;
             for (Line l : lines) {
                 if (l.level == Level.FAIL) {
@@ -157,13 +232,13 @@ public final class UpdateCheck {
             this.cardName = cardName;
             this.sha256 = sha256;
             this.size = size;
-            this.edition = edition;
+            this.compared = compared;
         }
 
         /**
-         * The plain answer for the top of the report. When the file passed: "OK to put on the card.", the edition it
-         * is for, and any warnings in full, to read first. When it did not: "Not OK to put on the card.", the first
-         * problem with its cause and what to do next, and how many more there are.
+         * The plain answer for the top of the report. When the file passed: "OK to put on the card." and any warnings
+         * in full, to read first. When it did not: "Not OK to put on the card.", the first problem with its cause and
+         * what to do next, and how many more there are.
          */
         public String verdict() {
             Line first = null;
@@ -187,9 +262,6 @@ public final class UpdateCheck {
                         + more;
             }
             StringBuilder sb = new StringBuilder("OK to put on the card.");
-            if (edition != null) {
-                sb.append(" It is only for the ").append(edition).append('.');
-            }
             if (warned.isEmpty()) {
                 sb.append(" Every check passed.");
             } else {
@@ -218,14 +290,163 @@ public final class UpdateCheck {
     private UpdateCheck() {
     }
 
+    // --- the build marks, by content ----------------------------------------------------------------------------
+
+    private static boolean digit(byte b) {
+        return b >= '0' && b <= '9';
+    }
+
+    static int indexOf(byte[] data, byte[] needle, int from, int to) {
+        outer:
+        for (int i = Math.max(0, from); i + needle.length <= Math.min(to, data.length); i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (data[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
+    }
+
+    /** End (exclusive, marker included) of the (register, value) table starting at start, or -1. */
+    private static int registerTableEnd(byte[] data, int start, int limit) {
+        for (int p = start; p + 2 <= Math.min(data.length, start + limit); p += 2) {
+            if ((data[p] & 0xFF) == 0xFF && (data[p + 1] & 0xFF) == 0xFF) {
+                return p + 2;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * The build marks, each found by what it looks like in the code area: the 12-digit stamp (ASCII digits then a NUL,
+     * after a non-digit, by preference the one that follows the "*.bin" the updater matches with), the build string
+     * "JH5408  <date>", and the sensor program: the reset table by its exact bytes, then the first (register, value)
+     * table after it that starts with a page select, switches page at least once more, holds 16 writes or more and
+     * ends with the ff ff marker. Where several spots fit, the init table the code points at by address wins.
+     */
+    public static Marks findMarks(byte[] data) {
+        int end = Math.min(data.length, CODE_AREA_END);
+        String stamp = null;
+        int stampOffset = -1;
+        int runs = 0;
+        int firstRun = -1;
+        byte[] updatePattern = "*.bin\0".getBytes(StandardCharsets.US_ASCII);
+        for (int i = VA_OFFSET; i + 13 <= end; i++) {
+            if (!digit(data[i]) || digit(data[i - 1])) {
+                continue;
+            }
+            int j = i;
+            while (j < end && digit(data[j])) {
+                j++;
+            }
+            if (j - i == 12 && j < end && data[j] == 0) {
+                runs++;
+                if (firstRun < 0) {
+                    firstRun = i;
+                }
+                if (indexOf(data, updatePattern, i - 64, i) >= 0) {
+                    stamp = new String(data, i, 12, StandardCharsets.US_ASCII);
+                    stampOffset = i;
+                    break;
+                }
+            }
+            i = j;
+        }
+        if (stamp == null && runs == 1) {
+            stamp = new String(data, firstRun, 12, StandardCharsets.US_ASCII);
+            stampOffset = firstRun;
+        }
+        String buildString = null;
+        int buildOffset = -1;
+        byte[] jh = "JH5408".getBytes(StandardCharsets.US_ASCII);
+        for (int at = indexOf(data, jh, VA_OFFSET, end); at >= 0; at = indexOf(data, jh, at + 1, end)) {
+            int p = at + jh.length;
+            int spaces = 0;
+            while (p < end && data[p] == ' ') {
+                p++;
+                spaces++;
+            }
+            int q = p;
+            while (q < end && q - p < 8 && digit(data[q])) {
+                q++;
+            }
+            if (spaces >= 1 && q - p == 8) {
+                buildString = new String(data, at, q - at, StandardCharsets.US_ASCII);
+                buildOffset = at;
+                break;
+            }
+        }
+        int resetStart = -1;
+        int sensorStart = -1;
+        int sensorEnd = -1;
+        int pairs = 0;
+        int referencedFrom = -1;
+        int bus = -1;
+        boolean pickedReferenced = false;
+        for (int at = indexOf(data, SENSOR_RESET_TABLE, VA_OFFSET, end); at >= 0 && !pickedReferenced;
+             at = indexOf(data, SENSOR_RESET_TABLE, at + 1, end)) {
+            int resetEnd = at + SENSOR_RESET_TABLE.length;
+            for (int p = resetEnd; p + 2 <= Math.min(end, resetEnd + 0x400); p += 2) {
+                if ((data[p] & 0xFF) != SENSOR_PAGE_REGISTER || data[p + 1] != 0) {
+                    continue;
+                }
+                int e = registerTableEnd(data, p, 2048);
+                if (e < 0 || e > end) {
+                    continue;
+                }
+                int n = (e - p) / 2 - 1;
+                int pages = 0;
+                for (int k = p + 2; k < e - 2; k += 2) {
+                    if ((data[k] & 0xFF) == SENSOR_PAGE_REGISTER) {
+                        pages++;
+                    }
+                }
+                if (n < 16 || pages < 1) {
+                    continue;
+                }
+                int ram = p - VA_OFFSET;
+                byte[] literal = {(byte) ram, (byte) (ram >> 8), (byte) (ram >> 16), (byte) (ram >> 24)};
+                int ref = indexOf(data, literal, VA_OFFSET, end);
+                if (sensorStart < 0 || ref >= 0) {
+                    resetStart = at;
+                    sensorStart = p;
+                    sensorEnd = e;
+                    pairs = n;
+                    referencedFrom = ref;
+                    int busAt = (resetEnd + 3) & ~3;
+                    long b = busAt + 4 <= data.length ? u32(data, busAt) : -1;
+                    bus = b > 0 && b < 0x100 ? (int) b : -1;
+                    pickedReferenced = ref >= 0;
+                }
+                break;
+            }
+        }
+        return new Marks(stamp, stampOffset, buildString, buildOffset, resetStart, sensorStart, sensorEnd, pairs,
+                sensorStart < 0 ? null : sha256Hex(data, sensorStart, sensorEnd), referencedFrom, bus);
+    }
+
+    // --- the checks ------------------------------------------------------------------------------------------------
+
     public static Result check(String displayName, byte[] data) {
-        return check(displayName, data, ORIGINAL_2025);
+        return check(displayName, data, PUBLIC_BUILD, null);
     }
 
     public static Result check(String displayName, byte[] data, Build build) {
+        return check(displayName, data, build, null);
+    }
+
+    /**
+     * reference is a dump of the camera the file goes into (the owner's backup), or null. With it, the file's sensor
+     * program and software are compared with that camera's own firmware; without it, they are only compared with the
+     * known build and the sensor line stays a warning.
+     */
+    public static Result check(String displayName, byte[] data, Build build, byte[] reference) {
         List<Line> out = new ArrayList<>();
         String cardName = null;
         long sum = byteSum(data);
+        Marks marks = findMarks(data);
 
         // 1. The name: the camera only looks for JH_5408<stamp>_<sum>.bin, and the sum is its only integrity check.
         Matcher m = NAME.matcher(displayName == null ? "" : displayName);
@@ -263,12 +484,12 @@ public final class UpdateCheck {
                             : "the name says " + hex8(named) + "; the bytes add up to " + hex8(sum) + "."));
             boolean differs = !stamp.equals(build.stamp);
             out.add(new Line(differs ? Level.PASS : Level.FAIL, "stamp", "Stamp", differs
-                    ? "the 12 digits in the name differ from the camera's own stamp, so the camera will not skip the"
-                    + " file."
-                    : "the 12 digits in the name are the camera's own stamp, so the camera would skip the file. Make"
-                    + " the file again with charmera pack on a computer, which gives it another stamp. "
-                    + RESTORE_INSTEAD,
-                    differs ? "in the name " + stamp + "; the camera's own " + build.stamp + "."
+                    ? "the 12 digits in the name differ from the stamp the known builds carry, so a camera running one"
+                    + " of them will not skip the file."
+                    : "the 12 digits in the name are the stamp the known builds carry, so a camera running one of them"
+                    + " would skip the file. Make the file again with charmera pack on a computer, which gives it"
+                    + " another stamp. " + RESTORE_INSTEAD,
+                    differs ? "in the name " + stamp + "; the known builds' own " + build.stamp + "."
                             : "stamp " + stamp + "."));
             boolean realDate = isRealStamp(stamp);
             out.add(new Line(realDate ? Level.PASS : Level.WARN, "stamp-date", "Stamp date", realDate
@@ -276,27 +497,45 @@ public final class UpdateCheck {
                     : "the stamp is not a real date and time. The camera does not mind, so this does not stop the"
                     + " update.",
                     realDate ? "" : "stamp " + stamp + ", read as year, month, day, hour and minute."));
+            if (marks.stamp != null && !marks.stamp.equals(stamp)) {
+                out.add(new Line(Level.INFO, "stamp-in-file", "Stamp in the file", "the stamp inside the file is not"
+                        + " the one in its name, so a camera that runs this file flashes it again at every power-on"
+                        + " while the file is on its card. Take the card out before the camera is switched on again,"
+                        + " and remove the file (step 5).",
+                        "inside the file " + marks.stamp + "; in the name " + stamp + "."));
+            }
         }
 
-        // 2. Size and structure.
+        // 2. Size and structure. Two sizes are known to work; what the camera erases after writing depends on it.
         int n = data.length;
+        boolean official = n == OFFICIAL_SIZE;
         if (n == UPDATE_SIZE) {
-            out.add(new Line(Level.PASS, "size", "Size", "the right size, the one every published update file has.",
-                    bytes(n) + ", 30 blocks of 64 KiB."));
+            out.add(new Line(Level.PASS, "size", "Size", "the right size: the one the community update files have. It"
+                    + " writes the camera's settings and stored photos too (see below).", bytes(n) + ", 30 blocks of 64 KiB."));
             out.add(new Line(Level.INFO, "final-erase", "After the update", "the camera also erases the last part of"
                     + " its memory, which is empty anyway. Nothing to do.", "block 0x1F0000, 64 KiB."));
+        } else if (official) {
+            out.add(new Line(Level.INFO, "size", "Size", "the right size: the one official updates have. It holds the"
+                    + " program, the pictures, the sounds and the menus only, nothing of another camera's settings or"
+                    + " photos.", bytes(n) + ", 22 blocks of 64 KiB and part of the 23rd."));
+            out.add(new Line(Level.WARN, "final-erase", "After the update", "the camera also erases its settings"
+                    + " block. At the next start it uses factory settings and an empty photo list: the photos in its"
+                    + " own memory stay there, but are no longer shown. Nothing above that block is touched.",
+                    "block 0x170000, 64 KiB: the settings bank and the photo directory."));
         } else {
             String why;
             if (n == 0x200000) {
-                why = " It is the size of a full 2 MB dump. A dump must never go on the card as it is. charmera pack"
-                        + " on a computer makes the update file from it.";
+                why = " It is the size of a full 2 MB dump. A dump must never go on the card as it is: the camera's"
+                        + " final erase then wraps around and bricks it. charmera pack on a computer makes the update"
+                        + " file from it.";
             } else if (n < UPDATE_SIZE) {
                 why = " A shorter file is usually a cut-off download or copy. Copy or download it again.";
             } else {
                 why = " Make the update file with charmera pack on a computer, and check it there with charmera verify.";
             }
             out.add(new Line(Level.FAIL, "size", "Size", "the file is the wrong size for an update file, so the app"
-                    + " will not put it on the card." + why, bytes(n) + "; an update file has " + bytes(UPDATE_SIZE) + "."));
+                    + " will not put it on the card." + why, bytes(n) + "; an update file has " + bytes(UPDATE_SIZE)
+                    + " or " + bytes(OFFICIAL_SIZE) + "."));
         }
         boolean magic = n >= 4 && data[0] == 'S' && data[1] == 'P' && data[2] == 'I' && data[3] == 'I';
         out.add(new Line(magic ? Level.PASS : Level.FAIL, "magic", "Start of the file", magic
@@ -305,40 +544,109 @@ public final class UpdateCheck {
                 + " this file. " + INSTEAD,
                 magic ? "begins with SPII." : "the first 4 bytes are not SPII."));
 
-        // 3. Which camera it is for. A file for another edition can stop the camera taking pictures.
-        boolean stampOk = regionEquals(data, build.stampOffset, build.stamp.getBytes(StandardCharsets.US_ASCII));
-        boolean buildOk = regionEquals(data, build.buildOffset, build.buildString);
-        String buildMarks = "build " + new String(build.buildString, StandardCharsets.US_ASCII).replaceAll("\\s+", " ")
-                + ", stamp " + build.stamp;
-        if (!(stampOk && buildOk)) {
-            out.add(new Line(Level.FAIL, "series", "Edition", "the file is not for the " + build.label + ". It is for"
-                    + " another camera or edition, or it is not Charmera firmware at all. A file for another edition can"
-                    + " stop the camera taking pictures. Do not use it. " + RESTORE_INSTEAD,
-                    "the marks of " + buildMarks + " are not in the file."));
+        // 3. Which build it is, read from its content. The stamp is not an identity: two builds share it.
+        boolean compared = false;
+        if (!marks.complete()) {
+            out.add(new Line(Level.FAIL, "series", "Build marks", "not all the marks every Charmera firmware carries"
+                    + " were found: " + marks.missing() + ". This is not Charmera firmware, or a damaged copy of it."
+                    + " Do not use it. " + RESTORE_INSTEAD,
+                    "found: " + (marks.buildString == null ? "" : "build string at " + hex(marks.buildOffset) + "; ")
+                            + (marks.stamp == null ? "" : "stamp " + marks.stamp + " at " + hex(marks.stampOffset) + "; ")
+                            + (marks.sensorStart < 0 ? "" : "sensor table at " + hex(marks.sensorStart) + ".")));
         } else {
-            out.add(new Line(Level.PASS, "series", "Edition", "the file is for the " + build.label + ". Put it only"
-                    + " into that camera. Never use it on a Millennium Edition (blue boot screen) or a CLOT edition: the"
-                    + " app checks the file, not your camera.", buildMarks + "."));
-            boolean sensor = n >= build.sensorEnd
-                    && sha256Hex(data, build.sensorStart, build.sensorEnd).equals(build.sensorSha256);
-            out.add(new Line(sensor ? Level.PASS : Level.FAIL, "sensor-table", "Image sensor set-up", sensor
-                    ? "the same as stock."
-                    : "different from stock. No toolkit mod changes it, and the wrong set-up is what stops other"
-                    + " editions taking pictures. The file was made from another edition's firmware or from a damaged"
-                    + " dump. Do not use it. " + RESTORE_INSTEAD, ""));
-            if (n >= SOFTWARE_END && sha256Hex(data, 0, SOFTWARE_END).equals(build.softwareSha256)) {
-                out.add(new Line(Level.PASS, "software", "Software", "the program and its sounds, pictures and menus"
-                        + " are the same as stock, byte for byte.", ""));
-            } else if (n >= CODE_AREA_END && sha256Hex(data, 0, CODE_AREA_END).equals(build.codeAreaSha256)) {
-                out.add(new Line(Level.WARN, "software", "Software", "a modified file. The program itself is stock,"
-                        + " but its sounds, frames, boot logo or menus differ. Only put it on the card if you made it"
-                        + " yourself or trust who made it.",
-                        "bytes 0 to 0x120000 (boot header, code and data) match stock; the resources after them differ."));
+            out.add(new Line(Level.PASS, "series", "Build marks", "Charmera firmware: build " + marks.buildString.trim()
+                    + ", stamp " + marks.stamp + ". The stamp is carried by two different builds and tells them"
+                    + " apart from nothing.",
+                    "build string at " + hex(marks.buildOffset) + ", stamp at " + hex(marks.stampOffset) + ", sensor table"
+                            + " at " + hex(marks.sensorStart) + ".."+ hex(marks.sensorEnd) + " (" + marks.sensorPairs
+                            + " writes" + (marks.busAddress < 0 ? "" : ", bus address " + hex(marks.busAddress))
+                            + (marks.referencedFrom < 0 ? ", no code reference found" : ", referenced from code at "
+                            + hex(marks.referencedFrom)) + ")."));
+            boolean exact = n >= OFFICIAL_SIZE && sha256Hex(data, 0, OFFICIAL_SIZE).equals(build.officialSha256);
+            boolean codeStock = n >= CODE_AREA_END && sha256Hex(data, 0, CODE_AREA_END).equals(build.codeAreaSha256);
+            boolean madeFrom = marks.stampOffset == build.stampOffset && marks.buildOffset == build.buildOffset
+                    && marks.sensorStart == build.sensorOffset;
+            if (exact) {
+                out.add(new Line(Level.INFO, "build", "Build", build.label + ", unchanged. " + NOT_THE_CAMERA,
+                        "bytes 0 to 0x169000 hash to the known build's."));
+            } else if (codeStock || madeFrom) {
+                out.add(new Line(Level.INFO, "build", "Build", build.label + ", with changes (see Software below). "
+                        + NOT_THE_CAMERA, "the build marks lie where that build keeps them."));
             } else {
-                out.add(new Line(Level.WARN, "software", "Software", "a modified file that changes the program itself."
-                        + " Only put it on the card if you made that change on purpose. Keep a way back ready, such as"
-                        + " your own backup (docs/02-RECOVERY.md).",
-                        "bytes 0 to 0x120000 (boot header, code and data) differ from stock: a tweak or another patch."));
+                out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know: not the public dump's."
+                        + " It belongs only in the camera it was dumped from. " + NOT_THE_CAMERA,
+                        "the build marks lie at other offsets than in the public dump."));
+            }
+
+            // The image sensor: the file's program for it against the camera's own, when a backup is given.
+            boolean knownTable = marks.sensorSha256.equals(build.sensorSha256);
+            Marks ref = reference == null ? null : findMarks(reference);
+            if (ref != null && ref.sensorStart >= 0) {
+                compared = true;
+                boolean same = ref.sensorSha256.equals(marks.sensorSha256);
+                out.add(new Line(same ? Level.PASS : Level.FAIL, "sensor-table", "Image sensor set-up", same
+                        ? "the same as in your camera's backup, so the file drives your camera's image sensor the way"
+                        + " its own firmware does."
+                        : "different from your camera's backup. The file drives the image sensor differently from your"
+                        + " camera's own firmware, and a camera whose sensor is not the one a firmware drives freezes in"
+                        + " photo and video mode after the flash. Do not use this file on this camera.",
+                        "the file's table: " + marks.sensorPairs + " writes, SHA-256 " + marks.sensorSha256 + "; the"
+                                + " backup's: " + ref.sensorPairs + " writes, SHA-256 " + ref.sensorSha256 + "."));
+            } else if (ref != null) {
+                out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "the backup given has no image"
+                        + " sensor set-up table, so the file cannot be compared with your camera's own firmware. Choose a"
+                        + " complete dump of your camera's chip in step 0.", "the file's table: " + marks.sensorPairs
+                        + " writes, SHA-256 " + marks.sensorSha256 + "."));
+            } else if (knownTable) {
+                out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "the same program as the public"
+                        + " build's: it drives one image sensor and never checks which one is fitted. Nothing in the"
+                        + " file can tell whether your camera has that sensor, and one original-series camera was left"
+                        + " unable to take pictures by this very program. " + BACKUP_STEP,
+                        marks.sensorPairs + " writes, SHA-256 " + marks.sensorSha256 + "."));
+            } else {
+                out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "not the public build's program:"
+                        + " the file was made from another build's dump and drives the sensor differently. Nothing in"
+                        + " the file can tell whether that fits your camera. " + BACKUP_STEP,
+                        marks.sensorPairs + " writes, SHA-256 " + marks.sensorSha256 + "; the public build's is "
+                                + build.sensorSha256 + "."));
+            }
+
+            // The software: against the backup when there is one, else against the known build.
+            if (reference != null && reference.length >= SOFTWARE_END && n >= OFFICIAL_SIZE) {
+                int span = Math.min(n, SOFTWARE_END);
+                boolean same = regionEquals(data, 0, reference, 0, span) && (span >= SOFTWARE_END
+                        || allFF(reference, span, SOFTWARE_END - span));
+                if (same) {
+                    out.add(new Line(Level.PASS, "software", "Software", "the program and its sounds, pictures and"
+                            + " menus are the same as in your camera's backup, byte for byte.", ""));
+                } else if (regionEquals(data, 0, reference, 0, CODE_AREA_END)) {
+                    out.add(new Line(Level.WARN, "software", "Software", "a modified file. The program itself is your"
+                            + " camera's own, but its sounds, frames, boot logo or menus differ from your backup's. Only"
+                            + " put it on the card if you made it yourself or trust who made it.",
+                            "bytes 0 to 0x120000 (boot header, code and data) match the backup; the resources after them"
+                                    + " differ."));
+                } else {
+                    out.add(new Line(Level.WARN, "software", "Software", "a file whose program differs from your"
+                            + " camera's own firmware: a mod that changes the program, or another build. Only put it on"
+                            + " the card if you made that change on purpose, or know the file is for this camera. Your"
+                            + " backup is the way back (docs/02-RECOVERY.md).",
+                            "bytes 0 to 0x120000 (boot header, code and data) differ from the backup."));
+                }
+            } else if (n >= SOFTWARE_END && sha256Hex(data, 0, SOFTWARE_END).equals(build.softwareSha256)
+                    || n == OFFICIAL_SIZE && exact) {
+                out.add(new Line(Level.PASS, "software", "Software", "the program and its sounds, pictures and menus"
+                        + " are the same as the public dump's, byte for byte.", ""));
+            } else if (codeStock) {
+                out.add(new Line(Level.WARN, "software", "Software", "a modified file. The program itself is the public"
+                        + " dump's, but its sounds, frames, boot logo or menus differ. Only put it on the card if you"
+                        + " made it yourself or trust who made it.",
+                        "bytes 0 to 0x120000 (boot header, code and data) match the public dump; the resources after them differ."));
+            } else {
+                out.add(new Line(Level.WARN, "software", "Software", "a file whose program differs from the public"
+                        + " dump's: a mod that changes the program, or another build. Only put it on the card if you"
+                        + " made that change on purpose, or know the file is for this camera. Keep a way back ready: a"
+                        + " backup of your camera (docs/02-RECOVERY.md).",
+                        "bytes 0 to 0x120000 (boot header, code and data) differ from the public dump."));
             }
         }
 
@@ -351,29 +659,43 @@ public final class UpdateCheck {
                     photos++;
                 }
             }
-            out.add(new Line(photos == 0 ? Level.PASS : Level.WARN, "photos", "Stored photos", photos == 0
-                    ? "the file carries none. The flash erases any photos now in the camera's own memory. If they"
-                    + " matter, copy the SPIDCIM folder off the card before you flash. That is where the camera copies"
-                    + " them."
-                    : "the file carries " + (photos == 1 ? "1 photo" : photos + " photos") + " from the camera it was"
-                    + " made from. The flash puts " + (photos == 1 ? "it" : "them") + " into your camera's own memory,"
-                    + " in place of any photos there now. If your photos matter, copy the SPIDCIM folder off the card"
-                    + " before you flash. That is where the camera copies them.",
-                    ""));
+            int listed = photoDirectoryEntries(data);
+            String copyOff = " If your photos matter, copy the SPIDCIM folder off the card before you flash. That is"
+                    + " where the camera copies them.";
+            if (photos == 0) {
+                out.add(new Line(Level.PASS, "photos", "Stored photos", "the file carries none. The flash erases any"
+                        + " photos now in the camera's own memory." + copyOff, ""));
+            } else if (listed == 0) {
+                out.add(new Line(Level.WARN, "photos", "Stored photos", "the file carries " + count(photos, "photo")
+                        + " from the camera it was made from, but its photo list is empty, so your camera will not show"
+                        + (photos == 1 ? " it" : " them") + ". " + (photos == 1 ? "It" : "They") + " still replace"
+                        + (photos == 1 ? "s" : "") + " any photos in your camera's own memory." + copyOff,
+                        "the photo directory lists no photo."));
+            } else {
+                out.add(new Line(Level.WARN, "photos", "Stored photos", "the file carries " + count(photos, "photo")
+                        + " from the camera it was made from and lists " + (listed == photos ? (photos == 1 ? "it" : "them")
+                        : count(listed, "of them")) + ", so your camera will show " + (listed == 1 ? "it" : "them")
+                        + " in place of any photos in its own memory." + copyOff,
+                        "the photo directory lists " + listed + "."));
+            }
+        } else if (official) {
+            out.add(new Line(Level.INFO, "own-area", "Settings and stored photos", "the file stops before them, so"
+                    + " none of another camera's settings or photos are written. See \"After the update\" for what"
+                    + " the camera does with its own.", ""));
         }
-        if (n >= SOFTWARE_END) {
+        if (n >= OFFICIAL_SIZE) {
             List<Entry> entries = resourceDirectory(data);
             int count = entries.size();
             Level level = count == 43 ? Level.PASS : (count == 0 ? Level.FAIL : Level.WARN);
             String found;
             if (count == 43) {
-                found = "all 43 sounds, pictures and menu files are there, as in stock.";
+                found = "all 43 sounds, pictures and menu files are there, as in the known builds.";
             } else if (count == 0) {
                 found = "none found. The camera needs them to start. The file is damaged, or it is not Charmera"
                         + " firmware. Do not use it. " + INSTEAD;
             } else {
-                found = "the file has " + count + " sounds, pictures and menu files, where stock has 43. It is a"
-                        + " modified file. Only put it on the card if you made it yourself or trust who made it.";
+                found = "the file has " + count + " sounds, pictures and menu files, where the known builds have 43."
+                        + " It is a modified file. Only put it on the card if you made it yourself or trust who made it.";
             }
             out.add(new Line(level, "resources", "Built-in parts", found, ""));
             if (count > 0) {
@@ -386,12 +708,12 @@ public final class UpdateCheck {
                             + " and only fixed-Huffman blocks, GPRS."));
                 } else {
                     StringBuilder sb = new StringBuilder();
-                    int listed = Math.min(problems.size(), MAX_LISTED_PROBLEMS);
-                    for (int i = 0; i < listed; i++) {
+                    int shown = Math.min(problems.size(), MAX_LISTED_PROBLEMS);
+                    for (int i = 0; i < shown; i++) {
                         sb.append(i == 0 ? "" : "; ").append(problems.get(i));
                     }
-                    if (problems.size() > listed) {
-                        sb.append("; and ").append(problems.size() - listed).append(" more");
+                    if (problems.size() > shown) {
+                        sb.append("; and ").append(problems.size() - shown).append(" more");
                     }
                     sb.append('.');
                     out.add(new Line(Level.FAIL, "resource-slots", "Built-in parts, one by one", problems.size()
@@ -403,7 +725,7 @@ public final class UpdateCheck {
                 }
             }
         }
-        return new Result(out, cardName, sha256Hex(data, 0, n), n, build.label);
+        return new Result(out, cardName, sha256Hex(data, 0, n), n, compared);
     }
 
     /**
@@ -427,6 +749,57 @@ public final class UpdateCheck {
             return "the file changed after it was checked; get it again in step 1";
         }
         return null;
+    }
+
+    /**
+     * What a backup of the camera must be for the app to take it as that camera's own dump: a full 2 MiB read of the
+     * flash chip that carries the Charmera build marks and is not one of the public images. Null when it is, otherwise
+     * why not, as a plain clause in lower case without a final full stop.
+     */
+    public static String backupProblem(byte[] data, String[] publicSha256) {
+        if (data == null) {
+            return "no file was read";
+        }
+        if (data.length != 0x200000) {
+            return "it is " + bytes(data.length) + ", but a backup of the flash chip is exactly " + bytes(0x200000)
+                    + (data.length == UPDATE_SIZE || data.length == OFFICIAL_SIZE ? ". This is an update file, not a dump of a chip" : "");
+        }
+        String sha = sha256Hex(data, 0, data.length);
+        for (String s : publicSha256) {
+            if (s.equalsIgnoreCase(sha)) {
+                return "it is the public stock dump, a copy of someone else's camera, not a read of yours";
+            }
+        }
+        if (!(data[0] == 'S' && data[1] == 'P' && data[2] == 'I' && data[3] == 'I')) {
+            return "it does not begin as Charmera firmware does, so it is not a readable dump of the chip";
+        }
+        Marks marks = findMarks(data);
+        if (!marks.complete()) {
+            return "the marks every Charmera firmware carries were not all found (" + marks.missing() + "), so it is not a"
+                    + " complete dump of the chip";
+        }
+        return null;
+    }
+
+    /** How many of the two directory entries at 0x17F000 mark a photo as present. An erased directory counts as none. */
+    static int photoDirectoryEntries(byte[] data) {
+        if (data.length < PHOTO_DIRECTORY + 16 || erased(data, PHOTO_DIRECTORY)) {
+            return 0;
+        }
+        int n = 0;
+        for (int i = 0; i < 2; i++) {
+            int off = PHOTO_DIRECTORY + 8 * i;
+            int used = (data[off + 2] & 0xFF) | (data[off + 3] & 0xFF) << 8;
+            long length = u32(data, off + 4);
+            if (used != 0 && used != 0xFFFF && length != 0 && length != 0xFFFFFFFFL) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    private static String count(int n, String noun) {
+        return n + " " + noun + (n == 1 ? "" : "s");
     }
 
     // --- settings bank ---------------------------------------------------------------------------------------
@@ -547,17 +920,26 @@ public final class UpdateCheck {
      * One line per entry whose slot lies outside the pack or the file, is erased, or does not hold the kind its name
      * says. An entry owns the bytes up to the next entry's offset; the last one up to RESOURCE_LIMIT.
      */
+    /**
+     * Where the last entry's slot ends: the factory self-test sector, or the end of an official-size file, which lies
+     * before that sector (the camera leaves the rest of the block erased).
+     */
+    static int resourceLimit(int fileLength) {
+        return fileLength >= OFFICIAL_SIZE && fileLength < RESOURCE_LIMIT ? fileLength : RESOURCE_LIMIT;
+    }
+
     static List<String> resourceProblems(byte[] data, List<Entry> entries) {
         List<String> problems = new ArrayList<>();
         long dirEnd = DIRECTORY_START + (long) DIRECTORY_ENTRY * entries.size();
+        int limit = resourceLimit(data.length);
         for (int i = 0; i < entries.size(); i++) {
             Entry e = entries.get(i);
             long start = e.offset;
-            long end = i + 1 < entries.size() ? entries.get(i + 1).offset : RESOURCE_LIMIT;
+            long end = i + 1 < entries.size() ? entries.get(i + 1).offset : limit;
             String where = e.displayName() + " at " + hex(start);
-            if (start < dirEnd || end > RESOURCE_LIMIT) {
+            if (start < dirEnd || end > limit) {
                 problems.add(where + ": its slot " + hex(start) + ".." + hex(end) + " lies outside the resource area "
-                        + hex(dirEnd) + ".." + hex(RESOURCE_LIMIT));
+                        + hex(dirEnd) + ".." + hex(limit));
                 continue;
             }
             if (end <= start) {
@@ -877,6 +1259,19 @@ public final class UpdateCheck {
         } catch (ParseException e) {
             return false;
         }
+    }
+
+    /** True when data[off..off+len) equals other[otherOff..otherOff+len), both in range. */
+    static boolean regionEquals(byte[] data, int off, byte[] other, int otherOff, int len) {
+        if (off < 0 || otherOff < 0 || off + len > data.length || otherOff + len > other.length) {
+            return false;
+        }
+        for (int i = 0; i < len; i++) {
+            if (data[off + i] != other[otherOff + i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static boolean regionEquals(byte[] data, int off, byte[] expected) {

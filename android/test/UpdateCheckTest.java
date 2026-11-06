@@ -78,20 +78,99 @@ public final class UpdateCheckTest {
         r = check(m, build);
         expect("other build string fails", !r.ok && line(r, "series", UpdateCheck.Level.FAIL), r);
 
+        // --- the image sensor: a warning without the camera's backup, a comparison with it ----------------------
+
+        r = check(base, build);
+        expect("without a backup the sensor line is a warning that names step 0", r.ok
+                && line(r, "sensor-table", UpdateCheck.Level.WARN)
+                && text(r, "sensor-table").contains("Choose this camera's backup"), r);
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, base);
+        expect("against the camera's own backup the same table passes and so does the software", r.ok && r.compared
+                && line(r, "sensor-table", UpdateCheck.Level.PASS) && line(r, "software", UpdateCheck.Level.PASS)
+                && r.verdict().equals("OK to put on the card. Every check passed."), r);
         m = base.clone();
         m[0xF5C70] ^= 1;
         r = check(m, build);
-        expect("changed sensor table fails", !r.ok && line(r, "sensor-table", UpdateCheck.Level.FAIL), r);
+        expect("a changed sensor table warns without a backup", r.ok && line(r, "sensor-table", UpdateCheck.Level.WARN)
+                && text(r, "sensor-table").contains("not the public build's program"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, base);
+        expect("a changed sensor table fails against the camera's backup", !r.ok && r.compared
+                && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && r.verdict().contains("different from your camera's backup"), r);
+        byte[] otherBackup = new byte[0x200000];
+        System.arraycopy(m, 0, otherBackup, 0, m.length);
+        Arrays.fill(otherBackup, m.length, otherBackup.length, (byte) 0xFF);
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, otherBackup);
+        expect("the public file fails against a backup whose sensor table differs", !r.ok
+                && line(r, "sensor-table", UpdateCheck.Level.FAIL), r);
+        m = base.clone();
+        m[0xF5C6C] = 0;   // the init table no longer starts with a page select: no table found
+        r = check(m, build);
+        expect("no sensor table means not Charmera firmware", !r.ok && line(r, "series", UpdateCheck.Level.FAIL)
+                && text(r, "series").contains("set-up table"), r);
+        m = base.clone();
+        m[0x218D0] = 'X';   // the stamp has no NUL after it: not a stamp string any more
+        r = check(m, build);
+        expect("no stamp string means not Charmera firmware", !r.ok && line(r, "series", UpdateCheck.Level.FAIL)
+                && text(r, "series").contains("version stamp"), r);
+        m = base.clone();
+        put(m, 0x218C4, "202601010000");
+        r = check(m, build);
+        expect("another stamp is still a Charmera build mark, since the stamp is no identity", r.ok
+                && line(r, "series", UpdateCheck.Level.PASS) && text(r, "series").contains("stamp 202601010000")
+                && line(r, "stamp-in-file", UpdateCheck.Level.INFO), r);
+
+        // --- the official update size ------------------------------------------------------------------------
+
+        byte[] official = Arrays.copyOf(base, UpdateCheck.OFFICIAL_SIZE);
+        r = UpdateCheck.check(name(official, "202611050001"), official, build);
+        expect("an official-size file passes: size INFO, final erase WARN, own area INFO, build unchanged", r.ok
+                && line(r, "size", UpdateCheck.Level.INFO) && line(r, "final-erase", UpdateCheck.Level.WARN)
+                && text(r, "final-erase").contains("factory settings") && line(r, "own-area", UpdateCheck.Level.INFO)
+                && line(r, "resource-slots", UpdateCheck.Level.PASS) && line(r, "build", UpdateCheck.Level.INFO)
+                && text(r, "build").contains("unchanged") && line(r, "software", UpdateCheck.Level.PASS), r);
+        r = UpdateCheck.check(name(official, "202611050001"), official, build, base);
+        expect("an official-size file against the backup passes the software and sensor lines", r.ok
+                && line(r, "software", UpdateCheck.Level.PASS) && line(r, "sensor-table", UpdateCheck.Level.PASS), r);
+        byte[] shorter = Arrays.copyOf(base, 0x160000);
+        r = UpdateCheck.check(name(shorter, "202611050001"), shorter, build);
+        expect("a file shorter than the official size fails", !r.ok && line(r, "size", UpdateCheck.Level.FAIL), r);
+        byte[] between = Arrays.copyOf(base, 0x170000);
+        r = UpdateCheck.check(name(between, "202611050001"), between, build);
+        expect("a file between the two sizes fails", !r.ok && line(r, "size", UpdateCheck.Level.FAIL), r);
+
+        // --- what the app takes as a backup of the camera ----------------------------------------------------
+
+        String[] noPublic = new String[0];
+        expect("an update file is not a backup", UpdateCheck.backupProblem(base, noPublic) != null
+                && UpdateCheck.backupProblem(base, noPublic).contains("update file"), null);
+        byte[] dump = new byte[0x200000];
+        System.arraycopy(base, 0, dump, 0, base.length);
+        Arrays.fill(dump, base.length, dump.length, (byte) 0xFF);
+        expect("a 2 MiB dump with the build marks is a backup", UpdateCheck.backupProblem(dump, noPublic) == null, null);
+        expect("the public dump is not a backup of your camera", UpdateCheck.backupProblem(dump,
+                new String[]{UpdateCheck.sha256Hex(dump, 0, dump.length)}) != null, null);
+        byte[] blank = new byte[0x200000];
+        Arrays.fill(blank, (byte) 0xFF);
+        expect("a blank read is not a backup", UpdateCheck.backupProblem(blank, noPublic).contains("does not begin"), null);
+        byte[] noMarks = dump.clone();
+        noMarks[0xF5C6C] = 0;
+        expect("a dump without the marks is not a backup", UpdateCheck.backupProblem(noMarks, noPublic).contains("set-up table"), null);
+        expect("nothing is not a backup", UpdateCheck.backupProblem(null, noPublic) != null, null);
 
         // --- what kind of mod: bytes 0..0x120000 (header, code, data) against the resources -------------------
 
         m = base.clone();
         m[slot("SOUND0WAV")[0] + 60] ^= 0x55;   // a PCM byte
         r = check(m, build);
-        expect("resource mod warns, passes, says the code area is stock", r.ok
+        expect("resource mod warns, passes, says the code area is the public dump's", r.ok
                 && line(r, "software", UpdateCheck.Level.WARN)
-                && text(r, "software").contains("The program itself is stock")
-                && detail(r, "software").contains("(boot header, code and data) match stock"), r);
+                && text(r, "software").contains("The program itself is the public dump's")
+                && detail(r, "software").contains("(boot header, code and data) match the public dump"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, base);
+        expect("against the backup a resource mod says the program is the camera's own", r.ok
+                && line(r, "software", UpdateCheck.Level.WARN)
+                && text(r, "software").contains("The program itself is your camera's own"), r);
 
         m = base.clone();
         m[0x62B8] ^= 0x08;
@@ -251,15 +330,21 @@ public final class UpdateCheckTest {
         r = check(m, build);
         expect("stored photo warns", r.ok && line(r, "photos", UpdateCheck.Level.WARN)
                 && text(r, "photos").contains("1 photo from the camera it was made from"), r);
-        expect("the verdict passes it and points at the warning", r.verdict().startsWith("OK to put on the card.")
-                && r.verdict().contains("Read this warning first. Stored photos: the file carries 1 photo from the"
-                + " camera it was made from.") && r.verdict().contains("copy the SPIDCIM folder off the card"), r);
+        expect("the verdict passes it and points at the warnings", r.verdict().startsWith("OK to put on the card.")
+                && r.verdict().contains("Read these 2 warnings first.")
+                && r.verdict().contains("Stored photos: the file carries 1 photo from the camera it was made from, but its"
+                + " photo list is empty, so your camera will not show it.")
+                && r.verdict().contains("copy the SPIDCIM folder off the card"), r);
+        m[0x17F002] = 1;        // directory entry 0: used
+        putU32(m, 0x17F004, 38478);
+        r = check(m, build);
+        expect("a listed stored photo is said to be shown", r.ok && text(r, "photos").contains("lists it, so your camera will show it"), r);
 
         // --- the verdict at the top of the report -------------------------------------------------------------
 
         r = check(base, build);
-        expect("a clean file's verdict is OK and names the edition", r.verdict().equals("OK to put on the card. It is"
-                + " only for the synthetic test build. Every check passed."), r);
+        expect("a clean file's verdict without a backup is OK with the sensor warning", r.verdict().startsWith("OK to put"
+                + " on the card. Read this warning first. Image sensor set-up: the same program as the public build's"), r);
         r = UpdateCheck.check("JH_5408202611050001_00000000.bin", base, build);
         expect("a failed file's verdict is Not OK with the first reason", r.verdict().startsWith("Not OK to put on the"
                 + " card. The app will not write this file. Sum: the file's bytes do not add up"), r);
@@ -310,9 +395,18 @@ public final class UpdateCheckTest {
         byte[] d = new byte[UpdateCheck.UPDATE_SIZE];
         new Random(5408).nextBytes(d);
         put(d, 0, "SPII");
+        // the build marks, shaped as the content finder expects them: NUL-terminated strings, and a sensor program
+        // (reset table, a 61-write init table with a page select first and one more page switch, the code literal)
+        d[0x218C3] = 0;
         put(d, 0x218C4, "202505201029");
+        d[0x218D0] = 0;
         put(d, 0x18964, "JH5408  20250520");
+        d[0x18974] = 0;
         put(d, 0xF3978, "Oct 14 2025");
+        d[0xF3983] = 0;
+        System.arraycopy(UpdateCheck.SENSOR_RESET_TABLE, 0, d, 0xF5BFC, 6);
+        System.arraycopy(SENSOR_TABLE, 0, d, 0xF5C6C, SENSOR_TABLE.length);
+        putU32(d, 0x7B91C, 0xF5C6C - 0x200);
         // The resource pack: GP+, a directory of 43 entries, then each entry's content padded with 0xFF to its slot.
         Arrays.fill(d, 0x120000, 0x170000, (byte) 0xFF);
         Arrays.fill(d, 0x120000, 0x120018, (byte) 0);
@@ -370,10 +464,30 @@ public final class UpdateCheckTest {
         return d;
     }
 
+    /** A 61-write init table: page select 0 first, one more page switch, the ff ff marker; 124 bytes like the real one. */
+    static final byte[] SENSOR_TABLE = sensorTable();
+
+    static byte[] sensorTable() {
+        byte[] t = new byte[124];
+        t[0] = (byte) 0xFD;
+        t[1] = 0;
+        for (int i = 0; i < 58; i++) {
+            t[2 + 2 * i] = (byte) (0x20 + i);
+            t[3 + 2 * i] = (byte) ((0x20 + i) * 3);
+        }
+        t[118] = (byte) 0xFD;
+        t[119] = 1;
+        t[120] = 0x11;
+        t[121] = (byte) 0x80;
+        t[122] = (byte) 0xFF;
+        t[123] = (byte) 0xFF;
+        return t;
+    }
+
     static UpdateCheck.Build buildFor(byte[] d) {
-        return new UpdateCheck.Build("synthetic test build", "202505201029", 0x218C4, "JH5408  20250520", 0x18964,
-                "Oct 14 2025", 0xF3978, UpdateCheck.sha256Hex(d, 0, 0x170000), UpdateCheck.sha256Hex(d, 0, 0x120000),
-                0xF5C6C, 0xF5CE8, UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8));
+        return new UpdateCheck.Build("synthetic test build", "202505201029", UpdateCheck.sha256Hex(d, 0, 0x170000),
+                UpdateCheck.sha256Hex(d, 0, 0x120000), UpdateCheck.sha256Hex(d, 0, UpdateCheck.OFFICIAL_SIZE),
+                UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8), 0x218C4, 0x18964, 0xF5C6C);
     }
 
     static int[] slot(String name) {
@@ -579,8 +693,8 @@ public final class UpdateCheckTest {
     }
 
     static boolean codeChange(UpdateCheck.Result r) {
-        return line(r, "software", UpdateCheck.Level.WARN) && text(r, "software").contains("changes the program itself")
-                && detail(r, "software").contains("(boot header, code and data) differ from stock");
+        return line(r, "software", UpdateCheck.Level.WARN) && text(r, "software").contains("program differs from the public dump's")
+                && detail(r, "software").contains("(boot header, code and data) differ from the public dump");
     }
 
     static boolean line(UpdateCheck.Result r, String name, UpdateCheck.Level level) {

@@ -8,8 +8,9 @@ careful layer over flashrom and never touches USB itself.
 Safety rules:
 
 - `probe` and `backup` only run flashrom without an operation or with `-r`. They cannot write.
-- `restore` refuses an image that is not exactly 2 MiB, does not start with the "SPII" magic, or lacks
-  the original-series build stamps (unless --allow-unknown-build). It prints the SHA-256, a 64 KiB
+- `restore` refuses an image that is not exactly 2 MiB, does not start with the "SPII" magic, or carries no
+  Charmera build marks (build string, 12-digit stamp, sensor table, each found by content; unless
+  --allow-unknown-build). It prints the SHA-256, a 64 KiB
   block diff against a fresh backup of the chip when one is given, and the exact plan, and only runs
   `flashrom -w` after the owner types RESTORE. Afterwards it reads the chip back and compares.
 - The tool never interrupts `flashrom -w` or the read-back after it: those run without a timeout.
@@ -38,15 +39,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from . import __version__
+from . import image as image_mod
 from .checksum import BLOCK_SIZE, FLASH_SIZE
 
 MAGIC = b"SPII"
 
-# Build stamp strings of the original 2025 series at their file offsets (VERIFIED in both public dumps).
-BUILD_STAMPS = (
-    (0x18964, b"JH5408  20250520"),
-    (0x218C4, b"202505201029"),
-)
+# The marks every Charmera build carries, found by content (they sit at different offsets in different
+# builds): the build string, the 12-digit stamp and the sensor init table. The stamp is the same in both
+# known builds and identifies neither; see charmera_toolkit/image.py.
+BUILD_MARKS = ("build_string", "stamp", "sensor_table")
 
 # 0x1E0000..0x200000 is 0xFF in every known dump.
 TAIL_START = 0x1E0000
@@ -339,27 +340,33 @@ def region_name(offset: int) -> str:
     return "beyond 2 MiB"
 
 
-def build_stamps_found(data: bytes) -> Dict[str, Optional[str]]:
-    """The expected stamp string at each known offset, or None when it is not there."""
-    out: Dict[str, Optional[str]] = {}
-    for offset, expected in BUILD_STAMPS:
-        chunk = data[offset : offset + len(expected)]
-        out[f"0x{offset:X}"] = expected.decode("ascii") if chunk == expected else None
-    return out
+def build_marks_found(data: bytes) -> Dict[str, Optional[dict]]:
+    """Each build mark found by content, with where it was found, or None when it is missing."""
+    m = image_mod.find_marks(data)
+    return {
+        "build_string": None if m.build_string is None else {"offset": f"0x{m.build_offset:X}",
+                                                               "value": m.build_string.decode("ascii", "replace")},
+        "stamp": None if m.stamp is None else {"offset": f"0x{m.stamp_offset:X}", "value": m.stamp},
+        "sensor_table": None if m.sensor is None else {"offset": f"0x{m.sensor.init[0]:X}", "writes": m.sensor.pairs,
+                                                       "sha256": m.sensor.sha256},
+    }
 
 
 def analyze_image(data: bytes) -> dict:
     """Everything the manifest and the restore gate want to know about an image."""
     sha = sha256_hex(data)
-    stamps = build_stamps_found(data)
+    marks = build_marks_found(data)
+    match = image_mod.detect_build(data)
     tail = data[TAIL_START:]
     return {
         "size": len(data),
         "size_ok": len(data) == FLASH_SIZE,
         "sha256": sha,
         "magic_ok": data[: len(MAGIC)] == MAGIC,
-        "build_stamps": stamps,
-        "build_stamps_ok": all(v is not None for v in stamps.values()),
+        "build_marks": marks,
+        "build_marks_ok": all(marks[k] is not None for k in BUILD_MARKS),
+        "build": match.identity,
+        "build_label": match.label,
         "tail_blank": len(data) == FLASH_SIZE and tail == b"\xff" * len(tail),
         "public_dump": PUBLIC_DUMPS.get(sha),
     }
@@ -371,9 +378,9 @@ def image_warnings(info: dict) -> List[str]:
         out.append(f"size is {info['size']:,} bytes, expected {FLASH_SIZE:,} (2 MiB)")
     if not info["magic_ok"]:
         out.append('the first four bytes are not the "SPII" magic')
-    missing = [k for k, v in info["build_stamps"].items() if v is None]
+    missing = [k for k in BUILD_MARKS if info["build_marks"][k] is None]
     if missing:
-        out.append("original-series build stamp missing at " + ", ".join(missing))
+        out.append("no Charmera build marks found: " + ", ".join(missing).replace("_", " ") + " missing")
     if info["size_ok"] and not info["tail_blank"]:
         out.append(f"the tail 0x{TAIL_START:X}..0x{FLASH_SIZE:X} is not all 0xFF (it is in every known dump)")
     return out
@@ -591,8 +598,9 @@ def cmd_backup(args: argparse.Namespace) -> int:
         "size_ok": info["size_ok"],
         "sha256": sha,
         "magic_ok": info["magic_ok"],
-        "build_stamps": info["build_stamps"],
-        "build_stamps_ok": info["build_stamps_ok"],
+        "build_marks": info["build_marks"],
+        "build_marks_ok": info["build_marks_ok"],
+        "build": info["build"],
         "tail_blank": info["tail_blank"],
         "public_dump": info["public_dump"],
         "warnings": warnings,
@@ -635,16 +643,16 @@ def cmd_restore(args: argparse.Namespace) -> int:
         refusals.append(f"{image_path.name} is {info['size']:,} bytes; a full-flash image is exactly {FLASH_SIZE:,}")
     if not info["magic_ok"]:
         refusals.append(f'{image_path.name} does not start with the "SPII" magic')
-    if not info["build_stamps_ok"]:
-        missing = ", ".join(k for k, v in info["build_stamps"].items() if v is None)
-        text = f"the original-series build stamps are missing at {missing}"
+    if not info["build_marks_ok"]:
+        missing = ", ".join(k.replace("_", " ") for k in BUILD_MARKS if info["build_marks"][k] is None)
+        text = f"this image carries no Charmera build marks ({missing} missing)"
         if args.allow_unknown_build:
             print(f"warning: {text}; continuing because --allow-unknown-build was given.")
-            print("Be sure this image was built for this camera's edition and series.")
+            print("Be sure this image is a dump of this camera's own chip.")
         else:
             refusals.append(
-                text + ". Flashing an image from another edition or series boots but freezes capture\n"
-                "(REPORTED). Pass --allow-unknown-build only if you know this image is for this camera."
+                text + ". A firmware that does not fit the camera boots but freezes photo and video mode\n"
+                "(seen on hardware). Pass --allow-unknown-build only if you know this image is this camera's own."
             )
     if refusals:
         for r in refusals:
@@ -656,8 +664,16 @@ def cmd_restore(args: argparse.Namespace) -> int:
     print(f"size:     {info['size']:,} bytes")
     print(f"sha256:   {info['sha256']}")
     print("magic:    SPII")
-    for offset, value in info["build_stamps"].items():
-        print(f"stamp:    {offset} {value if value else '(missing)'}")
+    print(f"build:    {info['build']} ({info['build_label']})")
+    print("          a build match says which public image this is, not whether it fits this camera; two builds share the stamp")
+    for k in BUILD_MARKS:
+        v = info["build_marks"][k]
+        if v is None:
+            print(f"mark:     {k.replace('_', ' ')} (missing)")
+        elif k == "sensor_table":
+            print(f"mark:     sensor table at {v['offset']}, {v['writes']} writes, sha256 {v['sha256'][:16]}...")
+        else:
+            print(f"mark:     {k.replace('_', ' ')} {v['value']!r} at {v['offset']}")
     print(f"tail:     {'all 0xFF' if info['tail_blank'] else 'NOT all 0xFF (every known dump is)'}")
     if info["public_dump"]:
         print(
@@ -813,7 +829,7 @@ def register(subparsers) -> None:
     restore = subparsers.add_parser(
         "restore",
         help="write a full 2 MiB image to the chip through flashrom (asks for a typed RESTORE)",
-        description="Check the image (2 MiB, SPII magic, original-series build stamps), show a 64 KiB "
+        description="Check the image (2 MiB, SPII magic, Charmera build marks found by content), show a 64 KiB "
         "block diff against --backup, show the SHA-256 and the plan, wait for the word RESTORE, then run "
         "flashrom -w (erase, write, verify) and read the chip back to compare.",
     )
@@ -827,6 +843,6 @@ def register(subparsers) -> None:
     restore.add_argument(
         "--allow-unknown-build",
         action="store_true",
-        help="write an image whose build stamps are not the original 2025 series (other editions freeze)",
+        help="write an image that carries no Charmera build marks (a firmware that does not fit the camera boots but freezes capture)",
     )
     restore.set_defaults(func=cmd_restore)

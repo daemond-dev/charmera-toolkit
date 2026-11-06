@@ -9,8 +9,9 @@ import java.util.zip.CRC32;
 
 /**
  * Plain-JVM tests for making the flash candidates in the app. Synthetic images test each step of the recipe and the
- * refusals; with CHARMERA_STOCK_IMAGE set to the public stock dump, all three candidates are made and must hash to
- * the reviewed files (Candidates.build refuses anything else).
+ * refusals; with CHARMERA_STOCK_IMAGE set to the public stock dump, the restore file and the three withdrawn
+ * candidates are made and must hash to the published and reviewed files (Candidates.build refuses anything else), and
+ * the checker must find the dump's build marks where the research put them.
  */
 public final class CandidatesTest {
 
@@ -70,6 +71,17 @@ public final class CandidatesTest {
             }
             byte[] restore = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);
             expect("the published restore file is accepted as the dump", Arrays.equals(Candidates.stockDump(restore), dump));
+            UpdateCheck.Marks mk = UpdateCheck.findMarks(dump);
+            expect("the real dump's marks are found by content where the research put them", mk.complete()
+                    && mk.stampOffset == 0x218C4 && "202505201029".equals(mk.stamp) && mk.buildOffset == 0x18964
+                    && mk.resetStart == 0xF5BFC && mk.sensorStart == 0xF5C6C && mk.sensorEnd == 0xF5CE8 && mk.sensorPairs == 61
+                    && mk.referencedFrom == 0x7B91C && mk.busAddress == 0x78
+                    && "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755".equals(mk.sensorSha256));
+            UpdateCheck.Result rr = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore, UpdateCheck.PUBLIC_BUILD, dump);
+            expect("the restore file against the dump it came from passes every line", rr.ok && rr.compared
+                    && rr.verdict().startsWith("OK to put on the card. Read this warning first. Stored photos:"));
+            expect("the public dump is refused as a backup of your camera",
+                    UpdateCheck.backupProblem(dump, new String[]{Candidates.STOCK_DUMP_SHA256}) != null);
         }
         System.out.printf(Locale.ROOT, "CandidatesTest: %d passed, %d failed%n", passes, failures);
         if (failures > 0) {

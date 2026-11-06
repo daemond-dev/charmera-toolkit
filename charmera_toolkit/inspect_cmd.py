@@ -26,12 +26,30 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
     print(f"header words:    {' '.join(f'{w:08x}' for w in info['header_words'][:18])}")
     if info["reg_init"]:
         print("reg init list:   " + ", ".join(f"[{r:#010x}]={v:#x}" for r, v in info["reg_init"]) + "  (INFERRED meaning)")
-    print(f"series:          {info['series']}  ({info['series_label']})")
-    for k, v in info["series_checks"].items():
-        print(f"  check {k:16s} {_fmt_bool(v)}")
-    print(f"embedded stamp:  {info['embedded_stamp']}")
+    print(f"build:           {info['identity']}  ({info['identity_label']})")
+    print("                 a build match says which public image this is, not whether it fits a given camera: only a dump of")
+    print("                 that camera's own chip does. The stamp 202505201029 is carried by two different builds.")
+    for k, v in info["identity_checks"].items():
+        print(f"  check {k:24s} {_fmt_bool(v)}")
+    m = info["marks"]
+    print(f"stamp:           {m.stamp or '(not found)'}" + (f"  at {m.stamp_offset:#x}" if m.stamp else "") + "  (found by content, not at a fixed offset)")
+    print(f"build string:    {m.build_string.decode('ascii', 'replace') if m.build_string else '(not found)'}" + (f"  at {m.build_offset:#x}" if m.build_string else ""))
+    print(f"compiled:        {m.compiled.decode('ascii', 'replace') if m.compiled else '(not found)'}" + (f"  at {m.compiled_offset:#x}" if m.compiled else ""))
+    if m.sensor:
+        t = m.sensor
+        print(f"sensor table:    {t.pairs} register writes at {t.init[0]:#x}..{t.init[1]:#x} ({t.init_bytes_len} bytes), reset table at {t.reset[0]:#x}"
+              + (f", bus address {t.bus_address:#x}" if t.bus_address is not None else "")
+              + (f", referenced from code at {t.referenced_from:#x}" if t.referenced_from is not None else ", no code reference found"))
+        print(f"                 sha256 {t.sha256}")
+        print("                 " + ("the same table as in both known builds (public dump, film-mods): it drives one sensor and reads no chip ID"
+                                    if info["identity_checks"].get("sensor_table_known") else "NOT the known builds' table"))
+    else:
+        print("sensor table:    not found (no reset table 'fd 00 20 00 ff ff' followed by an init table in the code area)")
     if info["software_sha256"]:
         print(f"software sha256: {info['software_sha256']}  (bytes 0..0x170000)")
+    fp = info.get("official_fingerprint")
+    if fp:
+        print(f"official span:   sha1 {fp[1]}  byte sum {fp[2]:08X}  (bytes 0..0x169000, what official updates write; the film-mods author's build is 91499bd3... / 0852C329)")
 
     # Filename check when it looks like an update file.
     try:
@@ -90,7 +108,16 @@ def handler(args) -> int:
         return 2
     if args.json:
         info = summarize(image)
-        out = {k: v for k, v in info.items() if k not in ("resources", "sounds", "settings_records", "current_settings", "photo_index")}
+        out = {k: v for k, v in info.items() if k not in ("resources", "sounds", "settings_records", "current_settings", "photo_index", "build", "marks")}
+        m = info["marks"]
+        out["marks"] = {
+            "stamp": m.stamp, "stamp_offset": m.stamp_offset,
+            "build_string": m.build_string.decode("ascii", "replace") if m.build_string else None, "build_offset": m.build_offset,
+            "compiled": m.compiled.decode("ascii", "replace") if m.compiled else None, "compiled_offset": m.compiled_offset,
+            "sensor_table": None if not m.sensor else {"reset": list(m.sensor.reset), "init": list(m.sensor.init), "pairs": m.sensor.pairs,
+                                                       "sha256": m.sensor.sha256, "bus_address": m.sensor.bus_address,
+                                                       "referenced_from": m.sensor.referenced_from},
+        }
         out["resources"] = [{"name": e.display_name, "offset": e.offset, "budget": e.budget} for e in info["resources"]]
         out["sounds"] = [{"name": s.entry.display_name, "offset": s.entry.offset, "rate": s.rate, "bits": s.bits,
                           "channels": s.channels, "data_len": s.data_len, "duration_ms": s.duration_ms} for s in info["sounds"]]

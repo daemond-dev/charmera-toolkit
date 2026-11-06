@@ -19,10 +19,29 @@ import pytest
 from charmera_toolkit import checksum, frames, image, pack, settings, stage
 
 STAMP = "202611041200"
-# Synthetic images carry no firmware bytes, so they hold this stand-in for the image-sensor table, and the
-# synthetic_build fixture makes the build identity accept it. Tests on the real dump use the real identity.
-SENSOR_START, SENSOR_END = image.ORIGINAL_2025.sensor_table
-SYNTHETIC_SENSOR_TABLE = bytes(range(SENSOR_END - SENSOR_START))
+# Synthetic images carry no firmware bytes, so they hold stand-ins for the build marks, placed where the public
+# build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL,
+# and a sensor program (the reset table, a 61-write init table that starts with a page select, switches page
+# once more and ends with ff ff, and the code literal that points at it). The init table's hash is not a known
+# build's, so the synthetic_build fixture registers it as the public build's where a test wants it accepted
+# without --stock. Tests on the real dump use the real identity.
+SENSOR_RESET_OFFSET = 0xF5BFC
+SENSOR_START, SENSOR_END = 0xF5C6C, 0xF5CE8
+SENSOR_POINTER = 0x7B91C
+SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                               + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
+assert len(SYNTHETIC_SENSOR_TABLE) == SENSOR_END - SENSOR_START == 124
+
+
+def put_build_marks(img: bytearray) -> None:
+    """The public build's marks at its offsets, so detect_build reads 'public-dump-modified'."""
+    b = image.PUBLIC_BUILD
+    img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
+    img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
+    img[0xF3978: 0xF3978 + 12] = b"Oct 14 2025\x00"
+    img[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = image.SENSOR_RESET_TABLE
+    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    img[SENSOR_POINTER: SENSOR_POINTER + 4] = struct.pack("<I", SENSOR_START - image.VA_OFFSET)
 
 
 # --- synthetic image (same shape as tests/test_core.py builds) -----------------------------------------------
@@ -41,10 +60,7 @@ def synthetic_image(records=(), with_sounds=True):
     img = bytearray(b"\xff" * checksum.FLASH_SIZE)
     img[0:4] = b"SPII"
     img[0x200:0x204] = b"\x18\xf0\x9f\xe5"
-    img[image.ORIGINAL_2025.stamp_offset: image.ORIGINAL_2025.stamp_offset + 12] = image.ORIGINAL_2025.stamp.encode()
-    img[image.ORIGINAL_2025.build_offset: image.ORIGINAL_2025.build_offset + 16] = image.ORIGINAL_2025.build_string
-    img[image.ORIGINAL_2025.compiled_offset: image.ORIGINAL_2025.compiled_offset + 11] = image.ORIGINAL_2025.compiled
-    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    put_build_marks(img)
     if with_sounds:
         base = image.RESOURCE_BASE
         img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
@@ -92,8 +108,8 @@ def run(*argv):
 
 @pytest.fixture
 def synthetic_build(monkeypatch):
-    """The original-series identity with the synthetic sensor table in place of the real one."""
-    fake = dataclasses.replace(image.ORIGINAL_2025, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest())
+    """The public build's identity with the synthetic sensor table in place of the real one."""
+    fake = dataclasses.replace(image.PUBLIC_BUILD, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest())
     monkeypatch.setitem(image.KNOWN_BUILDS, fake.key, fake)
     return fake
 

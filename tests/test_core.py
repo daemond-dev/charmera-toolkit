@@ -15,16 +15,35 @@ import pytest
 from charmera_toolkit import checksum, frames, image, pack, settings, sounds, verify
 
 
-# Synthetic images carry no firmware bytes, so they hold this stand-in for the image-sensor table, and the
-# synthetic_build fixture makes the build identity accept it. Tests on the real dump use the real identity.
-SENSOR_START, SENSOR_END = image.ORIGINAL_2025.sensor_table
-SYNTHETIC_SENSOR_TABLE = bytes(range(SENSOR_END - SENSOR_START))
+# Synthetic images carry no firmware bytes, so they hold stand-ins for the build marks, placed where the public
+# build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL,
+# and a sensor program (the reset table, a 61-write init table that starts with a page select, switches page
+# once more and ends with ff ff, and the code literal that points at it). The init table's hash is not a known
+# build's, so the synthetic_build fixture registers it as the public build's where a test wants it accepted
+# without --stock. Tests on the real dump use the real identity.
+SENSOR_RESET_OFFSET = 0xF5BFC
+SENSOR_START, SENSOR_END = 0xF5C6C, 0xF5CE8
+SENSOR_POINTER = 0x7B91C
+SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                               + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
+assert len(SYNTHETIC_SENSOR_TABLE) == SENSOR_END - SENSOR_START == 124
+
+
+def put_build_marks(img: bytearray) -> None:
+    """The public build's marks at its offsets, so detect_build reads 'public-dump-modified'."""
+    b = image.PUBLIC_BUILD
+    img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
+    img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
+    img[0xF3978: 0xF3978 + 12] = b"Oct 14 2025\x00"
+    img[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = image.SENSOR_RESET_TABLE
+    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    img[SENSOR_POINTER: SENSOR_POINTER + 4] = struct.pack("<I", SENSOR_START - image.VA_OFFSET)
 
 
 @pytest.fixture
 def synthetic_build(monkeypatch):
-    """The original-series identity with the synthetic sensor table in place of the real one."""
-    fake = dataclasses.replace(image.ORIGINAL_2025, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest())
+    """The public build's identity with the synthetic sensor table in place of the real one."""
+    fake = dataclasses.replace(image.PUBLIC_BUILD, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest())
     monkeypatch.setitem(image.KNOWN_BUILDS, fake.key, fake)
     return fake
 
@@ -61,11 +80,7 @@ def synthetic_image(records=(), with_sounds=True):
     img = bytearray(b"\xff" * checksum.FLASH_SIZE)
     img[0:4] = b"SPII"
     img[0x200:0x204] = b"\x18\xf0\x9f\xe5"
-    # build stamps so detect_build finds the original series (software hash will not match: that is expected)
-    img[image.ORIGINAL_2025.stamp_offset: image.ORIGINAL_2025.stamp_offset + 12] = image.ORIGINAL_2025.stamp.encode()
-    img[image.ORIGINAL_2025.build_offset: image.ORIGINAL_2025.build_offset + 16] = image.ORIGINAL_2025.build_string
-    img[image.ORIGINAL_2025.compiled_offset: image.ORIGINAL_2025.compiled_offset + 11] = image.ORIGINAL_2025.compiled
-    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    put_build_marks(img)   # detect_build then reads 'public-dump-modified' (the software hash cannot match)
     if with_sounds:
         base = image.RESOURCE_BASE
         img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
@@ -193,9 +208,16 @@ def test_pack_prepare_and_verify_synthetic(tmp_path):
 def test_stock_image_identity(stock_image):
     info = image.summarize(stock_image)
     assert info["kind"] == "dump" and info["magic_ok"]
-    assert info["series"] == "original-2025" and all(info["series_checks"].values())
-    assert set(info["series_checks"]) == {"stamp", "build_string", "compiled", "code_sha256", "sensor_table", "software_sha256"}
-    assert info["software_sha256"] == image.ORIGINAL_2025.software_sha256
+    assert info["identity"] == "public-dump" and all(info["identity_checks"].values())
+    assert set(info["identity_checks"]) == {"stamp", "build_string", "compiled", "code_sha256", "sensor_table", "software_sha256",
+                                            "sensor_table_referenced", "sensor_table_known", "fingerprint"}
+    assert info["software_sha256"] == image.PUBLIC_BUILD.software_sha256
+    m = info["marks"]
+    assert (m.stamp, m.stamp_offset, m.build_offset, m.compiled_offset) == ("202505201029", 0x218C4, 0x18964, 0xF3978)
+    assert m.sensor.init == (0xF5C6C, 0xF5CE8) and m.sensor.reset == (0xF5BFC, 0xF5C02) and m.sensor.pairs == 61
+    assert m.sensor.bus_address == 0x78 and m.sensor.referenced_from == 0x7B91C
+    assert m.sensor.sha256 == image.PUBLIC_BUILD.sensor_table_sha256
+    assert info["official_fingerprint"][1:] == (image.PUBLIC_BUILD.official_sha1, image.PUBLIC_BUILD.official_byte_sum)
     assert info["tail_blank"] is True
     assert len(info["resources"]) == 43
     names = [s.entry.display_name for s in info["sounds"]]
@@ -251,7 +273,7 @@ def test_verify_tags_and_product_code(tmp_path, capsys, synthetic_build):
     # 256-aligned but too short gets the right explanation
     tiny = payload[:0x160000]
     by = {c.name: c for c in verify_mod.verify_update(tmp_path / "JH_5408202611041200_00000000.bin", tiny, allow_modified=True)}
-    assert not by["size"].ok and "shorter than 0x170000" in by["size"].detail
+    assert not by["size"].ok and "shorter than 0x169000" in by["size"].detail
     assert not by["software-region"].ok and "ends at" in by["software-region"].detail
 
 
@@ -577,7 +599,7 @@ def test_verify_fails_a_changed_sensor_table_unless_allow_unknown_build(tmp_path
     bad = bytes(bad)
     p = _named(tmp_path, bad, "202611041201")
     by = {c.name: c for c in verify.verify_update(p, bad, allow_modified=True)}
-    assert not by["sensor-table"].ok and by["sensor-table"].severity == "fail" and "stage never does" in by["sensor-table"].detail
+    assert not by["sensor-table"].ok and by["sensor-table"].severity == "fail" and "stage never accepts it" in by["sensor-table"].detail
     by = {c.name: c for c in verify.verify_update(p, bad, allow_modified=True, allow_unknown_build=True)}
     assert by["sensor-table"].severity == "warn"
     args = type("A", (), {"file": str(p), "stock": None, "allow_modified": True, "allow_unknown_build": False, "allow_odd_size": False})
@@ -742,3 +764,80 @@ def test_tweak_refuses_a_cut_off_image(tmp_path, capsys):
     assert cli.main(["tweak", "apply", str(src), "--enable", "recommended", "--out", str(tmp_path / "o.bin")]) == 2
     assert "cut-off download" in capsys.readouterr().out
     assert not (tmp_path / "o.bin").exists()
+
+
+# --- official-size update files ---------------------------------------------------------------------------------
+
+
+def test_pack_official_size_and_verify(tmp_path, synthetic_build):
+    img = synthetic_image([make_record(), make_record(ui_sound=3)])
+    official = pack.prepare_payload(img, official_size=True)
+    assert len(official) == checksum.OFFICIAL_UPDATE_SIZE and official == img[:checksum.OFFICIAL_UPDATE_SIZE]
+    assert image.image_kind(official) == "official-update"
+    assert image.updater_extra_erase(len(official)) == settings.SETTINGS_BASE
+    p = _named(tmp_path, official, "202611061200")
+    # against the camera's own dump: everything passes, and the file carries nothing of the camera's own area
+    by = {c.name: c for c in verify.verify_update(p, official, stock=img)}
+    assert by["size"].ok and by["size"].severity == "info" and "official update size" in by["size"].detail
+    assert by["final-erase"].ok and by["final-erase"].severity == "warn" and "factory defaults" in by["final-erase"].detail
+    assert by["sensor-table"].ok and by["sensor-table"].severity == "fail"       # a plain PASS
+    assert by["software-region"].ok and "byte-identical to --stock" in by["software-region"].detail
+    assert by["own-area"].severity == "info" and "settings" not in by and "photos" not in by
+    assert by["resources"].severity == "warn" and by["resource-slots"].ok and by["sounds"].ok   # 6 synthetic entries, not 43
+    assert not [c for c in by.values() if not c.ok and c.severity == "fail"]
+    # without --stock the known (here: registered) table is INFO and the software region names the build
+    by = {c.name: c for c in verify.verify_update(p, official)}
+    assert by["sensor-table"].ok and by["sensor-table"].severity == "info"
+    assert not by["software-region"].ok and "--stock" in by["software-region"].detail
+    # an official-size file is also a valid input: padded like a software-only image
+    back = pack.prepare_payload(official)
+    assert len(back) == checksum.UPDATE_FILE_SIZE and back[:len(official)] == official
+    assert settings.parse_settings(back) == [] and back[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 8] == b"\x00" * 8
+    # a resource pack that reaches past 0x169000 cannot be cut
+    big = bytearray(img)
+    big[checksum.OFFICIAL_UPDATE_SIZE + 0x100] = 0x55
+    with pytest.raises(ValueError, match="past the official update size"):
+        pack.prepare_payload(bytes(big), official_size=True)
+
+
+def test_pack_official_size_from_the_command_line(tmp_path, capsys, synthetic_build):
+    from charmera_toolkit import cli
+    src = tmp_path / "s.bin"; src.write_bytes(synthetic_image([make_record()]))
+    assert cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "202611061200", "--official-size"]) == 0
+    out = capsys.readouterr().out
+    assert "the official update size" in out and "final erase:     block 0x170000" in out
+    assert "settings:        none in the file" in out and "stored photos:   none in the file" in out
+    assert cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "202611061200", "--official-size",
+                     "--i-understand-this-file-flashes-a-camera"]) == 0
+    files = list((tmp_path / "o").glob("JH_*.bin"))
+    assert len(files) == 1 and files[0].stat().st_size == checksum.OFFICIAL_UPDATE_SIZE
+
+
+def test_stock_image_official_size_fingerprint(stock_image, tmp_path):
+    """The public dump cut at 0x169000 carries the fingerprint the film-mods author compared against."""
+    official = pack.prepare_payload(stock_image, official_size=True)
+    assert hashlib.sha1(official).hexdigest() == image.PUBLIC_BUILD.official_sha1
+    assert checksum.byte_sum(official) == image.PUBLIC_BUILD.official_byte_sum
+    p = _named(tmp_path, official, "202611061200")
+    by = {c.name: c for c in verify.verify_update(p, official, stock=stock_image)}
+    assert not [c for c in by.values() if not c.ok and c.severity == "fail"]
+    assert "the public dump's build" in by["build"].detail and by["build"].severity == "info"
+    assert image.detect_build(official).identity == "public-dump"
+
+
+def test_verify_names_the_build_and_says_what_a_match_proves(tmp_path, synthetic_build):
+    payload = pack.prepare_payload(synthetic_image([make_record()]))
+    p = _named(tmp_path, payload)
+    by = {c.name: c for c in verify.verify_update(p, payload, allow_modified=True)}
+    assert by["series"].ok and "identifies neither" in by["series"].detail
+    assert by["build"].ok and "the public dump's build" in by["build"].detail and "not whether it fits the camera" in by["build"].detail
+    assert by["stamp-in-file"].severity == "info" and "flashes it again at every power-on" in by["stamp-in-file"].detail
+    # a file whose marks sit elsewhere is Charmera firmware of an unknown build: a warning, never a stamp-based pass
+    moved = bytearray(payload)
+    moved[0x218C3: 0x218D1] = b"\x00" * 14
+    moved[0x218D0: 0x218DD] = b"202505201029\x00"
+    moved = bytes(moved)
+    m = image.detect_build(moved)
+    assert m.charmera and m.build is None and m.identity == "charmera-unknown-build"
+    by = {c.name: c for c in verify.verify_update(_named(tmp_path, moved, "202611041201"), moved, allow_modified=True)}
+    assert by["build"].severity == "warn" and "does not know" in by["build"].detail

@@ -15,6 +15,29 @@ import pytest
 
 from charmera_toolkit import image, resources
 
+# Synthetic images carry no firmware bytes, so they hold stand-ins for the build marks, placed where the public
+# build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL,
+# and a sensor program (the reset table, a 61-write init table that starts with a page select, switches page
+# once more and ends with ff ff, and the code literal that points at it). The init table's hash is not a known
+# build's, so resources replace needs only the identity, not the table's hash.
+SENSOR_RESET_OFFSET = 0xF5BFC
+SENSOR_START, SENSOR_END = 0xF5C6C, 0xF5CE8
+SENSOR_POINTER = 0x7B91C
+SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                               + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
+assert len(SYNTHETIC_SENSOR_TABLE) == SENSOR_END - SENSOR_START == 124
+
+
+def put_build_marks(img: bytearray) -> None:
+    """The public build's marks at its offsets, so detect_build reads 'public-dump-modified'."""
+    b = image.PUBLIC_BUILD
+    img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
+    img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
+    img[0xF3978: 0xF3978 + 12] = b"Oct 14 2025\x00"
+    img[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = image.SENSOR_RESET_TABLE
+    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    img[SENSOR_POINTER: SENSOR_POINTER + 4] = struct.pack("<I", SENSOR_START - image.VA_OFFSET)
+
 # --- synthetic files ------------------------------------------------------------------------------------------------
 
 
@@ -75,10 +98,7 @@ def synthetic_image(entries=ENTRIES, pad=0xFF, stamps=True):
     img = bytearray(b"\xff" * 0x200000)
     img[0:4] = b"SPII"
     if stamps:
-        b = image.ORIGINAL_2025
-        img[b.stamp_offset: b.stamp_offset + 12] = b.stamp.encode()
-        img[b.build_offset: b.build_offset + len(b.build_string)] = b.build_string
-        img[b.compiled_offset: b.compiled_offset + len(b.compiled)] = b.compiled
+        put_build_marks(img)
     base = image.RESOURCE_BASE
     img[base: base + 0x18] = b"GP+\x00" + struct.pack("<H", len(entries)) + b"\x00" * 18
     sector = 4
@@ -428,7 +448,7 @@ def test_replace_handler_gate_build_and_output_rules(tmp_path, capsys):
     unknown = tmp_path / "unknown.bin"
     unknown.write_bytes(synthetic_image(stamps=False))
     assert resources.handler(make_args(**dict(base, image=str(unknown), out=str(tmp_path / "u.bin")), gate=True)) == 2
-    assert "not the original 2025 series" in capsys.readouterr().out and not (tmp_path / "u.bin").exists()
+    assert "not the public dump's build" in capsys.readouterr().out and not (tmp_path / "u.bin").exists()
     # list and extract still work on that image
     assert resources.handler(make_args(image=str(unknown))) == 0
 

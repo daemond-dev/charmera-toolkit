@@ -20,31 +20,42 @@ ANDROID_README = REPO / "android" / "README.md"
 
 
 def _code_area_constant(java: str) -> str:
-    m = re.search(r'ORIGINAL_2025_CODE_AREA_SHA256 = "([0-9a-f]{64})"', java)
-    assert m, "UpdateCheck.java has no ORIGINAL_2025_CODE_AREA_SHA256 constant"
+    m = re.search(r'PUBLIC_CODE_AREA_SHA256 = "([0-9a-f]{64})"', java)
+    assert m, "UpdateCheck.java has no PUBLIC_CODE_AREA_SHA256 constant"
     return m.group(1)
 
 
 def test_app_build_identity_matches_the_python_one():
+    """The app names the public build by the same fingerprints as image.py, and finds the marks by the same shapes."""
     java = SRC.read_text(encoding="utf-8")
-    block = java[java.index("ORIGINAL_2025 = new Build("): java.index(");", java.index("ORIGINAL_2025 = new Build("))]
-    b = image.ORIGINAL_2025
-    for text in (b.stamp, b.build_string.decode(), b.compiled.decode(), b.software_sha256, b.sensor_table_sha256):
+    block = java[java.index("PUBLIC_BUILD = new Build("): java.index(");", java.index("PUBLIC_BUILD = new Build("))]
+    b = image.PUBLIC_BUILD
+    for text in (b.software_sha256, b.official_sha256, b.sensor_table_sha256):
         assert f'"{text}"' in block, text
-    for number in (b.stamp_offset, b.build_offset, b.compiled_offset, *b.sensor_table):
+    for number in (b.stamp_offset, b.build_offset, b.sensor_table_offset):
         assert re.search(rf"0x{number:X}\b", block, re.I), hex(number)
-    assert "ORIGINAL_2025_CODE_AREA_SHA256" in block
+    assert "PUBLIC_CODE_AREA_SHA256" in block
+    assert f'SHARED_STAMP = "{b.stamp}"' in java and b.stamp == image.SHARED_STAMP == checksum.STOCK_TIMESTAMP
     assert f"UPDATE_SIZE = 0x{checksum.UPDATE_FILE_SIZE:X}" in java
+    assert f"OFFICIAL_SIZE = 0x{checksum.OFFICIAL_UPDATE_SIZE:X}" in java
     assert f"RESOURCE_BASE = 0x{image.RESOURCE_BASE:X}" in java
-    assert "CODE_AREA_END = 0x120000" in java
+    assert f"CODE_AREA_END = 0x{image.CODE_AREA_END:X}" in java
     assert f"RESOURCE_LIMIT = 0x{image.RESOURCE_LIMIT:X}" in java
-    assert f'STOCK_STAMP' not in java or checksum.STOCK_TIMESTAMP in java
+    # the same reset-table signature, and no mark read at a fixed offset any more
+    assert "SENSOR_RESET_TABLE = {(byte) 0xFD, 0, 0x20, 0, (byte) 0xFF, (byte) 0xFF}" in java
+    assert image.SENSOR_RESET_TABLE == bytes.fromhex("fd002000ffff")
+    check = java[java.index("public static Result check(String displayName, byte[] data, Build build, byte[] reference)"):]
+    assert "build.stampOffset" not in check.split("boolean madeFrom")[0]
+    assert "regionEquals(data, build.stampOffset" not in java and "regionEquals(data, build.buildOffset" not in java
 
 
 def test_app_code_area_hash_is_the_stock_dumps(stock_image):
-    """The app calls a file's code stock only when bytes 0..0x120000 (header, code, data) hash to this constant."""
+    """The app calls a file's program the public dump's only when bytes 0..0x120000 hash to this constant."""
     java = SRC.read_text(encoding="utf-8")
     assert _code_area_constant(java) == hashlib.sha256(stock_image[0:0x120000]).hexdigest()
+    assert image.PUBLIC_BUILD.official_sha256 == hashlib.sha256(stock_image[:image.OFFICIAL_UPDATE_SIZE]).hexdigest()
+    assert image.PUBLIC_BUILD.official_sha1 == hashlib.sha1(stock_image[:image.OFFICIAL_UPDATE_SIZE]).hexdigest()
+    assert image.PUBLIC_BUILD.official_byte_sum == checksum.byte_sum(stock_image[:image.OFFICIAL_UPDATE_SIZE])
 
 
 def _bodies(java: str, opener: str):
@@ -177,3 +188,4 @@ def test_app_candidates_match_the_documented_ones():
     assert "charmera_stock_latest.bin" in image.PUBLIC_DUMPS[stock]
     commit = "209c25a47ce91c805b663edb6e18861b367a5a1b"
     assert java.count(commit) == 2      # the download and the page point at the same fixed commit
+

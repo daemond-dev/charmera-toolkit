@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from charmera_toolkit import cli, flash
-from charmera_toolkit.flash import BUILD_STAMPS, FLASH_SIZE, TAIL_START
+from charmera_toolkit import cli, flash, image
+from charmera_toolkit.flash import FLASH_SIZE, TAIL_START
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -119,12 +119,23 @@ sys.exit(0)
 '''
 
 
+# The public build's marks, as the content finder expects them: the strings with their NUL, a sensor reset table,
+# a 61-write init table (page select first, one more page switch, ff ff marker) and the code literal pointing at it.
+STAMP_OFFSET, BUILD_OFFSET = 0x218C4, 0x18964
+SENSOR_START = 0xF5C6C
+SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                               + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
+
+
 def make_image(fill: int = 0x5A) -> bytes:
-    """A 2 MiB image shaped like a stock dump: magic, both build stamps, a 0xFF tail."""
+    """A 2 MiB image shaped like a stock dump: magic, the build marks, a 0xFF tail."""
     body = bytearray(bytes([fill]) * TAIL_START)
     body[0:4] = b"SPII"
-    for offset, stamp in BUILD_STAMPS:
-        body[offset : offset + len(stamp)] = stamp
+    body[BUILD_OFFSET: BUILD_OFFSET + 17] = b"JH5408  20250520\x00"
+    body[STAMP_OFFSET - 1: STAMP_OFFSET + 13] = b"\x00202505201029\x00"   # NUL-terminated, as in the firmware
+    body[0xF5BFC: 0xF5C02] = image.SENSOR_RESET_TABLE
+    body[SENSOR_START: SENSOR_START + len(SYNTHETIC_SENSOR_TABLE)] = SYNTHETIC_SENSOR_TABLE
+    body[0x7B91C: 0x7B920] = (SENSOR_START - 0x200).to_bytes(4, "little")
     return bytes(body) + b"\xff" * (FLASH_SIZE - TAIL_START)
 
 
@@ -399,8 +410,11 @@ def test_backup_happy_path(fake_flashrom, tmp_path, capsys):
     assert manifest["size"] == FLASH_SIZE
     assert manifest["size_ok"] is True
     assert manifest["magic_ok"] is True
-    assert manifest["build_stamps"] == {"0x18964": "JH5408  20250520", "0x218C4": "202505201029"}
-    assert manifest["build_stamps_ok"] is True
+    assert manifest["build_marks"]["build_string"] == {"offset": "0x18964", "value": "JH5408  20250520"}
+    assert manifest["build_marks"]["stamp"] == {"offset": "0x218C4", "value": "202505201029"}
+    assert manifest["build_marks"]["sensor_table"]["offset"] == "0xF5C6C" and manifest["build_marks"]["sensor_table"]["writes"] == 61
+    assert manifest["build_marks_ok"] is True
+    assert manifest["build"] == "public-dump-modified"
     assert manifest["tail_blank"] is True
     assert manifest["public_dump"] is None
     assert manifest["reads"] == 2
@@ -482,8 +496,9 @@ def test_backup_keeps_blank_chip_with_warnings(fake_flashrom, tmp_path, capsys):
     assert final.read_bytes() == b"\xff" * FLASH_SIZE
     manifest = json.loads((out_dir / (final.stem + ".manifest.json")).read_text())
     assert manifest["magic_ok"] is False
-    assert manifest["build_stamps_ok"] is False
-    assert manifest["build_stamps"] == {"0x18964": None, "0x218C4": None}
+    assert manifest["build_marks_ok"] is False
+    assert manifest["build_marks"] == {"build_string": None, "stamp": None, "sensor_table": None}
+    assert manifest["build"] == "not-charmera"
     assert manifest["tail_blank"] is True
     assert any("SPII" in w for w in manifest["warnings"])
     out = capsys.readouterr().out
@@ -566,23 +581,27 @@ def test_restore_refuses_wrong_magic(fake_flashrom, tmp_path, capsys):
     assert not fake_flashrom.wrote_anything()
 
 
-def test_restore_refuses_missing_build_stamp_without_flag(fake_flashrom, tmp_path, capsys):
+def test_restore_refuses_missing_build_marks_without_flag(fake_flashrom, tmp_path, capsys):
     data = bytearray(make_image())
-    offset, stamp = BUILD_STAMPS[1]
-    data[offset : offset + len(stamp)] = b"202601010000"
-    image = tmp_path / "other.bin"
-    image.write_bytes(bytes(data))
-    assert run(["restore", "--image", str(image)]) == 1
+    data[STAMP_OFFSET + 12] = ord("Z")      # no NUL after the digits: not a stamp string any more
+    image_path = tmp_path / "other.bin"
+    image_path.write_bytes(bytes(data))
+    assert run(["restore", "--image", str(image_path)]) == 1
     err = capsys.readouterr().err
-    assert "0x218C4" in err
+    assert "no Charmera build marks" in err and "stamp missing" in err
     assert "--allow-unknown-build" in err
     assert not fake_flashrom.wrote_anything()
+    # another stamp at the same place is still a Charmera build mark: the stamp is not an identity
+    data = bytearray(make_image())
+    data[STAMP_OFFSET: STAMP_OFFSET + 12] = b"202601010000"
+    image_path.write_bytes(bytes(data))
+    assert flash.analyze_image(bytes(data))["build_marks_ok"] is True
+    assert flash.analyze_image(bytes(data))["build"] == "charmera-unknown-build"
 
 
 def test_restore_missing_build_stamp_allowed_with_flag(fake_flashrom, tmp_path, monkeypatch, capsys):
     data = bytearray(make_image())
-    offset, stamp = BUILD_STAMPS[0]
-    data[offset : offset + len(stamp)] = b"X" * len(stamp)
+    data[BUILD_OFFSET: BUILD_OFFSET + 16] = b"X" * 16
     image = tmp_path / "other.bin"
     image.write_bytes(bytes(data))
     monkeypatch.setattr("builtins.input", lambda prompt="": "no")
@@ -842,7 +861,7 @@ def test_recovery_doc_matches_the_tool():
 def test_analyze_image_and_block_diff():
     stock = make_image()
     info = flash.analyze_image(stock)
-    assert info["size_ok"] and info["magic_ok"] and info["build_stamps_ok"] and info["tail_blank"]
+    assert info["size_ok"] and info["magic_ok"] and info["build_marks_ok"] and info["tail_blank"]
     assert info["public_dump"] is None
     assert flash.image_warnings(info) == []
 
