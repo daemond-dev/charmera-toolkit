@@ -172,7 +172,7 @@ def test_app_candidates_match_the_documented_ones():
     doc = (SRC.parents[6] / "docs" / "03-FLASH-CANDIDATES.md").read_text(encoding="utf-8")
     for name, sha in re.findall(r'"(JH_5408\d{12}_[0-9A-F]{8}\.bin)", "([0-9a-f]{64})"', java):
         assert name in doc and sha in doc, name
-    assert len(re.findall(r'"JH_5408\d{12}_[0-9A-F]{8}\.bin", "[0-9a-f]{64}"', java)) == 3
+    assert len(re.findall(r'"JH_5408\d{12}_[0-9A-F]{8}\.bin", "[0-9a-f]{64}"', java)) == 4   # restore, C, A, B
     stock = re.search(r'STOCK_DUMP_SHA256 = "([0-9a-f]{64})"', java).group(1)
     assert "charmera_stock_latest.bin" in image.PUBLIC_DUMPS[stock]
     commit = "209c25a47ce91c805b663edb6e18861b367a5a1b"

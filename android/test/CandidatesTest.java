@@ -41,7 +41,12 @@ public final class CandidatesTest {
                 && allEqual(b, WAV16_DATA, WAV16_DATA + 64, 0) && b[WAV8_DATA - 8] == 'd');
         expect("A leaves the sound data alone", a[WAV8_DATA] == img[WAV8_DATA]);
         expect("nothing below the settings bank changes", Arrays.equals(Arrays.copyOf(b, 0x120000), Arrays.copyOf(img, 0x120000)));
-        expect("a synthetic dump never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.C), "not the reviewed"));
+        expect("a synthetic dump never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.C), "not the expected"));
+        expect("only the stock restore is offered", java.util.Arrays.equals(Candidates.Kind.offeredKinds(),
+                new Candidates.Kind[]{Candidates.Kind.RESTORE}));
+        byte[] restore0 = invokeTransform(img, Candidates.Kind.RESTORE);
+        expect("the restore is the dump's first 0x1E0000 bytes, untouched",
+                java.util.Arrays.equals(restore0, java.util.Arrays.copyOf(img, UpdateCheck.UPDATE_SIZE)));
 
         String real = System.getenv("CHARMERA_STOCK_IMAGE");
         byte[] given = real == null || real.isEmpty() ? null : Files.readAllBytes(Paths.get(real));
@@ -52,7 +57,7 @@ public final class CandidatesTest {
         } else {
             byte[] dump = Candidates.stockDump(given);
             for (Candidates.Kind k : Candidates.Kind.values()) {
-                byte[] out = Candidates.build(dump, k);   // throws unless the SHA-256 is the reviewed one
+                byte[] out = Candidates.build(dump, k);   // throws unless the SHA-256 is the published or reviewed one
                 UpdateCheck.Result r = UpdateCheck.check(k.fileName, out);
                 expect("real " + k + " is the reviewed file and passes the checker", r.ok && k.fileName.equals(r.cardName)
                         && k.sha256.equals(r.sha256));

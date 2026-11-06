@@ -34,26 +34,53 @@ public final class Candidates {
     static final List<String> SOUND_SLOTS =
             Arrays.asList("BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV");
 
-    /** The three candidates, in the order to try them. Names and hashes as in docs/03-FLASH-CANDIDATES.md. */
+    /**
+     * What the app can make. RESTORE is the published stock restore file, which several owners have flashed with
+     * working cameras: the stock dump's first 0x1E0000 bytes, under its published name. C, A and B are withdrawn and
+     * not offered: C (one settings record, the factory one, and erased stored photos) left a camera stuck on the mode
+     * menu, and A and B use the same settings.
+     */
     public enum Kind {
-        C("Candidate C: stock firmware with factory settings, stored photos removed. Changes nothing in the code or"
-                + " the sounds. Try this one first.",
+        RESTORE(true, "Stock restore: the published stock firmware file other owners have flashed, exactly as dumped"
+                + " from a working camera (its settings and two photos in internal memory included). Use this to get a"
+                + " camera back to stock.",
+                "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906"),
+        C(false, "Candidate C (withdrawn: left a camera stuck on the mode menu).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
-        A("Candidate A: C with the UI sounds turned off in the settings (power-on chime, shutter, key clicks,"
-                + " power-off sound).",
+        A(false, "Candidate A (withdrawn: same settings as C).",
                 "JH_5408202611050001_0FB74D14.bin", "c4822cd7eed63169d80c5105811ab6492444793fafcc7a96e809869f2e5ccda7"),
-        B("Candidate B: A with the sound data itself silenced too, so the sounds stay off even if the camera ever"
-                + " resets its settings.",
+        B(false, "Candidate B (withdrawn: same settings as C).",
                 "JH_5408202611050002_0FB0BD3C.bin", "32a7f54e5090050d099681c33378e3d23822a736279ea78f9f3442a45edc3979");
 
+        /** Whether the app offers it. */
+        public final boolean offered;
         public final String label;
         public final String fileName;
         public final String sha256;
 
-        Kind(String label, String fileName, String sha256) {
+        Kind(boolean offered, String label, String fileName, String sha256) {
+            this.offered = offered;
             this.label = label;
             this.fileName = fileName;
             this.sha256 = sha256;
+        }
+
+        /** The kinds the app offers, in order. */
+        public static Kind[] offeredKinds() {
+            int n = 0;
+            for (Kind k : values()) {
+                if (k.offered) {
+                    n++;
+                }
+            }
+            Kind[] out = new Kind[n];
+            int i = 0;
+            for (Kind k : values()) {
+                if (k.offered) {
+                    out[i++] = k;
+                }
+            }
+            return out;
         }
     }
 
@@ -100,7 +127,7 @@ public final class Candidates {
         String sha = UpdateCheck.sha256Hex(out, 0, out.length);
         if (!sha.equals(kind.sha256)) {
             throw new IllegalStateException("the file made for " + kind.name() + " has SHA-256 " + sha + ", not the"
-                    + " reviewed " + kind.sha256 + "; it is not used. Please report this.");
+                    + " expected " + kind.sha256 + "; it is not used. Please report this.");
         }
         return out;
     }
@@ -109,6 +136,9 @@ public final class Candidates {
     static byte[] transform(byte[] dump, Kind kind) {
         if (dump.length != DUMP_SIZE) {
             throw new IllegalArgumentException("expects the 2 MiB stock dump");
+        }
+        if (kind == Kind.RESTORE) {
+            return Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the published restore file is exactly this
         }
         byte[] image = dump.clone();
         int first = firstValidRecord(image);

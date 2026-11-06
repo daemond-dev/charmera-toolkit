@@ -23,7 +23,7 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 ## The app
 
 [Charmera Card](../android/README.md) does the whole job on the phone, with no computer: it downloads the public
-stock dump, makes one of the three reviewed update files from it (it can make nothing else), writes it to the
+stock dump, makes the published stock restore file from it (it can make nothing else), writes it to the
 camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup.
 Download [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
 on the phone (sign in to GitHub in the phone's browser first: the repository is private). The rest of this page is

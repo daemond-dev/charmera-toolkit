@@ -1,7 +1,7 @@
 # Charmera Card for Android
 
 A small Android app (7.0 or later) that does the whole first flash from the phone, with no computer: it downloads
-the public stock firmware dump, makes one of the three reviewed update files from it, writes it to the camera's
+the public stock firmware dump, makes the published stock restore file from it, writes it to the camera's
 card over the camera's USB-C cable, and walks you through flashing and cleaning up. The camera flashes itself from
 the card, as described in [The first flash](../docs/01-FIRST-FLASH.md).
 
@@ -36,27 +36,28 @@ phone over USB.
 
 The app's screen is the same five steps.
 
-1. **Make the update file.** Tap **Download and make the file**, then choose C, A or B
-   ([what each changes](../docs/03-FLASH-CANDIDATES.md)); start with C. The app checks the download, makes the file
-   the same way the computer toolkit's recipe does, and uses it only if its SHA-256 equals the reviewed file's, so
-   it can make nothing else. The result is checked again the way `charmera verify` checks a file, and each check is
-   listed. Offline, or made a file on a computer? **Use a file on the phone** takes the stock dump (downloaded in a
-   browser from [its page](https://github.com/benbadio/keychain-camera-plus/blob/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin))
-   or a `JH_5408…bin` file that `charmera pack` wrote.
+1. **Get the update file.** Tap **Download the stock restore file**. The app downloads the stock dump, checks it,
+   and makes the published stock restore file from it (its first 0x1E0000 bytes), using it only if its SHA-256 is
+   the published file's (`b10a2f1c…`). It puts a camera back to stock, settings included. Candidates C, A and B are
+   withdrawn and not offered ([why](../docs/03-FLASH-CANDIDATES.md)). Offline, or made a file on a computer? **Use a
+   file on the phone** takes the stock dump or a `JH_5408…bin` file.
 2. **Connect the camera.** Card in the camera, connect the camera with a USB-C data cable: it shows its card as a
-   drive. Tap **Choose the camera's drive**, open that drive in the picker and tap "Use this folder" at its top
+   drive. Plugging the cable into a switched-off camera switches it on, and if its card holds an update file the
+   camera flashes that file again, so connect a switched-off camera only when its card has no update file. Tap **Choose the camera's drive**, open that drive in the picker and tap "Use this folder" at its top
    level. A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10: from
    Android 11 on, Android does not let an app choose the top level of a card in the phone's slot ("Use this folder"
    is greyed out there). The app remembers the drive and looks at it again whenever you come back to the app.
 3. **Write.** The app refuses a card that already holds an update file, and lists the card again just before it
    writes. It writes the file under a temporary name, renames it to the exact name the camera looks for, and reads
-   it back to compare SHA-256. If any of that fails, it lists the card again and says what is on it now.
+   it back to compare SHA-256. If any of that fails, it lists the card again and says what is on it now. When it is done, the app says so with a short message and offers
+   **Open storage settings**: Android does not let an app eject a drive, so eject it there before you unplug.
 4. **Flash.** Eject the drive in Android's storage settings and unplug the cable. Switch the camera off, then on
    again with the card in: it looks for the file only in its first five seconds and shows the update progress. At
    100% it stays on its last screen. Take the card out first, then hold the power key about a second to switch off.
 5. **Clean up.** The camera does not delete the file and would flash it again at every power-on. With the card
-   still out, switch the camera on, wait 10 seconds, insert the card, connect the camera to the phone, and tap
-   **Remove update files**. Then switch the camera off and on normally and check the boot screen, the live view and
+   still out, switch the camera on with its own power key (not by plugging in the cable), wait 10 seconds, insert
+   the card, connect the camera to the phone, and tap **Remove update files**. The result shows right under that
+   button and as a short message, and the app offers the storage settings to eject the drive. Then switch the camera off and on normally and check the boot screen, the live view and
    a test photo.
 
 ## About the camera's USB-C connection
@@ -72,7 +73,7 @@ the camera on with the card in.
 
 - **Unreadable cards:** it cannot make Android read a card the camera has marked dirty. Format the card in the
   phone, or run `charmera card-fix` on a computer ([SD card problems](../docs/05-CARDS.md)).
-- **Other mods:** it makes only the three reviewed files, C, A and B. Frames, a boot logo, start-up tweaks or a
+- **Other mods:** it makes only the stock restore file. Frames, a boot logo, start-up tweaks or a
   build from your own camera's backup need the toolkit on a computer, or in Termux
   ([Using an Android phone](../docs/06-ANDROID.md)); the app then checks and writes the file they produce. Because
   the repository is private, `pip install` from its GitHub URL in Termux needs a GitHub personal access token; or

@@ -65,6 +65,7 @@ public class MainActivity extends Activity {
     private Button writeButton;
     private Button cleanButton;
     private Button downloadButton;
+    private TextView cleanStatus;
     private Button saveButton;
     /** The public stock dump once downloaded or picked and checked; kept so choosing again needs no new download. */
     private byte[] stockDump;
@@ -113,11 +114,11 @@ public class MainActivity extends Activity {
                 + "The flash candidates (docs/03-FLASH-CANDIDATES.md) erase the two photos the camera keeps in its own"
                 + " memory."));
 
-        col.addView(heading("1. Make the update file"));
+        col.addView(heading("1. Get the update file"));
         col.addView(body("The app downloads the public stock firmware dump from GitHub (2 MiB), checks it, and makes the"
-                + " file you choose: C, A or B. These are the same reviewed files the computer toolkit makes, checked by"
-                + " their SHA-256; the app can make nothing else. Start with C."));
-        downloadButton = button("Download and make the file", v -> downloadDump());
+                + " stock restore file from it: the published file other owners have flashed, accepted only if its"
+                + " SHA-256 matches. It puts a camera back to stock."));
+        downloadButton = button("Download the stock restore file", v -> downloadDump());
         col.addView(downloadButton);
         TextView offline = body("Offline, or already have the stock dump or an update file on the phone? Choose it"
                 + " instead. The stock dump's page: " + Candidates.STOCK_DUMP_PAGE);
@@ -130,6 +131,8 @@ public class MainActivity extends Activity {
         col.addView(saveButton);
 
         col.addView(heading("2. Connect the camera"));
+        col.addView(warning("Plugging the cable into a switched-off camera switches it on. If its card holds an update"
+                + " file, it flashes that file again. Only connect a switched-off camera when the card has no update file."));
         col.addView(body("Card in the camera. Connect the camera to the phone with a USB-C data cable; the camera shows its"
                 + " card as a drive. If no drive appears, do not switch the camera on with the card in, in case the card"
                 + " still holds an update file: take the card out, switch the camera on, wait 10 seconds, put the card"
@@ -148,6 +151,7 @@ public class MainActivity extends Activity {
         col.addView(writeButton);
         writeStatus = body("");
         col.addView(writeStatus);
+        col.addView(button("Eject the drive (opens Android's storage settings)", v -> openStorageSettings()));
 
         col.addView(heading("4. Flash"));
         col.addView(body("1. Eject the drive in Android (Settings, Storage, the USB drive, Eject), then unplug the cable."
@@ -161,11 +165,13 @@ public class MainActivity extends Activity {
 
         col.addView(heading("5. Clean up"));
         col.addView(body("The update file is still on the card, and the camera would flash it again at every power-on."
-                + " With the card still out: switch the camera on, wait 10 seconds, put the card in, connect the camera"
-                + " to the phone again, then tap the button. The camera only looks for the file in the first five"
+                + " With the card still out: switch the camera on with its own power key (not by plugging in the cable),"
+                + " wait 10 seconds, put the card in, connect the camera to the phone again, then tap the button. The camera only looks for the file in the first five"
                 + " seconds after power-on, so it cannot flash again this way."));
         cleanButton = button("Remove update files from the card", v -> confirmClean());
         col.addView(cleanButton);
+        cleanStatus = body("");
+        col.addView(cleanStatus);
         col.addView(body("Then switch the camera off and on normally and check the boot screen, the live view and a test"
                 + " photo."));
 
@@ -221,6 +227,58 @@ public class MainActivity extends Activity {
     /** True once this screen is closing; work that finishes later must not touch its views or open dialogs. */
     private boolean gone() {
         return isFinishing() || isDestroyed();
+    }
+
+    private TextView warning(String s) {
+        TextView t = body(s);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        return t;
+    }
+
+    /**
+     * Android does not let an app eject a drive, so this opens the storage settings, where the USB drive or card has
+     * an Eject entry.
+     */
+    private void openStorageSettings() {
+        String[] actions = {android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS,
+                android.provider.Settings.ACTION_MEMORY_CARD_SETTINGS, android.provider.Settings.ACTION_SETTINGS};
+        for (String action : actions) {
+            try {
+                startActivity(new Intent(action));
+                return;
+            } catch (ActivityNotFoundException | SecurityException ignored) {
+                // try the next, more general settings screen
+            }
+        }
+        android.widget.Toast.makeText(this, "Open Settings, Storage, and eject the drive there.",
+                android.widget.Toast.LENGTH_LONG).show();
+    }
+
+    /** After a write or a removal: say it where the owner is looking, then offer the eject screen. */
+    private void done(String message, String next) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show();
+        if (dialog != null) {
+            return;
+        }
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle(message)
+                .setMessage("Eject the drive in Android before you unplug the cable or take the card out, so everything"
+                        + " written reaches the card. Android does not let apps eject a drive, so this opens the storage"
+                        + " settings: tap the USB drive or card there, then Eject.\n\n" + next)
+                .setPositiveButton("Open storage settings", (di, w) -> openStorageSettings())
+                .setNegativeButton("Later", null)
+                .create();
+        d.setOnDismissListener(di -> {
+            if (dialog == di) {
+                dialog = null;
+            }
+            if (!gone()) {
+                updateButtons();
+            }
+        });
+        dialog = d;
+        d.show();
+        updateButtons();
     }
 
     private TextView heading(String s) {
@@ -431,13 +489,17 @@ public class MainActivity extends Activity {
     private void chooseCandidate(byte[] dump, int request) {
         stockDump = dump;
         if (dialog != null) {
-            fileStatus.setText("The stock dump is downloaded and checked. Tap \"Download and make the file\" to choose"
-                    + " which file to make.");
+            fileStatus.setText("The stock dump is downloaded and checked. Tap \"Download the stock restore file\" to"
+                    + " make the file (no new download is needed).");
             updateButtons();
             return;
         }
+        final Candidates.Kind[] kinds = Candidates.Kind.offeredKinds();
+        if (kinds.length == 1) {
+            buildCandidate(dump, kinds[0], request);
+            return;
+        }
         final boolean[] picked = {false};
-        final Candidates.Kind[] kinds = Candidates.Kind.values();
         String[] labels = new String[kinds.length];
         for (int i = 0; i < kinds.length; i++) {
             labels[i] = kinds[i].label;
@@ -458,8 +520,8 @@ public class MainActivity extends Activity {
             }
             if (!gone()) {
                 if (!picked[0] && request == fileRequest) {
-                    fileStatus.setText("No file made yet. Tap \"Download and make the file\" to choose (no new download"
-                            + " is needed).");
+                    fileStatus.setText("No file made yet. Tap \"Download the stock restore file\" to choose (no new"
+                            + " download is needed).");
                 }
                 updateButtons();
             }
@@ -482,7 +544,7 @@ public class MainActivity extends Activity {
                 data = Candidates.build(dump, kind);
                 result = UpdateCheck.check(kind.fileName, data);
                 text = "Made " + kind.fileName + " from the stock dump. Its SHA-256 " + result.sha256 + " matches the"
-                        + " reviewed file.\n" + kind.label + "\n\n" + result.report() + "\n"
+                        + " published file.\n" + kind.label + "\n\n" + result.report() + "\n"
                         + (result.ok ? "OK to put on the card." : "Not OK: this file will not be written.");
             } catch (RuntimeException e) {
                 data = null;
@@ -864,6 +926,9 @@ public class MainActivity extends Activity {
                 busy = false;
                 writeStatus.setText(outcome);
                 inspectCard();
+                if (outcome.startsWith("Written and read back")) {
+                    done("Written to the card", "Then unplug the cable and follow step 4.");
+                }
             });
         });
     }
@@ -1012,7 +1077,7 @@ public class MainActivity extends Activity {
 
     private void clean(Uri t, List<CardState.Item> files) {
         busy = true;
-        writeStatus.setText("Removing…");
+        cleanStatus.setText("Removing…");
         updateButtons();
         WORKER.execute(() -> {
             StringBuilder sb = new StringBuilder();
@@ -1025,6 +1090,7 @@ public class MainActivity extends Activity {
                 }
                 sb.append(failed == null ? "Removed " + f.name : "Could not remove " + f.name + ": " + failed).append('\n');
             }
+            final boolean allRemoved = sb.indexOf("Could not remove") < 0;
             sb.append('\n').append(readCard(t).state.afterwards());
             final String s = sb.toString().trim();
             ui.post(() -> {
@@ -1032,8 +1098,11 @@ public class MainActivity extends Activity {
                     return;
                 }
                 busy = false;
-                writeStatus.setText(s);
+                cleanStatus.setText(s);
                 inspectCard();
+                if (allRemoved) {
+                    done("Update file removed", "Then unplug the cable. The camera is ready to use normally.");
+                }
             });
         });
     }

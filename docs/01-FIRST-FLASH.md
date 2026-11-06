@@ -6,7 +6,7 @@ The order of operations for putting a modified firmware on a Charmera for the fi
 no return marked. Every step links to a longer document; read those before the step, not during it. The
 [list of all docs](README.md) has them in reading order.
 
-Only a phone? The [Charmera Card app](../android/README.md) does steps 2 to 7 on the phone, making candidate C,
+Only a phone? The [Charmera Card app](../android/README.md) does steps 2 to 7 on the phone, making the stock restore file
 A or B from the public stock dump itself; read steps 0 and 1 here first.
 
 Not flashing anything? If you only want the photo and video dates fixed, go to
@@ -50,14 +50,9 @@ warning in step 5).
 
 ## 2. Pick the file
 
-[Flash candidates](03-FLASH-CANDIDATES.md) lists the three reviewed files, in the order to try them:
-
-- C: stock, settings reset to factory, photos blanked. Changes nothing in the code or resources. Try this
-  first if you only want to know that the updater path works on your camera.
-- A: C plus UI sounds set to 0 in the settings record. Fully reversible by flashing C.
-- B: A plus silenced sound data in the resource pack, for the case where the settings are ever reset.
-
-All three erase the two photos the camera stores in its own memory.
+The three candidates C, A and B in [Flash candidates](03-FLASH-CANDIDATES.md) are withdrawn: C left a camera
+stuck on the mode menu, and A and B use the same settings. The file to use is the published stock restore file,
+which several owners have flashed with working cameras; the same page gives its name and hash.
 
 Build your own instead, then `pack` it. Each of these commands prints what it will change and refuses to write
 until you pass its gate flag:

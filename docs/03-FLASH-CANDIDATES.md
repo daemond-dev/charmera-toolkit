@@ -2,8 +2,22 @@
 
 Reading order: 3 of 13 · previous: [Recovery](02-RECOVERY.md) · next: [Putting the file on the card](04-STAGE.md) · [all docs](README.md)
 
+**Withdrawn after a hardware test.** Candidate C was flashed on an original-series camera. The update itself
+completed and the camera boots, but it then stays on the mode menu: no mode can be chosen, and pressing the shutter
+there froze it until it switched itself off. That happened with and without a card. C differs from the published
+stock restore file below only in the settings bank (C keeps one record, the factory one; the restore file keeps the
+16 records of a working camera, and the record the camera loads differs in bytes +0x03 and +0x53) and in the stored
+photos. A and B use the same settings as C. Do not flash C, A or B. To get a camera back, flash the published stock
+restore file.
+
+**Stock restore (the recovery file).** `JH_5408202610261427_0F065D55.bin` from
+https://github.com/benbadio/keychain-camera-plus (commit 209c25a, `release/stock/`), SHA-256
+`b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906`. Several owners have flashed it with working
+cameras. It is exactly the first 0x1E0000 bytes of the stock dump below, so the Charmera Card app makes it from
+that dump and checks this hash.
+
 Three update files built from the public original-series dump, reviewed statically and by an independent
-pass. None has been flashed yet. They are reproducible byte for byte from the recipe below, so they are not
+pass. They are reproducible byte for byte from the recipe below, so they are not
 committed: build them yourself from the upstream dump and compare the hashes.
 
 Input: `charmera_stock_latest.bin` from https://github.com/benbadio/keychain-camera-plus (commit 209c25a),
