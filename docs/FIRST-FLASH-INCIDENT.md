@@ -15,6 +15,11 @@ public dump was flashed twice, once modified (candidate C) and once unmodified (
 gave the same result. Millennium and CLOT owners report the same symptom with the same image. This is an inference
 (about 70 percent at the time), not something measured on the camera.
 
+The public firmware drives exactly one sensor, with no check of which one is fitted. It writes a fixed list of
+61 register settings to a sensor at bus address 0x78, never reads the chip's ID, and carries on when a write
+fails. So a different sensor and a loose or damaged sensor ribbon look the same from the firmware's side. Only
+the sensor's markings or a dump from a matching camera can tell them apart.
+
 ## What was built
 
 - **The toolkit** (Python, Windows and Linux): the research report, `pack`, `verify` and `stage` for update
@@ -99,12 +104,16 @@ gave the same result. Millennium and CLOT owners report the same symptom with th
 1. **Reto.** File a ticket at https://www.kodak.retopro.co/pages/help-ticket. A purchase from Reto's own store
    within 30 days qualifies for an exchange. Say plainly that it was reflashed.
 2. **The community.** The request for a dump from a working original-series unit is posted in Project-Sirius #2.
-3. **The film-mods author.** Their camera works on a different build with the same stamp. Comparing that build
-   with the public dump is under way, to see whether the difference is in the sensor driver. If it is, the useful
-   questions for the author are when their camera was bought, which sensor it has, and whether they would share
-   a restore file. That file would be the 0x169000-byte kind, which leaves everything after the resources alone
-   apart from the settings reset. Nothing from that repo should go on this camera's card until the comparison
-   says it fits.
+3. **The film-mods author.** Their camera works on a different build with the same stamp. I compared the
+   addresses their notes give with the public dump:
+   - In both builds the sensor code and tables have the same size and layout. Most of the public dump's extra
+     code is in other parts of the firmware.
+   - So their build most likely drives the same sensor, at roughly 65 to 80 percent.
+   - The register values themselves can't be checked without their dump.
+
+   The question worth asking the author is whether their sensor init table matches the public dump's: 124 bytes
+   at file offset 0xF5C6C, sha256 `aea3976b…`. Their build is worth trying only if it differs. Nothing from that
+   repo should go on this camera's card.
 4. **A replacement camera.** Read its chip before flashing anything.
 
 ## Open work in the toolkit
