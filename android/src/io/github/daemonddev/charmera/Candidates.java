@@ -41,19 +41,20 @@ public final class Candidates {
      * menu, and A and B use the same settings.
      */
     public enum Kind {
-        RESTORE(true, "Stock restore: the published stock firmware file other owners have flashed, exactly as dumped"
-                + " from a working camera (its settings and two photos in internal memory included). Use this to get a"
-                + " camera back to stock.",
+        RESTORE(true, "The stock restore file: the published file several owners have flashed with working cameras."
+                + " It is exactly what was dumped from a working camera, with that camera's settings and the 2 photos"
+                + " it kept in its own memory. It puts a camera back to stock.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906"),
-        C(false, "Candidate C (withdrawn: left a camera stuck on the mode menu).",
+        C(false, "Candidate C (withdrawn: it left a camera stuck on its mode menu).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
-        A(false, "Candidate A (withdrawn: same settings as C).",
+        A(false, "Candidate A (withdrawn: it has the same settings as C).",
                 "JH_5408202611050001_0FB74D14.bin", "c4822cd7eed63169d80c5105811ab6492444793fafcc7a96e809869f2e5ccda7"),
-        B(false, "Candidate B (withdrawn: same settings as C).",
+        B(false, "Candidate B (withdrawn: it has the same settings as C).",
                 "JH_5408202611050002_0FB0BD3C.bin", "32a7f54e5090050d099681c33378e3d23822a736279ea78f9f3442a45edc3979");
 
         /** Whether the app offers it. */
         public final boolean offered;
+        /** What the file is, in plain words, for the owner. */
         public final String label;
         public final String fileName;
         public final String sha256;
@@ -89,7 +90,9 @@ public final class Candidates {
 
     /**
      * The 2 MiB stock dump from what the owner picked: the public dump itself, or the published stock restore file
-     * (its first 0x1E0000 bytes, which this pads with the blank 0xFF tail). Throws with a plain reason otherwise.
+     * (its first 0x1E0000 bytes, which this pads with the blank 0xFF tail). Throws otherwise, with a message that
+     * says the cause and the next step in plain words: it starts in lower case so the screen can show it after a
+     * colon, and any SHA-256 is on a last line that starts with "Detail:".
      */
     public static byte[] stockDump(byte[] picked) {
         byte[] dump;
@@ -99,14 +102,16 @@ public final class Candidates {
             dump = Arrays.copyOf(picked, DUMP_SIZE);
             Arrays.fill(dump, UpdateCheck.UPDATE_SIZE, DUMP_SIZE, (byte) 0xFF);
         } else {
-            throw new IllegalArgumentException("this file is " + picked.length + " bytes; the stock dump is 2,097,152"
-                    + " bytes (charmera_stock_latest.bin). A shorter file is usually a cut-off download.");
+            throw new IllegalArgumentException("the file is " + UpdateCheck.bytes(picked.length) + ", but the stock dump"
+                    + " is " + UpdateCheck.bytes(DUMP_SIZE) + ". A shorter file is usually a cut-off download."
+                    + " Download it again.");
         }
         String sha = UpdateCheck.sha256Hex(dump, 0, dump.length);
         if (!sha.equals(STOCK_DUMP_SHA256)) {
-            throw new IllegalArgumentException("this is not the public stock dump (its SHA-256 is " + sha + ", not "
-                    + STOCK_DUMP_SHA256 + "). The app makes the candidates only from that exact file; for your own"
-                    + " camera's backup, use the toolkit on a computer.");
+            throw new IllegalArgumentException("the file is not the public stock dump, so the app will not use it. The"
+                    + " app makes the stock restore file only from that exact file, charmera_stock_latest.bin,"
+                    + " unchanged. For a backup of your own camera, use the toolkit on a computer.\nDetail: its SHA-256"
+                    + " is " + sha + "; the public stock dump's is " + STOCK_DUMP_SHA256 + ".");
         }
         return dump;
     }
@@ -121,13 +126,18 @@ public final class Candidates {
         }
     }
 
-    /** The candidate's bytes, accepted only when they hash to the reviewed file. */
+    /**
+     * The candidate's bytes, accepted only when they hash to the reviewed file. Throws otherwise, with a message in
+     * the same form as stockDump's.
+     */
     public static byte[] build(byte[] stockDump, Kind kind) {
         byte[] out = transform(stockDump, kind);
         String sha = UpdateCheck.sha256Hex(out, 0, out.length);
         if (!sha.equals(kind.sha256)) {
-            throw new IllegalStateException("the file made for " + kind.name() + " has SHA-256 " + sha + ", not the"
-                    + " expected " + kind.sha256 + "; it is not used. Please report this.");
+            String what = kind == Kind.RESTORE ? "the published stock restore file" : "candidate " + kind.name();
+            throw new IllegalStateException("the file made from the stock dump is not exactly " + what + ", so the app"
+                    + " will not use it. This should not happen. Please report it.\nDetail: its SHA-256 is " + sha
+                    + "; " + what + " has " + kind.sha256 + ".");
         }
         return out;
     }
@@ -135,7 +145,7 @@ public final class Candidates {
     /** The recipe itself, without the final hash check (the tests run it on synthetic images). */
     static byte[] transform(byte[] dump, Kind kind) {
         if (dump.length != DUMP_SIZE) {
-            throw new IllegalArgumentException("expects the 2 MiB stock dump");
+            throw new IllegalArgumentException("the stock dump must be " + UpdateCheck.bytes(DUMP_SIZE) + ".");
         }
         if (kind == Kind.RESTORE) {
             return Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the published restore file is exactly this
@@ -143,7 +153,7 @@ public final class Candidates {
         byte[] image = dump.clone();
         int first = firstValidRecord(image);
         if (first < 0) {
-            throw new IllegalArgumentException("the dump has no CRC-valid settings record");
+            throw new IllegalArgumentException("the stock dump has no undamaged settings record.");
         }
         byte[] record = Arrays.copyOfRange(image, first, first + RECORD);
         if (kind == Kind.A || kind == Kind.B) {
@@ -192,7 +202,8 @@ public final class Candidates {
             }
             int off = (int) e.offset;
             if (!UpdateCheck.regionEquals(image, off, new byte[]{'R', 'I', 'F', 'F'})) {
-                throw new IllegalArgumentException(e.name + " is not a WAV file");
+                throw new IllegalArgumentException("the sound " + e.displayName() + " in the stock dump is not a WAV"
+                        + " file.");
             }
             long end = off + 8L + u32(image, off + 4);
             int bits = -1;
@@ -203,7 +214,8 @@ public final class Candidates {
                     bits = (image[p + 8 + 14] & 0xFF) | (image[p + 8 + 15] & 0xFF) << 8;
                 } else if (image[p] == 'd' && image[p + 1] == 'a' && image[p + 2] == 't' && image[p + 3] == 'a') {
                     if (bits < 0 || p + 8 + size > image.length) {
-                        throw new IllegalArgumentException(e.name + " has no format chunk before its data");
+                        throw new IllegalArgumentException("the sound " + e.displayName() + " in the stock dump has"
+                                + " no format part before its sound data.");
                     }
                     Arrays.fill(image, p + 8, (int) (p + 8 + size), (byte) (bits == 8 ? 0x80 : 0x00));
                     break;

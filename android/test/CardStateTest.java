@@ -41,11 +41,13 @@ public final class CardStateTest {
         expect("a folder is never an update file", !stale.names().contains("JH_dir"), stale.names());
         expect("DCIM is seen", stale.hasDcim, stale.describe());
         expect("a card holding update files refuses a write", stale.writeRefusal() != null
-                && stale.writeRefusal().contains("JH_5408202610261427_0F065D55.bin (1966080 bytes)")
+                && stale.writeRefusal().contains("JH_5408202610261427_0F065D55.bin (1,966,080 bytes)")
                 && stale.writeRefusal().contains("Remove update files"), stale.writeRefusal());
         expect("an unknown size is shown as ?", stale.names().contains("jh_old.BIN (? bytes)"), stale.names());
         expect("afterwards names what is still there", stale.afterwards().contains("charmera-stage.part")
                 && stale.afterwards().contains("Remove update files"), stale.afterwards());
+        expect("after a removal that left files, it says to try again and how else", stale.afterwards(true).contains(
+                "still holds") && stale.afterwards(true).contains("Files app"), stale.afterwards(true));
 
         UpdateCheck.Result checked = new UpdateCheck.Result(new java.util.ArrayList<>(),
                 "JH_5408202610261427_0F065D55.bin", "00", 1966080);

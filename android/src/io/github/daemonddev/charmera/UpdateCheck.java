@@ -20,6 +20,9 @@ import java.util.zip.Inflater;
  * imports, so it runs on a plain JVM for the tests in android/test.
  *
  * A file passes only when every FAIL-level check passes. WARN lines are shown and do not block.
+ *
+ * Every line is written for the owner reading it on a phone: a plain title and text, and any numbers, sums or
+ * offsets below it as a labelled detail. Result.verdict() is the one-line answer for the top of the report.
  */
 public final class UpdateCheck {
 
@@ -47,6 +50,7 @@ public final class UpdateCheck {
 
     /** What identifies a firmware build. The real one is ORIGINAL_2025; tests make their own. */
     public static final class Build {
+        /** The edition in the owner's words, as the report shows it: "original 2025 series (matte body, ...)". */
         final String label;
         final String stamp;
         final int stampOffset;
@@ -82,7 +86,7 @@ public final class UpdateCheck {
 
     /** Values from charmera_toolkit/image.py (the code-area hash from the stock dump itself); keep them in step. */
     public static final Build ORIGINAL_2025 = new Build(
-            "original 2025 series (matte body, yellow Kodak boot screen), build JH5408 20250520",
+            "original 2025 series (matte body, yellow Kodak boot screen)",
             "202505201029", 0x218C4, "JH5408  20250520", 0x18964, "Oct 14 2025", 0xF3978,
             "fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8",
             ORIGINAL_2025_CODE_AREA_SHA256,
@@ -93,20 +97,35 @@ public final class UpdateCheck {
 
     public enum Level { PASS, INFO, WARN, FAIL }
 
+    /** What to do instead after a FAIL: the file the app makes itself. The button is named as MainActivity labels it. */
+    static final String RESTORE_INSTEAD = "To restore the camera, tap \"Download the stock restore file\" instead.";
+    /** The same, plus the way to a working mod. */
+    static final String INSTEAD = RESTORE_INSTEAD + " For a mod, make the file again with charmera pack on a computer.";
+
     public static final class Line {
         public final Level level;
+        /** The check's short name, the one `charmera verify` uses. For code and tests; the report does not show it. */
         public final String name;
+        /** What the check is about, in plain words: "Name", "Stored photos". */
+        public final String title;
+        /** What the check found and, when it matters, what to do next. Plain words, no offsets. */
+        public final String text;
+        /** Numbers, sums and offsets for anyone who wants them, or "" for none. Shown below the text as "Detail:". */
         public final String detail;
 
-        Line(Level level, String name, String detail) {
+        Line(Level level, String name, String title, String text, String detail) {
             this.level = level;
             this.name = name;
-            this.detail = detail;
+            this.title = title;
+            this.text = text;
+            this.detail = detail == null ? "" : detail;
         }
 
+        /** "PASS  Name: in the form the camera looks for." and, when there is one, an indented "Detail:" line. */
         @Override
         public String toString() {
-            return String.format(Locale.ROOT, "%-4s %-15s %s", level, name, detail);
+            String head = level + "  " + title + ": " + text;
+            return detail.isEmpty() ? head : head + "\n      Detail: " + detail;
         }
     }
 
@@ -118,8 +137,14 @@ public final class UpdateCheck {
         public final String cardName;
         public final String sha256;
         public final int size;
+        /** The edition the file was checked against, in plain words, or null. */
+        final String edition;
 
         Result(List<Line> lines, String cardName, String sha256, int size) {
+            this(lines, cardName, sha256, size, null);
+        }
+
+        Result(List<Line> lines, String cardName, String sha256, int size, String edition) {
             boolean failed = false;
             for (Line l : lines) {
                 if (l.level == Level.FAIL) {
@@ -132,12 +157,59 @@ public final class UpdateCheck {
             this.cardName = cardName;
             this.sha256 = sha256;
             this.size = size;
+            this.edition = edition;
         }
 
+        /**
+         * The plain answer for the top of the report. When the file passed: "OK to put on the card.", the edition it
+         * is for, and any warnings in full, to read first. When it did not: "Not OK to put on the card.", the first
+         * problem with its cause and what to do next, and how many more there are.
+         */
+        public String verdict() {
+            Line first = null;
+            int fails = 0;
+            List<Line> warned = new ArrayList<>();
+            for (Line l : lines) {
+                if (l.level == Level.FAIL) {
+                    if (first == null) {
+                        first = l;
+                    }
+                    fails++;
+                } else if (l.level == Level.WARN) {
+                    warned.add(l);
+                }
+            }
+            if (first != null) {
+                String more = fails == 1 ? ""
+                        : fails == 2 ? " 1 more problem is listed below."
+                        : " " + (fails - 1) + " more problems are listed below.";
+                return "Not OK to put on the card. The app will not write this file. " + first.title + ": " + first.text
+                        + more;
+            }
+            StringBuilder sb = new StringBuilder("OK to put on the card.");
+            if (edition != null) {
+                sb.append(" It is only for the ").append(edition).append('.');
+            }
+            if (warned.isEmpty()) {
+                sb.append(" Every check passed.");
+            } else {
+                sb.append(warned.size() == 1 ? " Read this warning first." : " Read these " + warned.size()
+                        + " warnings first.");
+                for (Line w : warned) {
+                    sb.append(' ').append(w.title).append(": ").append(w.text);
+                }
+            }
+            return sb.toString();
+        }
+
+        /** Every check, in order, with a blank line between them. */
         public String report() {
             StringBuilder sb = new StringBuilder();
-            for (Line l : lines) {
-                sb.append(l).append('\n');
+            for (int i = 0; i < lines.size(); i++) {
+                if (i > 0) {
+                    sb.append('\n');
+                }
+                sb.append(lines.get(i)).append('\n');
             }
             return sb.toString();
         }
@@ -158,73 +230,115 @@ public final class UpdateCheck {
         // 1. The name: the camera only looks for JH_5408<stamp>_<sum>.bin, and the sum is its only integrity check.
         Matcher m = NAME.matcher(displayName == null ? "" : displayName);
         if (!m.find()) {
-            out.add(new Line(Level.FAIL, "name", "\"" + displayName + "\" does not contain JH_5408<12 digits>_<8 hex digits>."
-                    + " Use the file exactly as pack wrote it: the sum in its name is how the camera, and this app, know"
-                    + " the file arrived intact. This file adds up to " + hex8(sum) + "."));
+            out.add(new Line(Level.FAIL, "name", "Name", "this is not an update file's name, so the camera would not use"
+                    + " the file. The camera only takes a file named like JH_5408202610261427_0F065D55.bin, and the sum"
+                    + " at the end must match the file. Do not make up a name: choose the file under the name it was"
+                    + " made with. " + RESTORE_INSTEAD,
+                    (displayName == null ? "the file has no name" : "the name is \"" + displayName + "\"")
+                            + "; the file's bytes add up to " + hex8(sum) + "."));
         } else {
             String product = m.group(1);
             String stamp = m.group(2);
             long named = Long.parseLong(m.group(3), 16);
             cardName = "JH_" + product + stamp + "_" + hex8(named) + ".bin";
-            out.add(new Line(Level.PASS, "name", "JH_" + product + " stamp " + stamp + " checksum " + hex8(named)));
+            out.add(new Line(Level.PASS, "name", "Name", "in the form the camera looks for.",
+                    "model " + product + ", stamp " + stamp + ", sum " + hex8(named) + "."));
             if (!cardName.equals(displayName)) {
-                out.add(new Line(Level.INFO, "card-name", "will be written to the card as " + cardName));
+                out.add(new Line(Level.INFO, "card-name", "Name on the card", "the name on the phone is not exactly"
+                        + " the one the camera looks for, for example because \" (1)\" was added. The app writes the file"
+                        + " to the card as " + cardName + ".", ""));
             }
-            out.add(new Line(product.equals(PRODUCT) ? Level.PASS : Level.FAIL, "product",
-                    product.equals(PRODUCT) ? "product code " + product
-                            : "product code " + product + ", but the Charmera's updater looks for JH_" + PRODUCT));
-            out.add(new Line(named == sum ? Level.PASS : Level.FAIL, "checksum", named == sum
-                    ? "the bytes add up to " + hex8(sum) + ", as the name says"
-                    : "the name says " + hex8(named) + " but the bytes add up to " + hex8(sum)
-                    + ": the file is damaged or was changed after it was named. The camera would show"
-                    + " \"Program error\" and change nothing, but do not use it."));
+            boolean charmera = product.equals(PRODUCT);
+            out.add(new Line(charmera ? Level.PASS : Level.FAIL, "product", "Model", charmera
+                    ? "the name is for the Charmera."
+                    : "the name is for another camera model, so the Charmera would ignore the file. Do not use it. "
+                    + INSTEAD,
+                    "model code " + product + (charmera ? "." : "; the Charmera looks for JH_" + PRODUCT + ".")));
+            out.add(new Line(named == sum ? Level.PASS : Level.FAIL, "checksum", "Sum", named == sum
+                    ? "the file's bytes add up to the sum in its name, so the file arrived whole."
+                    : "the file's bytes do not add up to the sum in its name. The file is damaged, or it was changed"
+                    + " after it was named. The camera would show \"Program error\", erase nothing and switch itself"
+                    + " off. Do not use this file. Copy or download it again from where it came from.",
+                    named == sum ? "sum " + hex8(sum) + "."
+                            : "the name says " + hex8(named) + "; the bytes add up to " + hex8(sum) + "."));
             boolean differs = !stamp.equals(build.stamp);
-            out.add(new Line(differs ? Level.PASS : Level.FAIL, "stamp", differs
-                    ? "differs from the camera's own " + build.stamp
-                    : "equals the camera's own stamp " + build.stamp + ", so the camera would ignore the file"));
+            out.add(new Line(differs ? Level.PASS : Level.FAIL, "stamp", "Stamp", differs
+                    ? "the 12 digits in the name differ from the camera's own stamp, so the camera will not skip the"
+                    + " file."
+                    : "the 12 digits in the name are the camera's own stamp, so the camera would skip the file. Make"
+                    + " the file again with charmera pack on a computer, which gives it another stamp. "
+                    + RESTORE_INSTEAD,
+                    differs ? "in the name " + stamp + "; the camera's own " + build.stamp + "."
+                            : "stamp " + stamp + "."));
             boolean realDate = isRealStamp(stamp);
-            out.add(new Line(realDate ? Level.PASS : Level.WARN, "stamp-date",
-                    realDate ? "stamp is a real date" : "stamp is not a valid YYYYMMDDhhmm (the camera does not care)"));
+            out.add(new Line(realDate ? Level.PASS : Level.WARN, "stamp-date", "Stamp date", realDate
+                    ? "the stamp is a real date and time."
+                    : "the stamp is not a real date and time. The camera does not mind, so this does not stop the"
+                    + " update.",
+                    realDate ? "" : "stamp " + stamp + ", read as year, month, day, hour and minute."));
         }
 
         // 2. Size and structure.
         int n = data.length;
         if (n == UPDATE_SIZE) {
-            out.add(new Line(Level.PASS, "size", n + " bytes = 30 blocks of 64 KiB (the size every published update has)"));
-            out.add(new Line(Level.INFO, "final-erase", "after programming, the updater also erases block 0x1F0000, which is blank anyway"));
+            out.add(new Line(Level.PASS, "size", "Size", "the right size, the one every published update file has.",
+                    bytes(n) + ", 30 blocks of 64 KiB."));
+            out.add(new Line(Level.INFO, "final-erase", "After the update", "the camera also erases the last part of"
+                    + " its memory, which is empty anyway. Nothing to do.", "block 0x1F0000, 64 KiB."));
         } else {
-            out.add(new Line(Level.FAIL, "size", n + " bytes; this app only puts 0x1E0000-byte (1,966,080) files on a card."
-                    + (n == 0x200000 ? " A full 2 MiB dump must never go on a card: pack trims it." : "")
-                    + " Use charmera pack and verify on a computer for anything else."));
+            String why;
+            if (n == 0x200000) {
+                why = " It is the size of a full 2 MB dump. A dump must never go on the card as it is. charmera pack"
+                        + " on a computer makes the update file from it.";
+            } else if (n < UPDATE_SIZE) {
+                why = " A shorter file is usually a cut-off download or copy. Copy or download it again.";
+            } else {
+                why = " Make the update file with charmera pack on a computer, and check it there with charmera verify.";
+            }
+            out.add(new Line(Level.FAIL, "size", "Size", "the file is the wrong size for an update file, so the app"
+                    + " will not put it on the card." + why, bytes(n) + "; an update file has " + bytes(UPDATE_SIZE) + "."));
         }
         boolean magic = n >= 4 && data[0] == 'S' && data[1] == 'P' && data[2] == 'I' && data[3] == 'I';
-        out.add(new Line(magic ? Level.PASS : Level.FAIL, "magic",
-                magic ? "starts with 'SPII'" : "does not start with 'SPII', so the camera would not boot from it"));
+        out.add(new Line(magic ? Level.PASS : Level.FAIL, "magic", "Start of the file", magic
+                ? "it begins as Charmera firmware does."
+                : "it does not begin as Charmera firmware does, so the camera would not start from it. Do not use"
+                + " this file. " + INSTEAD,
+                magic ? "begins with SPII." : "the first 4 bytes are not SPII."));
 
         // 3. Which camera it is for. A file for another edition can stop the camera taking pictures.
         boolean stampOk = regionEquals(data, build.stampOffset, build.stamp.getBytes(StandardCharsets.US_ASCII));
         boolean buildOk = regionEquals(data, build.buildOffset, build.buildString);
+        String buildMarks = "build " + new String(build.buildString, StandardCharsets.US_ASCII).replaceAll("\\s+", " ")
+                + ", stamp " + build.stamp;
         if (!(stampOk && buildOk)) {
-            out.add(new Line(Level.FAIL, "series", "the build stamps of the " + build.label + " are not in this file;"
-                    + " it is for another camera or edition, or not a Charmera firmware at all"));
+            out.add(new Line(Level.FAIL, "series", "Edition", "the file is not for the " + build.label + ". It is for"
+                    + " another camera or edition, or it is not Charmera firmware at all. A file for another edition can"
+                    + " stop the camera taking pictures. Do not use it. " + RESTORE_INSTEAD,
+                    "the marks of " + buildMarks + " are not in the file."));
         } else {
-            out.add(new Line(Level.PASS, "series", build.label));
+            out.add(new Line(Level.PASS, "series", "Edition", "the file is for the " + build.label + ". Put it only"
+                    + " into that camera. Never use it on a Millennium Edition (blue boot screen) or a CLOT edition: the"
+                    + " app checks the file, not your camera.", buildMarks + "."));
             boolean sensor = n >= build.sensorEnd
                     && sha256Hex(data, build.sensorStart, build.sensorEnd).equals(build.sensorSha256);
-            out.add(new Line(sensor ? Level.PASS : Level.FAIL, "sensor-table", sensor
-                    ? "the image sensor set-up table is the stock one"
-                    : "the image sensor set-up table differs from stock; no toolkit mod changes it, and the wrong table"
-                    + " is what stops other editions from taking pictures"));
+            out.add(new Line(sensor ? Level.PASS : Level.FAIL, "sensor-table", "Image sensor set-up", sensor
+                    ? "the same as stock."
+                    : "different from stock. No toolkit mod changes it, and the wrong set-up is what stops other"
+                    + " editions taking pictures. The file was made from another edition's firmware or from a damaged"
+                    + " dump. Do not use it. " + RESTORE_INSTEAD, ""));
             if (n >= SOFTWARE_END && sha256Hex(data, 0, SOFTWARE_END).equals(build.softwareSha256)) {
-                out.add(new Line(Level.PASS, "software", "bytes 0..0x170000 are identical to the stock firmware"));
+                out.add(new Line(Level.PASS, "software", "Software", "the program and its sounds, pictures and menus"
+                        + " are the same as stock, byte for byte.", ""));
             } else if (n >= CODE_AREA_END && sha256Hex(data, 0, CODE_AREA_END).equals(build.codeAreaSha256)) {
-                out.add(new Line(Level.WARN, "software", "a mod: bytes 0..0x120000 (boot header, code and data) are"
-                        + " stock, the resources (sounds, frames, logo, menus) differ. Only flash files you built yourself"
-                        + " or trust."));
+                out.add(new Line(Level.WARN, "software", "Software", "a modified file. The program itself is stock,"
+                        + " but its sounds, frames, boot logo or menus differ. Only put it on the card if you made it"
+                        + " yourself or trust who made it.",
+                        "bytes 0 to 0x120000 (boot header, code and data) match stock; the resources after them differ."));
             } else {
-                out.add(new Line(Level.WARN, "software", "a mod that changes the boot header, the code or its data"
-                        + " (bytes 0..0x120000: a tweak or another patch). Only flash it if you made that change on"
-                        + " purpose, and only with a way back (see Recovery)."));
+                out.add(new Line(Level.WARN, "software", "Software", "a modified file that changes the program itself."
+                        + " Only put it on the card if you made that change on purpose. Keep a way back ready, such as"
+                        + " your own backup (docs/02-RECOVERY.md).",
+                        "bytes 0 to 0x120000 (boot header, code and data) differ from stock: a tweak or another patch."));
             }
         }
 
@@ -237,26 +351,41 @@ public final class UpdateCheck {
                     photos++;
                 }
             }
-            out.add(new Line(photos == 0 ? Level.PASS : Level.WARN, "photos", photos == 0
-                    ? "no photos stored in the file"
-                    : photos + " photo(s) stored in the file, from the camera it was made from"
-                    + " (pack --blank-photos removes them)"));
+            out.add(new Line(photos == 0 ? Level.PASS : Level.WARN, "photos", "Stored photos", photos == 0
+                    ? "the file carries none. The flash erases any photos now in the camera's own memory. If they"
+                    + " matter, copy the SPIDCIM folder off the card before you flash. That is where the camera copies"
+                    + " them."
+                    : "the file carries " + (photos == 1 ? "1 photo" : photos + " photos") + " from the camera it was"
+                    + " made from. The flash puts " + (photos == 1 ? "it" : "them") + " into your camera's own memory,"
+                    + " in place of any photos there now. If your photos matter, copy the SPIDCIM folder off the card"
+                    + " before you flash. That is where the camera copies them.",
+                    ""));
         }
         if (n >= SOFTWARE_END) {
             List<Entry> entries = resourceDirectory(data);
             int count = entries.size();
             Level level = count == 43 ? Level.PASS : (count == 0 ? Level.FAIL : Level.WARN);
-            out.add(new Line(level, "resources", count + " resource entries" + (count == 43 ? "" : " (stock has 43)")));
+            String found;
+            if (count == 43) {
+                found = "all 43 sounds, pictures and menu files are there, as in stock.";
+            } else if (count == 0) {
+                found = "none found. The camera needs them to start. The file is damaged, or it is not Charmera"
+                        + " firmware. Do not use it. " + INSTEAD;
+            } else {
+                found = "the file has " + count + " sounds, pictures and menu files, where stock has 43. It is a"
+                        + " modified file. Only put it on the card if you made it yourself or trust who made it.";
+            }
+            out.add(new Line(level, "resources", "Built-in parts", found, ""));
             if (count > 0) {
                 List<String> problems = resourceProblems(data, entries);
                 if (problems.isEmpty()) {
-                    out.add(new Line(Level.PASS, "resource-slots", "all " + count + " entries lie inside the pack, none"
-                            + " is erased, and each holds the kind its name says (WAV with fmt and data within its slot,"
-                            + " JPEG with an end marker, GPZP that inflates with a matching trailer and only fixed-Huffman"
-                            + " blocks, GPRS)"));
+                    out.add(new Line(Level.PASS, "resource-slots", "Built-in parts, one by one", "each one is whole"
+                            + " and holds what its name says.", "all " + count + " entries lie inside the resource"
+                            + " area, none is erased, and each holds the kind its name says: WAV with fmt and data"
+                            + " within its slot, JPEG with an end marker, GPZP that inflates with a matching trailer"
+                            + " and only fixed-Huffman blocks, GPRS."));
                 } else {
                     StringBuilder sb = new StringBuilder();
-                    sb.append(problems.size()).append(" of ").append(count).append(" entries are damaged: ");
                     int listed = Math.min(problems.size(), MAX_LISTED_PROBLEMS);
                     for (int i = 0; i < listed; i++) {
                         sb.append(i == 0 ? "" : "; ").append(problems.get(i));
@@ -264,31 +393,38 @@ public final class UpdateCheck {
                     if (problems.size() > listed) {
                         sb.append("; and ").append(problems.size() - listed).append(" more");
                     }
-                    sb.append(". The camera checks none of this; a damaged boot logo or menu resource can stop it"
-                            + " booting far enough to update again.");
-                    out.add(new Line(Level.FAIL, "resource-slots", sb.toString()));
+                    sb.append('.');
+                    out.add(new Line(Level.FAIL, "resource-slots", "Built-in parts, one by one", problems.size()
+                            + " of " + count + " are damaged. The camera does not check them before it flashes. A"
+                            + " damaged boot logo or menu can stop the camera starting far enough to update again. Do"
+                            + " not use this file. It was most likely made from a cut-off download or a damaged dump."
+                            + " Making it again from the same source does not help. Start again from a complete dump. "
+                            + RESTORE_INSTEAD, sb.toString()));
                 }
             }
         }
-        return new Result(out, cardName, sha256Hex(data, 0, n), n);
+        return new Result(out, cardName, sha256Hex(data, 0, n), n, build.label);
     }
 
     /**
      * Null when data is exactly the file that check passed (the same size and SHA-256, and check is a pass with a card
      * name), otherwise why it must not be written. The app calls this again just before it writes.
+     *
+     * The reason is a plain clause that starts in lower case and has no final full stop, so the screen can show it
+     * after "Not written: ". It names the cause and says to go back to step 1.
      */
     public static String confirms(Result check, byte[] data) {
         if (check == null || data == null) {
-            return "no checked file";
+            return "no file has been checked yet; get the update file in step 1 first";
         }
         if (!check.ok) {
-            return "the file did not pass its checks";
+            return "the file did not pass its checks; see the lines marked FAIL in step 1";
         }
         if (check.cardName == null) {
-            return "the file's name could not be read";
+            return "the file's name is not an update file's name; see step 1";
         }
         if (data.length != check.size || !sha256Hex(data, 0, data.length).equals(check.sha256)) {
-            return "the bytes to be written are not the file that was checked";
+            return "the file changed after it was checked; get it again in step 1";
         }
         return null;
     }
@@ -307,23 +443,31 @@ public final class UpdateCheck {
         }
         boolean blank = records == 0;
         if (blank) {
-            out.add(new Line(Level.INFO, "settings", "settings bank blank: the camera starts with its defaults"));
+            out.add(new Line(Level.INFO, "settings", "Settings", "the file carries none. The camera will start with its"
+                    + " default settings.", "the settings area is blank."));
         } else if (current >= PHOTO_DIRECTORY) {
-            out.add(new Line(Level.WARN, "settings", "120 or more records: the camera would read the photo directory as"
-                    + " settings and fall back to defaults (pack --factory-settings fixes this)"));
+            out.add(new Line(Level.WARN, "settings", "Settings", "the file holds too many saved settings. The camera"
+                    + " would read part of its photo list as settings and fall back to its default settings. This does"
+                    + " not stop the update.", "120 or more settings records."));
         } else if (!crcOk(data, current)) {
-            out.add(new Line(Level.WARN, "settings", "the record the camera would load (at 0x" + Integer.toHexString(current)
-                    + ") fails its CRC, so the camera would use its defaults"));
+            out.add(new Line(Level.WARN, "settings", "Settings", "the saved settings the camera would load are damaged,"
+                    + " so the camera would use its default settings. This does not stop the update.",
+                    "the record at 0x" + Integer.toHexString(current) + " fails its CRC."));
         } else {
             int ui = data[current + OFF_UI_SOUND] & 0xFF;
-            out.add(new Line(Level.PASS, "settings", records + " record(s); the camera will load the one at 0x"
-                    + Integer.toHexString(current) + ": UI sounds " + (ui == 0 ? "OFF" : "on (level " + ui + ")")));
+            out.add(new Line(Level.PASS, "settings", "Settings", "the file carries the saved settings of the camera it"
+                    + " was made from. Your camera will start with them, with camera sounds "
+                    + (ui == 0 ? "off." : "on (level " + ui + ")."),
+                    records + (records == 1 ? " settings record" : " settings records") + "; the camera loads the one"
+                            + " at 0x" + Integer.toHexString(current) + "."));
         }
         boolean consistent = blank || !erased(data, PHOTO_DIRECTORY);
-        out.add(new Line(consistent ? Level.PASS : Level.FAIL, "photo-directory", consistent
-                ? "photo directory consistent with the settings"
-                : "settings exist but the photo directory at 0x17F000 is erased; the camera would read two bogus photo"
-                + " entries (pack zeroes it)"));
+        out.add(new Line(consistent ? Level.PASS : Level.FAIL, "photo-directory", "Photo list", consistent
+                ? "the list of photos in the camera's own memory is in order."
+                : "the file has settings but no photo list. The camera would read two broken photo entries from it."
+                + " Do not use this file. Make it again with charmera pack on a computer, which writes an empty photo"
+                + " list. " + RESTORE_INSTEAD,
+                consistent ? "" : "the photo directory at 0x17F000 is erased."));
     }
 
     private static boolean erased(byte[] data, int off) {
@@ -717,6 +861,11 @@ public final class UpdateCheck {
 
     static String hex8(long v) {
         return String.format(Locale.ROOT, "%08X", v & 0xFFFFFFFFL);
+    }
+
+    /** "1,966,080 bytes". */
+    static String bytes(long n) {
+        return String.format(Locale.ROOT, "%,d bytes", n);
     }
 
     static boolean isRealStamp(String stamp) {

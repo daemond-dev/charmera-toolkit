@@ -19,8 +19,9 @@ Status: built and its checks tested on a computer; it has not yet been run on a 
   or the camera cannot take a picture ([Recovery, section D](../docs/02-RECOVERY.md#d-wrong-edition)).
 - **Charge the battery fully first.** Programming takes 15 to 20 seconds, and a power loss in that window leaves a
   camera that only a chip programmer can bring back ([Recovery](../docs/02-RECOVERY.md)).
-- **Stored photos:** the [flash candidates](../docs/03-FLASH-CANDIDATES.md) erase the two photos the camera keeps in
-  its own memory.
+- **Stored photos:** the flash replaces the two photos the camera keeps in its own memory. The stock restore file
+  puts in the two photos of the camera it was dumped from. If yours matter, copy the `SPIDCIM` folder off the card
+  first ([The first flash, step 5](../docs/01-FIRST-FLASH.md#5-flash-the-point-of-no-return)).
 
 ## Install
 
@@ -40,25 +41,37 @@ The app's screen is the same five steps.
    and makes the published stock restore file from it (its first 0x1E0000 bytes), using it only if its SHA-256 is
    the published file's (`b10a2f1c…`). It puts a camera back to stock, settings included. Candidates C, A and B are
    withdrawn and not offered ([why](../docs/03-FLASH-CANDIDATES.md)). Offline, or made a file on a computer? **Use a
-   file on the phone** takes the stock dump or a `JH_5408…bin` file.
-2. **Connect the camera.** Card in the camera, connect the camera with a USB-C data cable: it shows its card as a
-   drive. Plugging the cable into a switched-off camera switches it on, and if its card holds an update file the
-   camera flashes that file again, so connect a switched-off camera only when its card has no update file. Tap **Choose the camera's drive**, open that drive in the picker and tap "Use this folder" at its top
-   level. A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10: from
+   file on the phone** takes the stock dump or a `JH_5408…bin` file. If the file chosen is C, A or B, the app says
+   not to put it on the card and to download the stock restore file instead.
+2. **Connect the camera.** Plugging the cable into a switched-off camera switches it on, and if its card holds an
+   update file the camera flashes that file again. So the app always has you connect the camera this way: switch
+   it off if it is on, take the card out, switch the camera on with its power key, wait 10 seconds, put the card
+   back in, then connect the camera with a USB-C data cable. It shows its card as a drive. Tap **Choose the
+   camera's drive**, open that drive in the picker's menu and tap "Use this folder" in its top folder, not inside
+   DCIM. A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10: from
    Android 11 on, Android does not let an app choose the top level of a card in the phone's slot ("Use this folder"
-   is greyed out there). The app remembers the drive and looks at it again whenever you come back to the app.
-3. **Write.** The app refuses a card that already holds an update file, and lists the card again just before it
-   writes. It writes the file under a temporary name, renames it to the exact name the camera looks for, and reads
+   is greyed out there; see [What it cannot do](#what-it-cannot-do) for the slot). The app remembers the drive and
+   looks at it again whenever you come back to the app, or pick the drive again.
+3. **Write to the card.** Tap **Write the update file to the card** and confirm. The app refuses a card that
+   already holds an update file, and lists the card again just before it writes. It writes the file under a temporary name, renames it to the exact name the camera looks for, and reads
    it back to compare SHA-256. If any of that fails, it lists the card again and says what is on it now. When it is done, the app says so with a short message and offers
-   **Open storage settings**: Android does not let an app eject a drive, so eject it there before you unplug.
+   **Open storage settings**: Android does not let an app eject a drive, so eject it there before you unplug. The
+   **Eject the drive (opens Android's storage settings)** button under step 3 opens the same screen.
 4. **Flash.** Eject the drive in Android's storage settings and unplug the cable. Switch the camera off, then on
-   again with the card in: it looks for the file only in its first five seconds and shows the update progress. At
-   100% it stays on its last screen. Take the card out first, then hold the power key about a second to switch off.
+   again with the card in: it looks for the file only in its first five seconds, then shows "Upgrade" with a
+   percentage, about 15 to 20 seconds in all. No "Upgrade" screen and a normal start mean it did not find the
+   file: switch it off, connect it as in step 2 and check what the card holds. At 100% it stays on its last
+   screen. Take the card out first, then hold the power key about a second to switch off. "Program error" means
+   nothing was erased and the camera switches itself off: take the card out, remove the file as in step 5, and
+   write it again.
 5. **Clean up.** The camera does not delete the file and would flash it again at every power-on. With the card
    still out, switch the camera on with its own power key (not by plugging in the cable), wait 10 seconds, insert
-   the card, connect the camera to the phone, and tap **Remove update files**. The result shows right under that
-   button and as a short message, and the app offers the storage settings to eject the drive. Then switch the camera off and on normally and check the boot screen, the live view and
-   a test photo.
+   the card, connect the camera to the phone, and tap **Remove update files from the card**. The result shows right under that
+   button and as a short message, and the app offers the storage settings to eject the drive. If that button is
+   greyed out, pick the camera's drive again with **Choose the camera's drive** so the app looks at the card again.
+   For a card in the phone's own slot on Android 11 or later, delete the file from the card's top folder with the
+   Files app. Then switch the camera off and on normally and check the boot screen, the live view and a test
+   photo.
 
 ## About the camera's USB-C connection
 

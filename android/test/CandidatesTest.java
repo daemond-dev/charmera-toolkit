@@ -41,7 +41,13 @@ public final class CandidatesTest {
                 && allEqual(b, WAV16_DATA, WAV16_DATA + 64, 0) && b[WAV8_DATA - 8] == 'd');
         expect("A leaves the sound data alone", a[WAV8_DATA] == img[WAV8_DATA]);
         expect("nothing below the settings bank changes", Arrays.equals(Arrays.copyOf(b, 0x120000), Arrays.copyOf(img, 0x120000)));
-        expect("a synthetic dump never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.C), "not the expected"));
+        expect("a synthetic dump never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.C),
+                "is not exactly candidate C, so the app will not use it"));
+        expect("a synthetic restore never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.RESTORE),
+                "is not exactly the published stock restore file"));
+        expect("a refusal says the cause first and keeps the SHA-256 for its last line", refused(
+                () -> Candidates.stockDump(junk), "so the app will not use it") && refused(() -> Candidates.stockDump(junk),
+                "\nDetail: its SHA-256 is "));
         expect("only the stock restore is offered", java.util.Arrays.equals(Candidates.Kind.offeredKinds(),
                 new Candidates.Kind[]{Candidates.Kind.RESTORE}));
         byte[] restore0 = invokeTransform(img, Candidates.Kind.RESTORE);

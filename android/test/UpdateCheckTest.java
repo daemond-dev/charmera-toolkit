@@ -90,30 +90,28 @@ public final class UpdateCheckTest {
         r = check(m, build);
         expect("resource mod warns, passes, says the code area is stock", r.ok
                 && line(r, "software", UpdateCheck.Level.WARN)
-                && detail(r, "software").contains("(boot header, code and data) are stock"), r);
+                && text(r, "software").contains("The program itself is stock")
+                && detail(r, "software").contains("(boot header, code and data) match stock"), r);
 
         m = base.clone();
         m[0x62B8] ^= 0x08;
         r = check(m, build);
-        expect("code mod warns, passes", r.ok && detail(r, "software").contains("changes the boot header, the code"), r);
+        expect("code mod warns, passes", r.ok && codeChange(r), r);
 
         m = base.clone();
         m[0x28] ^= 0x01;   // inside the boot header's register list
         r = check(m, build);
-        expect("a boot-header change is reported as a code change", r.ok
-                && detail(r, "software").contains("changes the boot header, the code"), r);
+        expect("a boot-header change is reported as a code change", r.ok && codeChange(r), r);
 
         m = base.clone();
         m[0x100100] ^= 0x01;   // inside .data
         r = check(m, build);
-        expect("a .data change is reported as a code change", r.ok
-                && detail(r, "software").contains("changes the boot header, the code"), r);
+        expect("a .data change is reported as a code change", r.ok && codeChange(r), r);
 
         m = base.clone();
         m[0x115000] ^= 0x01;   // the zero padding below the pack
         r = check(m, build);
-        expect("a change in the padding below the pack is reported as a code change", r.ok
-                && detail(r, "software").contains("changes the boot header, the code"), r);
+        expect("a change in the padding below the pack is reported as a code change", r.ok && codeChange(r), r);
 
         // --- resource slots ------------------------------------------------------------------------------------
 
@@ -217,7 +215,7 @@ public final class UpdateCheckTest {
         m = base.clone();
         putU32(m, entryOffset("ICON33GPZ") + 20, (0x16E000 - 0x120000) / 512 + 1);
         r = check(m, build);
-        expect("a slot reaching past the resource area fails", !r.ok && detail(r, "resource-slots").startsWith("2 of 43")
+        expect("a slot reaching past the resource area fails", !r.ok && text(r, "resource-slots").startsWith("2 of 43")
                 && detail(r, "resource-slots").contains("PIC33.GPZP at 0x") && detail(r, "resource-slots").contains(
                 "..0x16e200 lies outside the resource area") && detail(r, "resource-slots").contains("ICON33.GPZ at 0x16e200: empty slot"), r);
 
@@ -232,7 +230,7 @@ public final class UpdateCheckTest {
         r = check(m, build);
         expect("a cut-off pack fails, naming the erased entries", !r.ok && line(r, "resource-slots", UpdateCheck.Level.FAIL)
                 && detail(r, "resource-slots").contains("PIC21.GPZP at 0x") && detail(r, "resource-slots").contains("erased")
-                && detail(r, "resource-slots").contains("; and 7 more") && detail(r, "resource-slots").startsWith("15 of 43"), r);
+                && detail(r, "resource-slots").contains("; and 7 more") && text(r, "resource-slots").startsWith("15 of 43"), r);
 
         // --- settings and photos --------------------------------------------------------------------------------
 
@@ -242,7 +240,7 @@ public final class UpdateCheckTest {
         expect("record with erased photo directory fails", !r.ok && line(r, "photo-directory", UpdateCheck.Level.FAIL), r);
         Arrays.fill(m, 0x17F000, 0x17F200, (byte) 0);
         r = check(m, build);
-        expect("muted record reads as UI sounds OFF", r.ok && detail(r, "settings").contains("UI sounds OFF"), r);
+        expect("muted record reads as camera sounds off", r.ok && text(r, "settings").contains("camera sounds off"), r);
         m[0x170000 + 0x10] ^= 1;   // break the CRC
         r = check(m, build);
         expect("bad CRC warns", r.ok && line(r, "settings", UpdateCheck.Level.WARN), r);
@@ -251,7 +249,29 @@ public final class UpdateCheckTest {
         m[0x180000] = (byte) 0xFF;
         m[0x180001] = (byte) 0xD8;
         r = check(m, build);
-        expect("stored photo warns", r.ok && line(r, "photos", UpdateCheck.Level.WARN), r);
+        expect("stored photo warns", r.ok && line(r, "photos", UpdateCheck.Level.WARN)
+                && text(r, "photos").contains("1 photo from the camera it was made from"), r);
+        expect("the verdict passes it and points at the warning", r.verdict().startsWith("OK to put on the card.")
+                && r.verdict().contains("Read this warning first. Stored photos: the file carries 1 photo from the"
+                + " camera it was made from.") && r.verdict().contains("copy the SPIDCIM folder off the card"), r);
+
+        // --- the verdict at the top of the report -------------------------------------------------------------
+
+        r = check(base, build);
+        expect("a clean file's verdict is OK and names the edition", r.verdict().equals("OK to put on the card. It is"
+                + " only for the synthetic test build. Every check passed."), r);
+        r = UpdateCheck.check("JH_5408202611050001_00000000.bin", base, build);
+        expect("a failed file's verdict is Not OK with the first reason", r.verdict().startsWith("Not OK to put on the"
+                + " card. The app will not write this file. Sum: the file's bytes do not add up"), r);
+        m = base.clone();
+        m[0] = 'X';
+        r = UpdateCheck.check("JH_5408202505201029_00000000.bin", m, build);
+        expect("the verdict counts the other problems", r.verdict().startsWith("Not OK to put on the card. The app will"
+                + " not write this file. Sum: ") && r.verdict().endsWith(" 2 more problems are listed below."), r);
+        r = UpdateCheck.check("firmware.bin", base, build);
+        expect("a nameless file's verdict says what to do", r.verdict().contains("Name: this is not an update file's"
+                + " name") && r.verdict().contains("Do not make up a name")
+                && r.verdict().contains("tap \"Download the stock restore file\" instead."), r);
 
         // --- the write gate: Write uses exactly the checked bytes ---------------------------------------------
 
@@ -273,7 +293,7 @@ public final class UpdateCheckTest {
                 File f = new File(p);
                 byte[] d = Files.readAllBytes(f.toPath());
                 r = UpdateCheck.check(f.getName(), d);
-                System.out.println("--- " + f.getName() + "\n" + r.report());
+                System.out.println("--- " + f.getName() + "\n" + r.verdict() + "\n\n" + r.report());
                 expect("real file " + f.getName() + " passes against the real build", r.ok, r);
             }
         }
@@ -554,7 +574,13 @@ public final class UpdateCheckTest {
         UpdateCheck.Result r = check(m, build);
         String d = detail(r, "resource-slots");
         expect(what + " fails resource-slots", !r.ok && line(r, "resource-slots", UpdateCheck.Level.FAIL)
-                && d.startsWith("1 of 43 entries are damaged: " + entry + " at ") && d.contains(text), r);
+                && text(r, "resource-slots").startsWith("1 of 43 are damaged.")
+                && d.startsWith(entry + " at ") && d.contains(text), r);
+    }
+
+    static boolean codeChange(UpdateCheck.Result r) {
+        return line(r, "software", UpdateCheck.Level.WARN) && text(r, "software").contains("changes the program itself")
+                && detail(r, "software").contains("(boot header, code and data) differ from stock");
     }
 
     static boolean line(UpdateCheck.Result r, String name, UpdateCheck.Level level) {
@@ -566,6 +592,7 @@ public final class UpdateCheckTest {
         return false;
     }
 
+    /** The technical detail of the first line with that check name. */
     static String detail(UpdateCheck.Result r, String name) {
         for (UpdateCheck.Line l : r.lines) {
             if (l.name.equals(name)) {
@@ -575,12 +602,54 @@ public final class UpdateCheckTest {
         return "";
     }
 
+    /** The plain text of the first line with that check name. */
+    static String text(UpdateCheck.Result r, String name) {
+        for (UpdateCheck.Line l : r.lines) {
+            if (l.name.equals(name)) {
+                return l.text;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * What the owner reads first stays plain: no offsets and no check names in a title, a text or the verdict; those
+     * belong in the detail. Every line has a title and a text.
+     */
+    static String unplain(UpdateCheck.Result r) {
+        List<String> names = new ArrayList<>();
+        for (UpdateCheck.Line l : r.lines) {
+            names.add(l.name);
+        }
+        List<String> shown = new ArrayList<>();
+        for (UpdateCheck.Line l : r.lines) {
+            if (l.title.isEmpty() || l.text.isEmpty()) {
+                return "an empty title or text: " + l;
+            }
+            shown.add(l.title + ": " + l.text);
+        }
+        shown.add(r.verdict());
+        for (String s : shown) {
+            if (s.contains("0x")) {
+                return "an offset outside the detail: " + s;
+            }
+            for (String n : names) {
+                if (n.contains("-") && s.contains(n)) {
+                    return "the check name " + n + " outside the detail: " + s;
+                }
+            }
+        }
+        return null;
+    }
+
     static void expect(String what, boolean ok, UpdateCheck.Result r) {
-        if (ok) {
+        String rough = r == null ? null : unplain(r);
+        if (ok && rough == null) {
             passes++;
         } else {
             failures++;
-            System.out.println("FAILED: " + what + "\n" + (r == null ? "" : r.report()));
+            System.out.println("FAILED: " + what + (rough == null ? "" : " (" + rough + ")") + "\n"
+                    + (r == null ? "" : r.verdict() + "\n\n" + r.report()));
         }
     }
 }
