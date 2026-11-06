@@ -1,9 +1,14 @@
 # Charmera Card for Android
 
-A small Android app (7.0 or later) that puts a Charmera update file on an SD card from the phone. The camera
-then flashes itself from the card, as described in [The first flash](../docs/01-FIRST-FLASH.md). The app needs no
-permissions and no network: it reaches the card through Android's own folder picker, which grants access to the
-one folder you choose.
+A small Android app (7.0 or later) that does the whole first flash from the phone, with no computer: it downloads
+the public stock firmware dump, makes one of the three reviewed update files from it, writes it to the camera's
+card over the camera's USB-C cable, and walks you through flashing and cleaning up. The camera flashes itself from
+the card, as described in [The first flash](../docs/01-FIRST-FLASH.md).
+
+It uses the network only to download the stock dump from its upstream repository on GitHub, at a fixed commit, and
+accepts the download only if its SHA-256 is that of the public dump. No firmware is shipped inside the app. It
+reaches the card through Android's own folder picker, which grants access to the one folder you choose, so it needs
+no storage permission.
 
 Status: built and its checks tested on a computer; it has not yet been run on a phone.
 
@@ -29,30 +34,30 @@ phone over USB.
 
 ## Use
 
-1. **Choose update file.** Pick the `JH_5408…bin` file that `charmera pack` wrote, or open it from a file manager
-   with "Open with" or "Share". The app checks it and lists each check, the way `charmera verify` does.
-2. **Choose the SD card.** Connect the camera's card through a USB card reader, or leave it in the camera and
-   connect the camera by its cable ([below](#through-the-cameras-usb-c-cable)). The phone's own SD slot works only
-   on Android 7 to 10: from Android 11 on, Android does not let an app choose the top level of a card in the
-   phone's slot ("Use this folder" is greyed out there), while USB card readers and the camera's USB drive are
-   allowed. In the picker, open the card itself and tap "Use this folder" at its top level. The app remembers the
-   card and looks at it again whenever you come back to the app.
+The app's screen is the same five steps.
 
-   Only the slot, on Android 11 or later? Copy the update file to the card's top level with the Files app, then
-   choose that copy in step 1 to have the app check it there. A `card-name` line in the result means the copy's
-   name is not exact: copy it again or rename it to the name shown. Skip steps 2 and 3, and delete the copy with
-   the Files app after the flash.
-3. **Write the file to the card.** The app refuses a card that already holds an update file, and lists the card
-   again just before it writes. It writes the file under a temporary name, renames it to the exact name the camera
-   looks for, and reads it back to compare SHA-256. If any of that fails, it lists the card again and says what is
-   on it now.
-4. Eject the card in Android's storage settings, put it in the camera, and flash
-   ([step 5 of The first flash](../docs/01-FIRST-FLASH.md#5-flash-the-point-of-no-return)): camera off, card in,
-   then switch it on. The camera looks for the file only in the first five seconds after power-on.
-5. The camera does not delete the file, and after 100% it stays on its final screen. Take the card out, then hold
-   the power key about a second to switch the camera off.
-6. Connect the card to the phone again and tap **Remove update files**. Never switch the camera on with the update
-   file on its card except to flash: it would flash it again at every power-on.
+1. **Make the update file.** Tap **Download and make the file**, then choose C, A or B
+   ([what each changes](../docs/03-FLASH-CANDIDATES.md)); start with C. The app checks the download, makes the file
+   the same way the computer toolkit's recipe does, and uses it only if its SHA-256 equals the reviewed file's, so
+   it can make nothing else. The result is checked again the way `charmera verify` checks a file, and each check is
+   listed. Offline, or made a file on a computer? **Use a file on the phone** takes the stock dump (downloaded in a
+   browser from [its page](https://github.com/benbadio/keychain-camera-plus/blob/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin))
+   or a `JH_5408…bin` file that `charmera pack` wrote.
+2. **Connect the camera.** Card in the camera, connect the camera with a USB-C data cable: it shows its card as a
+   drive. Tap **Choose the camera's drive**, open that drive in the picker and tap "Use this folder" at its top
+   level. A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10: from
+   Android 11 on, Android does not let an app choose the top level of a card in the phone's slot ("Use this folder"
+   is greyed out there). The app remembers the drive and looks at it again whenever you come back to the app.
+3. **Write.** The app refuses a card that already holds an update file, and lists the card again just before it
+   writes. It writes the file under a temporary name, renames it to the exact name the camera looks for, and reads
+   it back to compare SHA-256. If any of that fails, it lists the card again and says what is on it now.
+4. **Flash.** Eject the drive in Android's storage settings and unplug the cable. Switch the camera off, then on
+   again with the card in: it looks for the file only in its first five seconds and shows the update progress. At
+   100% it stays on its last screen. Take the card out first, then hold the power key about a second to switch off.
+5. **Clean up.** The camera does not delete the file and would flash it again at every power-on. With the card
+   still out, switch the camera on, wait 10 seconds, insert the card, connect the camera to the phone, and tap
+   **Remove update files**. Then switch the camera off and on normally and check the boot screen, the live view and
+   a test photo.
 
 ## Through the camera's USB-C cable
 

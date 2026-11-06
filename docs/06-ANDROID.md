@@ -22,25 +22,24 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 
 ## The app
 
-[Charmera Card](../android/README.md) is a small app for exactly this step: it checks an update file the way
-`charmera verify` does, writes it to the top folder of the card through Android's folder picker, reads it back,
-and removes it again after the flash. It needs no permissions and no root. Download
-[charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
-(sign in to GitHub in the phone's browser first: the repository is private)
-on the phone. Its README covers installing and each screen. The rest of this page is the same job done by hand,
-and what the app cannot help with.
+[Charmera Card](../android/README.md) does the whole job on the phone, with no computer: it downloads the public
+stock dump, makes one of the three reviewed update files from it (it can make nothing else), writes it to the
+camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup.
+Download [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
+on the phone (sign in to GitHub in the phone's browser first: the repository is private). The rest of this page is
+the same job done by hand, and what the app cannot help with.
 
 Which way the card reaches the app depends on the Android version:
 
 - Android 11 and later: Android does not let an app pick the top level of a card in the phone's own SD slot
-  ("Use this folder" is greyed out there). Use a USB card reader, or leave the card in the camera and connect
-  the camera with its USB-C cable: the owner has confirmed that the camera shows its card as a drive on the
-  phone ([below](#through-the-cameras-own-usb-port)). Both can be picked at their top level.
+  ("Use this folder" is greyed out there). Leave the card in the camera and connect the camera with its USB-C
+  cable: the owner has confirmed that the camera shows its card as a drive on the phone
+  ([below](#through-the-cameras-own-usb-port)). A USB card reader works too. Both can be picked at their top level.
 - Android 7 to 10: the phone's own SD slot works as well.
 - Only the slot, on Android 11 or later: copy the update file to the card's top level with the Files app
   ([section 3](#3-copy-the-file-to-the-card-root)), then pick that copied file in the app's step 1
-  (**Choose update file**) to have it checked where it lies. Delete the copy with the Files app after the
-  flash.
+  (**Use a file on the phone**; the old name was Choose update file) to have it checked where it lies. Delete the
+  copy with the Files app after the flash.
 
 ## What the phone has to do
 

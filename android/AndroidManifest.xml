@@ -4,8 +4,9 @@
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
-    <!-- No permissions: the card is reached through Android's folder picker, which grants access to the one
-         folder the user chooses. -->
+    <!-- Internet only to download the public stock dump from GitHub. The card is reached through Android's folder
+         picker, which grants access to the one folder the user chooses, so no storage permission is needed. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

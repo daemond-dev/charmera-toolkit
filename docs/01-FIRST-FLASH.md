@@ -6,6 +6,9 @@ The order of operations for putting a modified firmware on a Charmera for the fi
 no return marked. Every step links to a longer document; read those before the step, not during it. The
 [list of all docs](README.md) has them in reading order.
 
+Only a phone? The [Charmera Card app](../android/README.md) does steps 2 to 7 on the phone, making candidate C,
+A or B from the public stock dump itself; read steps 0 and 1 here first.
+
 Not flashing anything? If you only want the photo and video dates fixed, go to
 [Photo dates (EXIF)](10-EXIF.md). If your phone will not read the camera's card, go to
 [SD card problems](05-CARDS.md).

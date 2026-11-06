@@ -1,0 +1,219 @@
+package io.github.daemonddev.charmera;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.zip.CRC32;
+
+/**
+ * Makes the three reviewed flash candidates (docs/03-FLASH-CANDIDATES.md) from the public stock dump, the same way
+ * the toolkit's recipe does on a computer, so no computer is needed. No firmware is shipped in the app: the owner
+ * downloads the public dump, and this class accepts only that exact file (by SHA-256).
+ *
+ * The result is accepted only when its SHA-256 equals the reviewed file's, so this path can produce nothing but
+ * those three files. No Android imports: it runs on a plain JVM for the tests in android/test.
+ */
+public final class Candidates {
+
+    /** The public stock dump: benbadio/keychain-camera-plus, dumps/charmera_stock_latest.bin (2 MiB). */
+    public static final String STOCK_DUMP_SHA256 = "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f";
+    /** Where it is downloaded from: the upstream repository at a fixed commit, so the address never changes. */
+    public static final String STOCK_DUMP_DOWNLOAD = "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/"
+            + "209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin";
+    /** The same file's page, for downloading it in a browser. */
+    public static final String STOCK_DUMP_PAGE = "https://github.com/benbadio/keychain-camera-plus/blob/"
+            + "209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin";
+    static final int DUMP_SIZE = 0x200000;
+
+    static final int SETTINGS_BASE = 0x170000;
+    static final int SETTINGS_END = 0x17F000;
+    static final int PHOTO_DIRECTORY = 0x17F000;
+    static final int SECTOR = 0x200;
+    static final int RECORD = 0x100;
+    static final int CRC_LEN = 252;
+    static final int OFF_UI_SOUND = 0x19;
+    static final List<String> SOUND_SLOTS =
+            Arrays.asList("BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV");
+
+    /** The three candidates, in the order to try them. Names and hashes as in docs/03-FLASH-CANDIDATES.md. */
+    public enum Kind {
+        C("Candidate C: stock firmware with factory settings, stored photos removed. Changes nothing in the code or"
+                + " the sounds. Try this one first.",
+                "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
+        A("Candidate A: C with the UI sounds turned off in the settings (power-on chime, shutter, key clicks,"
+                + " power-off sound).",
+                "JH_5408202611050001_0FB74D14.bin", "c4822cd7eed63169d80c5105811ab6492444793fafcc7a96e809869f2e5ccda7"),
+        B("Candidate B: A with the sound data itself silenced too, so the sounds stay off even if the camera ever"
+                + " resets its settings.",
+                "JH_5408202611050002_0FB0BD3C.bin", "32a7f54e5090050d099681c33378e3d23822a736279ea78f9f3442a45edc3979");
+
+        public final String label;
+        public final String fileName;
+        public final String sha256;
+
+        Kind(String label, String fileName, String sha256) {
+            this.label = label;
+            this.fileName = fileName;
+            this.sha256 = sha256;
+        }
+    }
+
+    private Candidates() {
+    }
+
+    /**
+     * The 2 MiB stock dump from what the owner picked: the public dump itself, or the published stock restore file
+     * (its first 0x1E0000 bytes, which this pads with the blank 0xFF tail). Throws with a plain reason otherwise.
+     */
+    public static byte[] stockDump(byte[] picked) {
+        byte[] dump;
+        if (picked.length == DUMP_SIZE) {
+            dump = picked;
+        } else if (picked.length == UpdateCheck.UPDATE_SIZE) {
+            dump = Arrays.copyOf(picked, DUMP_SIZE);
+            Arrays.fill(dump, UpdateCheck.UPDATE_SIZE, DUMP_SIZE, (byte) 0xFF);
+        } else {
+            throw new IllegalArgumentException("this file is " + picked.length + " bytes; the stock dump is 2,097,152"
+                    + " bytes (charmera_stock_latest.bin). A shorter file is usually a cut-off download.");
+        }
+        String sha = UpdateCheck.sha256Hex(dump, 0, dump.length);
+        if (!sha.equals(STOCK_DUMP_SHA256)) {
+            throw new IllegalArgumentException("this is not the public stock dump (its SHA-256 is " + sha + ", not "
+                    + STOCK_DUMP_SHA256 + "). The app makes the candidates only from that exact file; for your own"
+                    + " camera's backup, use the toolkit on a computer.");
+        }
+        return dump;
+    }
+
+    /** True when the bytes are the public stock dump, or the published restore file made from it. */
+    public static boolean isStockDump(byte[] picked) {
+        try {
+            stockDump(picked);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** The candidate's bytes, accepted only when they hash to the reviewed file. */
+    public static byte[] build(byte[] stockDump, Kind kind) {
+        byte[] out = transform(stockDump, kind);
+        String sha = UpdateCheck.sha256Hex(out, 0, out.length);
+        if (!sha.equals(kind.sha256)) {
+            throw new IllegalStateException("the file made for " + kind.name() + " has SHA-256 " + sha + ", not the"
+                    + " reviewed " + kind.sha256 + "; it is not used. Please report this.");
+        }
+        return out;
+    }
+
+    /** The recipe itself, without the final hash check (the tests run it on synthetic images). */
+    static byte[] transform(byte[] dump, Kind kind) {
+        if (dump.length != DUMP_SIZE) {
+            throw new IllegalArgumentException("expects the 2 MiB stock dump");
+        }
+        byte[] image = dump.clone();
+        int first = firstValidRecord(image);
+        if (first < 0) {
+            throw new IllegalArgumentException("the dump has no CRC-valid settings record");
+        }
+        byte[] record = Arrays.copyOfRange(image, first, first + RECORD);
+        if (kind == Kind.A || kind == Kind.B) {
+            record = withByte(record, OFF_UI_SOUND, 0);       // sounds mute --method settings --base-record first
+        }
+        rewriteStore(image, record);                          // also what pack --factory-settings does for C
+        if (kind == Kind.B) {
+            mutePcm(image);                                   // sounds mute --method pcm
+        }
+        byte[] payload = Arrays.copyOf(image, UpdateCheck.UPDATE_SIZE);   // pack trims the blank tail
+        blankPhotos(payload);                                 // pack --blank-photos
+        return payload;
+    }
+
+    /** The first non-erased sector of the bank whose 252-byte body matches its CRC, or -1. */
+    static int firstValidRecord(byte[] image) {
+        for (int off = SETTINGS_BASE; off < SETTINGS_END; off += SECTOR) {
+            if (!erased(image, off) && crcOk(image, off)) {
+                return off;
+            }
+        }
+        return -1;
+    }
+
+    /** The bank holds only this record, at sector 0 with a zero second page; an erased directory is zeroed. */
+    static void rewriteStore(byte[] image, byte[] record) {
+        Arrays.fill(image, SETTINGS_BASE, SETTINGS_END, (byte) 0xFF);
+        System.arraycopy(record, 0, image, SETTINGS_BASE, RECORD);
+        Arrays.fill(image, SETTINGS_BASE + RECORD, SETTINGS_BASE + SECTOR, (byte) 0);
+        if (erased(image, PHOTO_DIRECTORY)) {
+            Arrays.fill(image, PHOTO_DIRECTORY, PHOTO_DIRECTORY + SECTOR, (byte) 0);
+        }
+    }
+
+    /** A zeroed photo directory (what the camera's own "delete all" leaves) and erased photo slots. */
+    static void blankPhotos(byte[] payload) {
+        Arrays.fill(payload, PHOTO_DIRECTORY, PHOTO_DIRECTORY + SECTOR, (byte) 0);
+        Arrays.fill(payload, PHOTO_DIRECTORY + SECTOR, UpdateCheck.UPDATE_SIZE, (byte) 0xFF);
+    }
+
+    /** Silence the PCM data of the five sound slots (0x80 for 8-bit, 0x00 for 16-bit); headers untouched. */
+    static void mutePcm(byte[] image) {
+        for (UpdateCheck.Entry e : UpdateCheck.resourceDirectory(image)) {
+            if (!SOUND_SLOTS.contains(e.name)) {
+                continue;
+            }
+            int off = (int) e.offset;
+            if (!UpdateCheck.regionEquals(image, off, new byte[]{'R', 'I', 'F', 'F'})) {
+                throw new IllegalArgumentException(e.name + " is not a WAV file");
+            }
+            long end = off + 8L + u32(image, off + 4);
+            int bits = -1;
+            int p = off + 12;
+            while (p + 8 <= end && p + 8 <= image.length) {
+                long size = u32(image, p + 4);
+                if (image[p] == 'f' && image[p + 1] == 'm' && image[p + 2] == 't' && image[p + 3] == ' ') {
+                    bits = (image[p + 8 + 14] & 0xFF) | (image[p + 8 + 15] & 0xFF) << 8;
+                } else if (image[p] == 'd' && image[p + 1] == 'a' && image[p + 2] == 't' && image[p + 3] == 'a') {
+                    if (bits < 0 || p + 8 + size > image.length) {
+                        throw new IllegalArgumentException(e.name + " has no format chunk before its data");
+                    }
+                    Arrays.fill(image, p + 8, (int) (p + 8 + size), (byte) (bits == 8 ? 0x80 : 0x00));
+                    break;
+                }
+                p += 8 + (int) size + (int) (size & 1);
+            }
+        }
+    }
+
+    static byte[] withByte(byte[] record, int offset, int value) {
+        byte[] r = record.clone();
+        r[offset] = (byte) value;
+        CRC32 crc = new CRC32();
+        crc.update(r, 0, CRC_LEN);
+        long v = crc.getValue();
+        for (int i = 0; i < 4; i++) {
+            r[CRC_LEN + i] = (byte) (v >>> (8 * i));
+        }
+        return r;
+    }
+
+    static boolean erased(byte[] image, int off) {
+        for (int i = 0; i < 8; i++) {
+            if (off + i >= image.length) {
+                return true;
+            }
+            if ((image[off + i] & 0xFF) != 0xFF) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean crcOk(byte[] image, int off) {
+        CRC32 crc = new CRC32();
+        crc.update(image, off, CRC_LEN);
+        return crc.getValue() == u32(image, off + CRC_LEN);
+    }
+
+    static long u32(byte[] b, int off) {
+        return (b[off] & 0xFFL) | (b[off + 1] & 0xFFL) << 8 | (b[off + 2] & 0xFFL) << 16 | (b[off + 3] & 0xFFL) << 24;
+    }
+}

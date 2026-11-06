@@ -29,9 +29,11 @@ mkdir -p out/build/classes out/build/gen out/test
 
 echo "1/4 checker and card tests"
 javac -encoding UTF-8 -d out/test src/io/github/daemonddev/charmera/UpdateCheck.java \
-    src/io/github/daemonddev/charmera/CardState.java test/UpdateCheckTest.java test/CardStateTest.java
+    src/io/github/daemonddev/charmera/CardState.java src/io/github/daemonddev/charmera/Candidates.java \
+    test/UpdateCheckTest.java test/CardStateTest.java test/CandidatesTest.java
 java -cp out/test UpdateCheckTest
 java -cp out/test io.github.daemonddev.charmera.CardStateTest
+java -cp out/test CandidatesTest
 
 echo "2/4 resources"
 "$BT/aapt2" compile --dir res -o out/build/res.zip

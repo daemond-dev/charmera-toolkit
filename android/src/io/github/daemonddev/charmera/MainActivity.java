@@ -105,23 +105,24 @@ public class MainActivity extends Activity {
                 + "The flash candidates (docs/03-FLASH-CANDIDATES.md) erase the two photos the camera keeps in its own"
                 + " memory."));
 
-        col.addView(heading("1. The update file"));
-        col.addView(body("Pick the JH_5408…bin file that charmera pack wrote. It is checked the way charmera verify"
-                + " checks it before anything goes near the card."));
-        col.addView(button("Choose update file", v -> pickFile()));
+        col.addView(heading("1. Make the update file"));
+        col.addView(body("The app downloads the public stock firmware dump from GitHub (2 MiB), checks it, and makes the"
+                + " file you choose: C, A or B. These are the same reviewed files the computer toolkit makes, checked by"
+                + " their SHA-256; the app can make nothing else. Start with C."));
+        col.addView(button("Download and make the file", v -> downloadDump()));
+        col.addView(body("Offline, or already have the stock dump or an update file on the phone? Choose it instead. The"
+                + " stock dump is at " + Candidates.STOCK_DUMP_PAGE));
+        col.addView(button("Use a file on the phone", v -> pickFile()));
         fileStatus = mono();
         col.addView(fileStatus);
 
-        col.addView(heading("2. The SD card"));
-        col.addView(body("Connect the camera's card with a USB card reader, or leave it in the camera and connect the"
-                + " camera with its USB-C cable: the camera shows its card as a drive. The phone's own SD slot works"
-                + " only on Android 7 to 10; from Android 11 on, Android does not let an app choose the top level of a"
-                + " card in the slot. In the picker, open the card or drive itself and tap \"Use this folder\" at its"
-                + " top level, not inside DCIM.\n"
-                + "Only the slot? Copy the update file to the card's top level with the Files app, then choose that"
-                + " copy in step 1 to have it checked; a card-name line in the result means the copy's name is not"
-                + " exact. Skip steps 2 and 3, and delete the copy with the Files app after the flash."));
-        col.addView(button("Choose the SD card", v -> pickCard()));
+        col.addView(heading("2. Connect the camera"));
+        col.addView(body("Card in the camera. Connect the camera to the phone with a USB-C data cable; the camera shows its"
+                + " card as a drive (switch the camera on if no drive appears). Tap the button, open that drive in the"
+                + " picker and tap \"Use this folder\" at its top level, not inside DCIM.\n"
+                + "A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10: from"
+                + " Android 11 on, Android does not let an app choose the top level of a card in the slot."));
+        col.addView(button("Choose the camera's drive", v -> pickCard()));
         cardStatus = mono();
         col.addView(cardStatus);
 
@@ -130,28 +131,30 @@ public class MainActivity extends Activity {
         col.addView(writeButton);
         writeStatus = body("");
         col.addView(writeStatus);
+
+        col.addView(heading("4. Flash"));
+        col.addView(body("1. Eject the drive in Android (Settings, Storage, the USB drive, Eject), then unplug the cable.\n"
+                + "2. Switch the camera off, then on again, with the card still in it. The camera looks for the file in"
+                + " its first five seconds and shows the update progress. Do not touch anything until it reaches 100%.\n"
+                + "3. The camera stays on its last screen and does not delete the file. Take the card out first, then"
+                + " hold the power key about a second to switch it off.\n"
+                + "\"Program error\" means the file's sum did not match: nothing was erased and the camera switches"
+                + " itself off."));
+
+        col.addView(heading("5. Clean up"));
+        col.addView(body("The update file is still on the card, and the camera would flash it again at every power-on."
+                + " With the card still out: switch the camera on, wait 10 seconds, put the card in, connect the camera"
+                + " to the phone again, then tap the button. The camera only looks for the file in the first five"
+                + " seconds after power-on, so it cannot flash again this way."));
         cleanButton = button("Remove update files from the card", v -> confirmClean());
         col.addView(cleanButton);
+        col.addView(body("Then switch the camera off and on normally and check the boot screen, the live view and a test"
+                + " photo."));
 
-        col.addView(heading("Then, on the camera"));
-        col.addView(body("1. Eject the card in Android (Settings, Storage, the card or USB drive, Eject), then take it"
-                + " out or unplug the cable.\n"
-                + "2. Camera off, card in the camera, then switch it on. The camera looks for the file only in the first"
-                + " five seconds after power-on, then shows the update progress. Do not touch anything until it reaches"
-                + " 100%.\n"
-                + "3. The camera does not delete the file and stays on its final screen. Take the card out, then hold"
-                + " the power key about a second to switch it off.\n"
-                + "4. Connect the card to the phone again and tap \"Remove update files\". Never switch the camera on"
-                + " with the update file on its card except to flash: it would flash again.\n"
-                + "To remove it through the USB-C cable instead: switch the camera on without its card, wait 10 seconds,"
-                + " insert the card, connect the camera to the phone, then tap \"Remove update files\".\n"
-                + "\"Program error\" on the camera means the file's sum did not match; nothing was erased."));
-
-        col.addView(heading("If the card does not show up"));
-        TextView help = body("A card the camera has used has a flag set that Android refuses, so the phone offers to"
-                + " format it instead. Either format it in the phone (this erases it) or run charmera card-fix on a"
-                + " computer once. Details: docs/05-CARDS.md and docs/06-ANDROID.md in the toolkit.");
-        col.addView(help);
+        col.addView(heading("If the drive does not show up"));
+        col.addView(body("A card the camera has used has a flag set that Android may refuse, so the phone offers to"
+                + " format it instead. Formatting it in the phone works but erases the card; copy your photos off first."
+                + " Details: docs/05-CARDS.md and docs/06-ANDROID.md in the toolkit."));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFitsSystemWindows(true);
@@ -275,6 +278,123 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Download the public stock dump from its pinned upstream address, then ask which candidate to make. */
+    private void downloadDump() {
+        dismissDialog();
+        final int request = ++fileRequest;
+        fileStatus.setText("Downloading the stock dump from GitHub (2 MiB)…");
+        fileData = null;
+        fileCheck = null;
+        if (!busy) {
+            writeStatus.setText("");
+        }
+        updateButtons();
+        WORKER.execute(() -> {
+            byte[] dump = null;
+            String problem = null;
+            try {
+                dump = Candidates.stockDump(fetch(Candidates.STOCK_DUMP_DOWNLOAD));
+            } catch (IOException | RuntimeException e) {
+                problem = why(e);
+            }
+            final byte[] d = dump;
+            final String p = problem;
+            ui.post(() -> {
+                if (gone() || request != fileRequest) {
+                    return;
+                }
+                if (d == null) {
+                    fileStatus.setText("Could not get the stock dump: " + p + "\nCheck the connection and try again, or"
+                            + " download it in the browser from " + Candidates.STOCK_DUMP_PAGE + " and choose it with"
+                            + " \"Use a file on the phone\".");
+                    updateButtons();
+                    return;
+                }
+                chooseCandidate(d, request);
+            });
+        });
+    }
+
+    private static byte[] fetch(String address) throws IOException {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(address).openConnection();
+        c.setConnectTimeout(20000);
+        c.setReadTimeout(30000);
+        c.setInstanceFollowRedirects(true);
+        try {
+            int code = c.getResponseCode();
+            if (code != 200) {
+                throw new IOException("GitHub answered " + code);
+            }
+            return readAll(c.getInputStream());
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private void chooseCandidate(byte[] dump, int request) {
+        if (dialog != null) {
+            return;
+        }
+        final Candidates.Kind[] kinds = Candidates.Kind.values();
+        String[] labels = new String[kinds.length];
+        for (int i = 0; i < kinds.length; i++) {
+            labels[i] = kinds[i].label;
+        }
+        fileStatus.setText("The stock dump checks out (SHA-256 " + Candidates.STOCK_DUMP_SHA256 + "). Choose which"
+                + " file to make.");
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Which file?")
+                .setItems(labels, (di, which) -> buildCandidate(dump, kinds[which], request))
+                .setNegativeButton("Cancel", null)
+                .create();
+        d.setOnDismissListener(di -> {
+            if (dialog == di) {
+                dialog = null;
+            }
+            if (!gone()) {
+                updateButtons();
+            }
+        });
+        dialog = d;
+        d.show();
+        updateButtons();
+    }
+
+    private void buildCandidate(byte[] dump, Candidates.Kind kind, int request) {
+        if (request != fileRequest) {
+            return;
+        }
+        fileStatus.setText("Making " + kind.fileName + "…");
+        WORKER.execute(() -> {
+            byte[] data = null;
+            UpdateCheck.Result result = null;
+            String text;
+            try {
+                data = Candidates.build(dump, kind);
+                result = UpdateCheck.check(kind.fileName, data);
+                text = "Made " + kind.fileName + " from the stock dump. Its SHA-256 " + result.sha256 + " matches the"
+                        + " reviewed file.\n" + kind.label + "\n\n" + result.report() + "\n"
+                        + (result.ok ? "OK to put on the card." : "Not OK: this file will not be written.");
+            } catch (RuntimeException e) {
+                data = null;
+                result = null;
+                text = "Could not make the file: " + why(e);
+            }
+            final byte[] dd = data;
+            final UpdateCheck.Result r = result;
+            final String tt = text;
+            ui.post(() -> {
+                if (gone() || request != fileRequest) {
+                    return;
+                }
+                fileData = dd;
+                fileCheck = r;
+                fileStatus.setText(tt);
+                updateButtons();
+            });
+        });
+    }
+
     /** "Open with" or "Share" from a file manager. */
     private void handleIncoming(Intent intent) {
         if (intent == null) {
@@ -312,21 +432,33 @@ public class MainActivity extends Activity {
             String text;
             byte[] data = null;
             UpdateCheck.Result result = null;
+            byte[] stock = null;
             try {
                 data = readAll(getContentResolver().openInputStream(uri));
-                result = UpdateCheck.check(name, data);
-                text = name + "\n" + data.length + " bytes, SHA-256 " + result.sha256 + "\n\n" + result.report()
-                        + "\n" + (result.ok ? "OK to put on the card." : "Not OK: this file will not be written. Fix the FAIL lines first.");
+                stock = Candidates.isStockDump(data) ? Candidates.stockDump(data) : null;
+                if (stock != null) {
+                    text = "";
+                } else {
+                    result = UpdateCheck.check(name, data);
+                    text = name + "\n" + data.length + " bytes, SHA-256 " + result.sha256 + "\n\n" + result.report()
+                            + "\n" + (result.ok ? "OK to put on the card." : "Not OK: this file will not be written. Fix the FAIL lines first.");
+                }
             } catch (IOException | RuntimeException e) {
                 data = null;
                 result = null;
+                stock = null;
                 text = "Could not read the file: " + why(e);
             }
             final byte[] d = data;
             final UpdateCheck.Result r = result;
             final String t = text;
+            final byte[] s = stock;
             ui.post(() -> {
                 if (gone() || request != fileRequest) {
+                    return;
+                }
+                if (s != null) {
+                    chooseCandidate(s, request);
                     return;
                 }
                 fileData = d;
@@ -404,6 +536,7 @@ public class MainActivity extends Activity {
         Uri uri = data.getData();
         if (request == PICK_FILE) {
             loadFile(uri);
+
         } else if (request == PICK_CARD) {
             if (!DocumentsContract.isTreeUri(uri)) {
                 tree = null;

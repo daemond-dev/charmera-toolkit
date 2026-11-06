@@ -36,7 +36,8 @@ Examples for every command are in the [Command reference](docs/07-USAGE.md).
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
 
-On a phone, the [Charmera Card app](android/README.md) checks an update file and puts it on the SD card
+On a phone, the [Charmera Card app](android/README.md) does the whole flash with no computer: it makes the
+reviewed update file from the public stock dump and puts it on the camera's card over the USB-C cable
 ([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk);
 the repository is private, so sign in to GitHub in the phone's browser first).
 
