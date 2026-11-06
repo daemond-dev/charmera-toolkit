@@ -91,7 +91,8 @@ def test_android_slot_limit_and_fallback():
     t = text("06-ANDROID.md")
     assert "Android 11 and later" in t and "Android 7 to 10" in t
     assert "USB card reader" in t and "USB-C" in t
-    assert "Files app" in t and "Choose update file" in t
+    assert "Files app" in t and "Use a file on the phone" in t
+    assert "Choose update file" not in t      # the button's old name
 
 
 def test_usb_c_cleanup():
@@ -110,8 +111,30 @@ def test_ignored_file_diagnosis_lists_the_real_causes():
 def test_candidates_agree_with_first_flash():
     t = text("03-FLASH-CANDIDATES.md")
     assert "Card formatted FAT32" not in t
-    assert "Prerequisite before any of these goes on a card: a verified full-flash backup" not in t
-    assert "recommended" in t
+    assert "is recommended" not in t and "Recommended:" not in t     # the backup is required, not recommended
+    assert "No backup, no flash" in t
+    assert "did not cause the freeze" in t and "does not fit" in t   # the corrected cause
+    assert "The diff confirms" not in t
+
+
+HARD_STOP = re.compile(r"no backup[^.]{0,40}no flash", re.I)
+
+
+@pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "1. Back up your camera's chip (no backup, no flash)"),
+                                          ("03-FLASH-CANDIDATES.md", "Flashing order, when you are ready"),
+                                          ("06-ANDROID.md", "Before you flash from a phone"),
+                                          ("04-STAGE.md", "What it does, in order")])
+def test_the_backup_is_a_hard_stop_before_every_flash(name, heading):
+    s = section(name, heading)
+    assert HARD_STOP.search(s), name
+    assert "recommended" not in s.lower(), name
+
+
+def test_no_doc_calls_the_stamp_or_the_series_a_proof():
+    for name in FILES:
+        t = text(name).lower()
+        assert "only ways to tell editions apart" not in t, name
+        assert "identical to every original-series camera read so far" not in t, name
 
 
 def test_android_card_fix_command():

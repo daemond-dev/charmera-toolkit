@@ -33,9 +33,9 @@ build has a program for any other sensor, and flashing either one would give thi
   resources with a factory settings record and blank internal photos. A is C with the interface sounds off. B is A
   with the sound files silenced.
 - **Charmera Card**, the Android app. It downloads the dump, checks its hash and makes the update file. It writes
-  that file to the camera's card over the camera's USB-C cable, then walks through the flash and cleanup. Builds
-  are signed with a permanent key and published by GitHub Actions. Version 0.4 is published. A rewrite of its
-  on-screen text is on the branch `claude/charmera-firmware-toolkit-0kilzl` and has not been published.
+  that file to the camera's card over the camera's USB-C cable, then walks through the flash and cleanup. Builds are signed with a permanent key and published by GitHub Actions. Version 0.4 is published. Version 0.5,
+  with the backup step and the review fixes, is on the branch `claude/charmera-firmware-toolkit-0kilzl` and has not
+  been published.
 
 ## Timeline
 
@@ -132,18 +132,34 @@ build has a program for any other sensor, and flashing either one would give thi
 
 ## Open work in the toolkit
 
-- Make "no backup of your own camera, no flash" a hard stop in the app and the docs.
-- Correct `docs/03-FLASH-CANDIDATES.md`: the likely cause is the firmware not matching the sensor, not C's
-  settings.
-- Consider building official-size update files (0x169000 bytes) that leave the settings, the photos and the last
-  block alone, unless there is a reason to write them.
-- Finish the 0.4 review fixes, then build, test and publish the app's text rewrite.
-- The toolkit identifies a build by its version stamp and checks the sensor table at a fixed offset
-  (`image.py`, 0xF5C6C). The stamp does not identify a build, and the table moves between builds. Find the table
-  by its content instead, and stop treating "original series" as proof that a camera matches the public dump.
-- The research report says the firmware ignores sensor write failures. More exactly, after 10 failed attempts
-  at one register it abandons the rest of that table, and the caller ignores the error. The sensor is started
-  from the start-up state at boot, before the card mounts.
+Status on 2026-11-06, after the work on the branch `claude/charmera-firmware-toolkit-0kilzl`:
+
+- Done: "no backup of your own camera, no flash" is a hard stop in the docs (`01-FIRST-FLASH.md` step 1, `03`, `06`,
+  the app's README) and in the app: a new step 0 takes a dump of the camera's own chip (a 2 MiB file with the build
+  marks, never one of the public dumps), the update file is compared with it (the sensor table must be the same, the
+  software line says whether it is the camera's own firmware), and the write and the save-a-copy buttons stay off
+  without it. Not done: the command-line `stage` still writes without a backup; `verify` and `stage` only say so.
+  Whether `stage` should refuse without `--stock` is a decision to make.
+- Done: `docs/03-FLASH-CANDIDATES.md` now says the likely cause is firmware that does not fit the sensor, not C's
+  settings, and why the candidates stay withdrawn.
+- Done: official-size update files (0x169000 bytes): `pack --official-size` builds them, `verify` and the app accept
+  them and say what the final erase does (settings block erased: factory defaults and an empty photo list at the next
+  start; the stored photo data and the blocks above 0x1E0000 untouched). Not tested on hardware by this project; the
+  size itself is what Reto's updates and the film-mods files use.
+- Done: the pending 0.4 review fixes, on the branch as version 0.5: withdrawn C/A/B files picked from the phone are
+  refused (it was already so; checked), the photo warning says the restore file's photo list is empty, the README's
+  USB paragraph says what the first run showed, the eject button is off while a write or removal runs, old results
+  clear when a new action starts (a write clears the removal result and the other way round; picking a drive clears
+  both), the dead file chooser and the leftover wording are gone. Not done: the full Android build and the publish;
+  the build runs only in CI, and a push to `main` publishes.
+- Done: the toolkit and the app find the stamp, the build string and the sensor table by content, cross-check the
+  table against the code literal that points at it (0x7B91C in the public dump), name builds by a fingerprint over
+  0..0x169000 (the public dump VERIFIED; the film-mods build by the SHA-1 and byte sum its author reported), and say
+  everywhere that a build match tells which public image a file was made from, not whether it fits a camera. "Original
+  series" and the stamp are no longer treated as proof of anything.
+- Done: the research report carries a dated note with the corrections, including the sensor-write failure handling
+  (after 10 failed attempts at one register the rest of that table is abandoned and the caller ignores the error) and
+  the fact that the sensor is started at boot, before the card mounts.
 
 ## Build comparison details
 

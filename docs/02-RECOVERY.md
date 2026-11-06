@@ -18,8 +18,10 @@ to the end before deciding anything.
 
 ## Which situation are you in?
 
-1. Is the body an original-series camera (yellow Kodak boot screen, REPORTED)? If it is a Millennium
-   Edition (blue boot screen) or a CLOT edition, go to [section D](#d-wrong-edition) first, whatever else is wrong.
+1. Does the camera boot, show its menus and play back photos, but freeze when photo or video mode starts, after a
+   flash? That is firmware that does not fit the camera: [section D](#d-firmware-that-does-not-fit-the-camera) first,
+   whatever the body. A Millennium Edition (blue boot screen) or a CLOT edition flashed with an original-series image
+   is the known case; an original-series camera had it on 2026-11-06 too.
 2. Does the camera power on and get far enough to mount the SD card (it shows the live view, plays back
    photos, or reacts to a card)? Yes: [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card). No: [section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
 3. Was an update interrupted before it reached 100% (battery died, card pulled, camera switched off while
@@ -78,7 +80,7 @@ Steps:
    it out of the reader or the phone.
 
 4. Check the body once more: original 2025 series only, matte with the yellow Kodak boot screen, never a
-   Millennium or CLOT edition ([section D](#d-wrong-edition)). Charge the battery fully and unplug the cable:
+   Millennium or CLOT edition ([section D](#d-firmware-that-does-not-fit-the-camera)). Charge the battery fully and unplug the cable:
    an update that loses power part way is [section C](#c-an-interrupted-flash). With the camera off, put
    the card in, then power on. The updater finds the file and shows "Upgrade NN%" counting up, about 15 to 20
    seconds in all.
@@ -202,8 +204,11 @@ to get pin 1 right.
    exits 1 and says so: that file is not a full-flash image, `restore` will refuse it, and `probe`
    should be reporting a 2048 kB chip before you try again.
 
-   On a healthy original-series camera the manifest shows `magic_ok: true`, both build stamps
-   (`JH5408  20250520` at `0x18964`, `202505201029` at `0x218C4`) and `tail_blank: true`.
+   On a healthy camera the manifest shows `magic_ok: true`, `build_marks_ok: true` (the build string, the 12-digit
+   stamp and the image-sensor set-up table, each found by its content, with the offset where it was found; in the
+   public dump `0x18964`, `0x218C4` and `0xF5C6C`) and `tail_blank: true`. `build` names the build when it is a known
+   one (`public-dump`) and says `charmera-unknown-build` when nobody has published it, which is the backup worth most:
+   nobody else can give you that firmware.
 
 ### Restore
 
@@ -227,9 +232,10 @@ Then:
 python -m charmera_toolkit restore --image <source>.bin --backup <backup of the chip as it is now>.bin
 ```
 
-`restore` refuses an image that is not exactly 2,097,152 bytes, does not start with `SPII`, or lacks the
-original-series build stamps (`--allow-unknown-build` overrides the last check and nothing else; use it
-only for an image you know belongs to this camera). `--backup` takes a fresh backup of the chip as it is
+`restore` refuses an image that is not exactly 2,097,152 bytes, does not start with `SPII`, or carries no
+Charmera build marks (the build string, the stamp and the sensor table, found by content; `--allow-unknown-build`
+overrides that check and nothing else; use it only for an image you know belongs to this camera). It prints which
+build the image is, and that a build match says which public image it is, not whether it fits this camera. `--backup` takes a fresh backup of the chip as it is
 now (the one from step 2 above, made with the clip still in place); `restore` then prints which of the
 32 blocks of 64 KiB differ between that backup and the image, which is exactly what the write will
 change, so you can see that, for example, only the settings store changes. An older backup still gives a
@@ -278,21 +284,32 @@ What is known and what is not:
 - If the camera still boots after an interruption (it was interrupted before the erase started, or
   "Program error" appeared), nothing was changed (VERIFIED for "Program error"). Go to [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card).
 
-## D. Wrong edition
+## D. Firmware that does not fit the camera
 
-- The Millennium Edition (blue boot screen) and the CLOT edition are different firmware builds. Flashing
-  the original-series image onto them boots, but capture freezes (REPORTED by two owners). The toolkit
-  cannot tell editions apart over USB or from the chip; the body and the boot screen tell you, and only
-  you can check them.
-- Do not flash an original-series image, from your own backup of another camera or from a public dump,
-  onto a Millennium or CLOT body. `restore` checks build stamps, and the original-series stamps are what
-  it accepts by default; it cannot know which body is on the clip.
-- If it has already been done: the camera boots, so the SD updater still runs. Wait for an edition-specific
-  dump from an owner of that edition and apply it through [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card). Nothing in this toolkit can produce
-  one from the original-series image.
-- If you own a Millennium or CLOT camera that works, make a backup now ([section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)'s `backup`, with the
-  camera opened the same way). That backup is the only thing that can restore it later, and it is what
-  other owners of that edition will need.
+- The symptom: the camera boots, shows its menus, plays back photos and reacts to its keys, but photo and video mode
+  freeze; the shutter clicks and the camera locks up until it switches itself off. The firmware drives exactly one
+  image sensor, never reads which one is fitted, and carries on when its writes fail (VERIFIED in the public dump),
+  so a camera with another sensor behaves exactly like this. A loose or damaged sensor ribbon looks the same from
+  the firmware's side.
+- Known cases: the Millennium Edition (blue boot screen) and the CLOT edition flashed with the original-series image
+  (REPORTED by two owners), and an original-series camera of the 1987 blind-box design, bought in Japan in November
+  2026, flashed with the public dump on 2026-11-06 ([the incident notes](FIRST-FLASH-INCIDENT.md)). So the body and
+  the boot screen do not say which firmware a camera needs.
+- The version stamp does not either: the public dump and the build on the charmera-film-mods author's camera both
+  carry `202505201029` with different bytes (the author confirmed it from their own dump). The toolkit therefore
+  names a build by a fingerprint over its bytes, finds the build marks by their content rather than at fixed offsets,
+  and says plainly that a build match tells which public image a file was made from, not whether it fits a camera.
+  The one check that does is `verify --stock <a dump of that camera>`: the file's sensor table against the camera's own.
+- Do not flash an image from another camera, your own backup of another camera or a public dump included, onto a
+  camera whose own chip has not been read. `restore` cannot know which camera is on the clip.
+- If it has already been done: the camera boots, so the SD updater still runs. The way back is the camera's own
+  backup through [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card). Without one, only a
+  dump from a working camera with the same sensor can help; identify the sensor from the marking on its module (the
+  firmware never reads an ID, so the marking is the way), and ask owners of the same batch or edition for a dump. The
+  two known builds carry the same sensor table, byte for byte, so neither helps a camera with another sensor.
+- If you own a camera that works, make a backup now ([section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)'s
+  `backup`, with the camera opened the same way). That backup is the only thing that can restore it later, and if its
+  build is one nobody has published, it is what other owners with the same parts will need.
 
 ## Reference
 
@@ -301,8 +318,9 @@ The image (VERIFIED in both public dumps):
 | Offset | Content |
 | --- | --- |
 | `0x000000` | magic `SPII`, start of the code |
-| `0x018964` | build stamp string `JH5408  20250520` |
-| `0x0218C4` | build stamp string `202505201029` |
+| `0x018964` | build string `JH5408  20250520` (in the public dump; another build keeps it elsewhere, so the toolkit finds it by content) |
+| `0x0218C4` | version stamp `202505201029` (shared by two different builds; identifies neither) |
+| `0x0F5C6C` | the 61-write image-sensor set-up table (public dump; `0xF5D34` in the film-mods build) |
 | `0x170000` | settings store (records appended as settings change) |
 | `0x180000`, `0x1A5800` | internally stored photos in the public dumps |
 | `0x1E0000` to `0x200000` | `0xFF` in every known dump; update files stop here |

@@ -3,17 +3,22 @@
 Reading order: 6 of 13 · previous: [SD card problems](05-CARDS.md) · next: [Command reference](07-USAGE.md) · [all docs](README.md)
 
 Short version: a phone can do the SD-card route, which covers every normal flash. It cannot do the chip-level
-route (CH341A), which is what you need for the first full backup and for a camera that no longer boots. Flashing
-from a phone has not been tried yet. What has been seen on a phone: the camera, connected by USB-C, shows its card
-as a drive. The parts that are inference are marked.
+route (CH341A), which is what you need for the backup that every flash requires, and for a camera that no longer
+boots. Flashing from a phone was done once, on 2026-11-06, over the camera's own USB-C cable: the write, the flash and
+the cleanup worked as described here. The file flashed that day did not fit the camera, which is why the backup is a
+hard stop below. The parts that are still inference are marked.
 
 ## Before you flash from a phone
 
 The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash-the-point-of-no-return):
 
+- No backup of your own camera, no flash. The backup is a dump of this camera's flash chip, read with a CH341A clip
+  on a computer ([step 1 of The first flash](01-FIRST-FLASH.md#1-back-up-your-cameras-chip-no-backup-no-flash)). The app
+  does not write to the card without it, and compares the update file's image-sensor set-up with it; `verify
+  --stock <backup>` does the same on a computer. Whether a firmware fits a camera cannot be told any other way.
 - Original 2025 series only: matte body, yellow Kodak boot screen. Never a Millennium Edition (blue boot
-  screen) or a CLOT edition ([Recovery, section D](02-RECOVERY.md#d-wrong-edition)). The app checks the file,
-  not the camera; no check on the file can tell which body it goes into.
+  screen) or a CLOT edition ([Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). The body
+  alone proves nothing: an original-series camera was left unable to take pictures by the public dump.
 - Charge the battery fully before every flash. A power loss while the camera programs itself leaves a camera
   that only a chip programmer can bring back ([Recovery, section C](02-RECOVERY.md#c-an-interrupted-flash)).
 - The photos the camera stores in its own memory are replaced by the flash. The
@@ -22,9 +27,10 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 
 ## The app
 
-[Charmera Card](../android/README.md) does the whole job on the phone, with no computer: it downloads the public
-stock dump, makes the published stock restore file from it (it can make nothing else), writes it to the
-camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup.
+[Charmera Card](../android/README.md) does the card part on the phone: it downloads the public stock dump, makes the
+published stock restore file from it (it can make nothing else), compares that file with your backup, writes it to
+the camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup. It
+writes nothing without a backup on record.
 Download [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
 on the phone (sign in to GitHub in the phone's browser first: the repository is private). The rest of this page is
 the same job done by hand, and what the app cannot help with.
@@ -38,8 +44,8 @@ Which way the card reaches the app depends on the Android version:
 - Android 7 to 10: the phone's own SD slot works as well.
 - Only the slot, on Android 11 or later: copy the update file to the card's top level with the Files app
   ([section 3](#3-copy-the-file-to-the-card-root)), then pick that copied file in the app's step 1
-  (**Use a file on the phone**; the old name was Choose update file) to have it checked where it lies. Delete the
-  copy with the Files app after the flash.
+  (**Use a file on the phone**) to have it checked where it lies. Delete the copy with the Files app after the
+  flash.
 
 ## What the phone has to do
 
@@ -108,8 +114,8 @@ is where the camera looks.
 
 ## 4. Flash
 
-Check the list in [Before you flash from a phone](#before-you-flash-from-a-phone) once more: original 2025
-series body, battery fully charged, the stored photos saved or given up. Then follow
+Check the list in [Before you flash from a phone](#before-you-flash-from-a-phone) once more: the backup of this
+camera kept safe, original 2025 series body, battery fully charged, the stored photos saved or given up. Then follow
 [step 5 of The first flash](01-FIRST-FLASH.md#5-flash-the-point-of-no-return):
 
 1. Camera off, card in, then switch it on. The camera looks for the file only in the first five seconds after
@@ -126,18 +132,21 @@ series body, battery fully charged, the stored photos saved or given up. Then fo
 ## Through the camera's own USB port
 
 When connected by USB the camera presents its card as a storage device (USB ID 1B3F:8301, "GENPLUS USB-MSDC
-DISK A"), so the card can stay in the camera. The owner has confirmed that the drive appears on an Android phone
-connected over USB-C; writing an update file that way and flashing from it has not been tried yet. The same
-dirty-flag problem applies. The app's screens for this route are in its README:
-[the app's five steps](../android/README.md#use).
+DISK A"), so the card can stay in the camera. On 2026-11-06 the drive appeared on an Android phone connected over
+USB-C, the app wrote an update file to it, and the camera flashed that file at its next power-on; the cleanup over
+the same cable worked too. Two things the same run showed: plugging the cable into a switched-off camera switches it
+on and runs the updater from the card, so a camera is never connected with an update file on its card unless that
+flash is wanted; and the camera looks for the file only in the first five seconds after power-on, so it does not
+notice a file added while it runs. The same dirty-flag problem applies. The app's screens for this route are in its
+README: [the app's steps](../android/README.md#use).
 
 1. Connect the camera to the phone with a USB-C data cable, pick the camera's drive in the app and write the
    file, as for a card reader.
 2. Eject the drive in Android (Settings, Storage, the USB drive, Eject), then unplug the cable.
 3. With a fully charged battery and no cable, switch the camera off, then on again. It only looks for the file
-   in the first five seconds after power-on, so it did not notice the file while it was running. Whether the
-   updater runs when the camera starts up while still plugged in is unknown, which is why the cable comes out
-   first.
+   in the first five seconds after power-on, so it did not notice the file while it was running. The cable comes
+   out first because plugging it in powers the camera on and runs the updater, and a flash should start on your
+   key press, with the battery charged, not on a cable.
 4. At 100% the camera stays on its last screen. Take the card out of the camera, then hold the power key about
    a second to switch it off.
 5. To remove the file: switch the camera on without its card and wait 10 seconds (the updater looks at the

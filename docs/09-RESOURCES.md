@@ -102,8 +102,8 @@ charmera verify out/JH_5408*.bin --stock my_backup.bin --allow-modified
 
 What has to hold, checked in this order; the first property that differs is named and the command exits 2:
 
-1. The image is the original 2025 series build (its build stamps are present). Other builds have an
-   unknown pack layout.
+1. The image is the public dump's build or a copy of it (its fingerprint, or its build marks at that build's
+   offsets, say so). Other builds have an unknown pack layout.
 2. The entry is a JPEG. For a WAV the message points at `sounds replace`, for a frame strip or thumbnail at
    `frames replace`; the other GPZP files and `GPRS.PAK` are refused because nobody knows yet what the
    firmware needs from them.

@@ -2,8 +2,21 @@
 
 Reading order: 13 of 13 · previous: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)
 
-Status: complete for Phase 1. Everything here is static analysis and public sources; nothing has been flashed.
+Status: complete for Phase 1. Everything here is static analysis and public sources; when it was written, nothing had been flashed.
 Date: 2026-11-04. Scope: original 2025 series (matte body, yellow Kodak boot screen). No hardware was touched; every finding below comes from public files, public issue threads, and static analysis of two public flash dumps.
+
+**Update, 2026-11-06.** The first flash happened and went wrong; [the incident notes](FIRST-FLASH-INCIDENT.md) have the
+timeline and the corrections. What this report got wrong or left open, in short: an original-series camera (1987
+blind-box design, bought in Japan in November 2026) boots with the public dump but freezes in photo and video mode,
+so the public build does not fit every original-series camera and "original series" is not an identity. A second
+build with the same stamp `202505201029` but different bytes exists (the charmera-film-mods author's camera; its
+fingerprint over 0..0x169000 is SHA-1 `91499bd3…`, byte sum `0852C329`, against `d1f21227…`, `0852B369` here), so the
+stamp identifies no build; the toolkit now finds the build marks and the sensor table by content and names builds by
+fingerprint ([Image layout](11-FORMAT.md#build-identity)). Both known builds carry the same 61-write sensor table. The
+sensor is set up at boot, before the card mounts; more exactly than section 9 says, after 10 failed attempts at one
+register the firmware abandons the rest of the table and its caller ignores the error. The 2 MiB file's final erase
+is no longer unknown: it wraps to block 1 and bricks the camera (film-mods author, on hardware). And the rule that
+follows from all of it: no backup of your own camera, no flash.
 
 Labels used throughout: **VERIFIED** = reproduced here from the binaries or files; **REPORTED** = stated by a community source and cited, not reproduced here; **INFERRED** = reasoned from the evidence, with the reasoning given; **UNKNOWN** = nobody has shown it.
 
@@ -185,7 +198,7 @@ Nothing here has been flashed yet. The first mute test on a camera waits for you
 ## 8. Risks
 
 1. **No boot-ROM fallback is known.** A failed SD update, or a bad image, means a clip write or a dead camera. Mitigation: verified backup first; only block-aligned 0x1E0000 files; full battery; never a 2 MiB file.
-2. **Edition confusion.** The original-series image boots on a Millennium or CLOT body but capture fails. The image carries no edition marker the tool can read from the camera over USB; identification is up to the owner (boot screen colour, filters). Mitigation: `verify` refuses unknown builds, the docs say "yellow boot screen only", and the mods are built from the owner's own backup, never a public dump.
+2. **Firmware that does not fit the camera.** The original-series image boots on a Millennium or CLOT body but capture fails, and on 2026-11-06 it did the same on an original-series body. The image carries no marker the tool can read from the camera, and the body, the boot screen and the stamp prove nothing. Mitigation, since then: no backup of the owner's own camera, no flash; `verify --stock <that backup>` compares the sensor table; and the mods are built from the owner's own backup, never a public dump.
 3. **Programmer voltage.** A black CH341A at 5 V can damage the flash and the SoC. Mitigation: documented, and the backup tool prints the warning before every run.
 4. **Back-powering the SoC through the flash VCC pin.** Causes unstable reads and could stress the board. Mitigation: battery disconnected, double read with compare, stop if the chip is not detected cleanly.
 5. **A public restore image is not a factory image.** It carries another owner's settings records and two photos; a blanked variant is cleaner but its behaviour on a blank settings store is only emulation-verified.
@@ -210,7 +223,10 @@ Nothing here has been flashed yet. The first mute test on a camera waits for you
 
 Already built in `charmera-toolkit` (read-only unless a gate flag is given): `inspect`, `verify`, `pack`, `sounds list/extract/mute/replace`; `card-check`/`card-fix`, `exif-fix` and `backup`/`restore` are being finished. Design decisions that follow from this report:
 
-- Series detection is by build stamps plus the software-region hash; anything else is "unknown" and refused. When a Millennium or CLOT dump appears, it gets its own fingerprint entry.
+- Build detection was by build stamps plus the software-region hash. Since 2026-11-06 it is by fingerprint over the
+  bytes, with the marks found by content, because the stamp is shared by two builds; a known build is named, an unknown
+  one is said to be unknown, and neither is taken as proof that a file fits a camera. When another dump appears, it
+  gets its own fingerprint entry.
 - Update files are always 0x1E0000 bytes, never 2 MiB, never odd-sized; the stamp must differ from 202505201029; the name is derived from the byte sum, never typed.
 - Mods are data-only and are verified by diffing 64 KiB blocks against the owner's stock backup, so `verify` can state exactly which blocks a mod touches.
 - Nothing produces a flashable file without an explicit flag, and every such file comes with a manifest and a SHA-256.

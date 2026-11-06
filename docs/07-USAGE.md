@@ -21,18 +21,23 @@ charmera resources list my_backup.bin                                # all 43 re
 charmera resources extract my_backup.bin --out resources/            # each entry trimmed to its real length
 ```
 
-`inspect` tells you what a file is: dump or update file, which build it carries, whether its software region is
-byte-identical to the stock original-series firmware, what the resource pack and sound slots contain, which settings
-record is current (and whether UI sounds are on), and whether it holds another owner's photos.
+`inspect` tells you what a file is: dump or update file, which build it carries (named by a fingerprint over its
+bytes, never by the version stamp, which two different builds share), where its build marks and its image-sensor
+set-up table were found, whether its software region is byte-identical to the public dump's, what the resource pack
+and sound slots contain, which settings record is current (and whether UI sounds are on), and whether it holds another
+owner's photos.
 
-`verify` is the gate before a card. It checks the filename checksum, the stamp, the size rule, the magic, the build, and
-reports anything that differs from stock. A FAIL line means do not use the file.
+`verify` is the gate before a card. It checks the filename checksum, the stamp, the size rule, the magic, the build
+marks, the sensor table and the software region, and says what each result proves. Always give `--stock <a dump of
+the camera the file goes into>`: the sensor table and the software region are compared with it, and that comparison is
+the only check that says anything about your camera. A FAIL line means do not use the file.
 
-`--allow-modified` accepts a software region that differs from stock: any mod of the code or the resources needs it.
-Settings-only files, such as candidates A and C, pass without it. `stage` always uses it.
-Two things it does not accept. A changed image-sensor table (`sensor-table`) fails unless `--allow-unknown-build` is
-given, and `stage` never gives it: no toolkit mod changes that table, and the wrong one is what stops other editions
-from taking pictures. A damaged resource entry (`resource-slots`) always fails: every entry's slot must lie inside the
+`--allow-modified` accepts a software region that differs from the reference: any mod of the code or the resources
+needs it. Settings-only files pass without it. `stage` always uses it.
+Two things it does not accept. A sensor table that differs from `--stock`'s (`sensor-table`), or, without `--stock`,
+from the known builds', fails unless `--allow-unknown-build` is given, and `stage` never gives it: no toolkit mod
+changes that table, and a firmware that drives a sensor the camera does not have leaves it unable to take pictures.
+A damaged resource entry (`resource-slots`) always fails: every entry's slot must lie inside the
 resource area and the file, must not be erased, and must hold the kind its name says (a WAV with fmt and data chunks that fits its slot, a JPEG
 with an FF D9 end marker inside its slot, a GPZP stream that inflates, matches its CRC and length trailer and uses only
 fixed-Huffman blocks, a GPRS pack). The camera checks none of this, and it opens the boot logo at every boot before
@@ -62,14 +67,19 @@ charmera frames replace my_backup.bin --slot 1 --png frame.png --thumb thumb.png
 charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jpg --out logo.bin --strip-metadata --i-understand-this-is-a-mod
 ```
 
-`pack` takes a 2 MiB dump (trimmed to 0x1E0000), a 0x1E0000 update file, or a software-only image of exactly 0x170000
-bytes (padded with an erased settings bank and a zeroed photo directory; the plan shows the padding, and names any
-damaged resource entry that `verify` will refuse). It refuses any
+`pack` takes a 2 MiB dump (trimmed to 0x1E0000), a 0x1E0000 update file, a 0x169000-byte official-size update file,
+or a software-only image of exactly 0x170000 bytes (the last two padded with an erased settings bank and a zeroed photo
+directory; the plan shows the padding, and names any damaged resource entry that `verify` will refuse). It refuses any
 other length below 0x1E0000 as truncated, because padding a cut-off download would put 0xFF over part of the code or
-the resource pack. `--out` must be a folder on the computer: `pack` refuses one that has a DCIM folder (that is a card;
-put the file there with `stage`) or that already holds another `JH_*.bin`. `--factory-settings` keeps only the first
-CRC-valid settings record and erases the rest of the bank; it zeroes the photo directory only when that sector is
-erased, so stored photos stay unless you add `--blank-photos`. `--stamp` takes 12 ASCII digits 0-9.
+the resource pack. `--official-size` cuts the result at 0x169000, where official updates end: the file then writes the
+code and the resources only, nothing of another camera's settings or photos, and the camera's final erase lands on the
+settings block, so it starts with factory settings and an empty photo list while its stored photo data and the blocks
+above 0x1E0000 are left alone ([Image layout](11-FORMAT.md#update-file-jh_5408stamp_sumbin)). `--out` must be a folder
+on the computer: `pack` refuses one that has a DCIM folder (that is a card; put the file there with `stage`) or that
+already holds another `JH_*.bin`. `--factory-settings` keeps only the first CRC-valid settings record and erases the
+rest of the bank; it zeroes the photo directory only when that sector is erased, so stored photos stay unless you add
+`--blank-photos`. `--stamp` takes 12 ASCII digits 0-9. `pack` refuses an input without the Charmera build marks unless
+`--allow-unknown-build` is given, and notes a build it does not know.
 
 `settings set` keeps everything else in the record and leaves that record as the only one in the bank. `tweak apply`
 refuses any patch whose original bytes are not where it expects them, so it cannot land on the wrong build or on

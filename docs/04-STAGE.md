@@ -31,10 +31,12 @@ guarantee.
 ## What it does, in order
 
 1. **verify.** Runs the same checks as `charmera verify FILE --allow-modified` and prints them with the same
-   tags (PASS, FAIL, WARN, INFO). A modified software region is allowed, because that is what a mod is; an
-   unknown build, an odd size, a wrong checksum, the stock stamp, a 2 MiB file are FAIL. Any FAIL refuses
-   with exit 1. WARN lines are shown and do not block. `--stock my_backup.bin` makes the software-region
-   line list the 64 KiB blocks that differ from your own dump.
+   tags (PASS, FAIL, WARN, INFO). A modified software region is allowed, because that is what a mod is; missing
+   build marks, a sensor table that differs from `--stock` (or, without `--stock`, from the known builds'), an odd
+   size, a wrong checksum, the shared stamp, a 2 MiB file are FAIL. Any FAIL refuses with exit 1. WARN lines are
+   shown and do not block. Always give `--stock my_backup.bin`, a dump of the camera this card goes into: it is what
+   the sensor table is compared with, and it makes the software-region line list the 64 KiB blocks that differ from
+   your own dump. No backup, no flash.
 2. **The card.** `--card` must exist, be a directory, and be a mount point (Linux) or a drive root
    (Windows: `E:` or `E:\`). On Linux the device behind the mount and its filesystem type are read from
    `/proc/mounts`, and the whole disk's removable flag from sysfs (a card in a built-in slot counts as
@@ -65,7 +67,7 @@ a refused volume, a failed write or read-back); 2 a usage problem or no confirma
 ## The sequence on the camera
 
 Before you start: only an original 2025 series body (matte, yellow Kodak boot screen; never a Millennium or
-CLOT edition, [Recovery, section D](02-RECOVERY.md#d-wrong-edition)). Charge the battery fully, then unplug the
+CLOT edition, [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). Charge the battery fully, then unplug the
 cable. Programming takes 15 to 20 seconds and a power loss in that window leaves a camera that only a chip
 programmer can bring back ([Recovery](02-RECOVERY.md)). Whether the updater runs on USB power without a battery
 is not known. Any update file replaces the photos the camera stores in its own memory; the
@@ -97,7 +99,8 @@ or flashed with a toolkit-built file still runs `202505201029`, and `verify` ref
 | Message | Meaning | What to do |
 |---|---|---|
 | `FAIL ...` then `RESULT: verify failed` | The file itself is wrong: name checksum, stamp, size, build. | Rebuild it with `pack`; never rename an update file by hand. |
-| `FAIL sensor-table` | The image-sensor set-up table differs from the original 2025 series. No toolkit mod changes it. | Do not use the file: it was built from another edition's firmware or a damaged dump. |
+| `FAIL sensor-table` | The image-sensor set-up table differs from your `--stock` dump's (or, without `--stock`, from the known builds'). No toolkit mod changes it, and that difference is what leaves a camera unable to take pictures. | Do not use the file on this camera. Without `--stock`, give it: your backup is the only reference that says anything about your camera. |
+| `FAIL series` | The build marks (build string, stamp, sensor table) were not found. | Not Charmera firmware, or a damaged copy. Rebuild from a complete dump. |
 | `FAIL resource-slots` | A resource entry is erased, cut off or not the kind its name says, typically from a truncated download or a damaged dump. | Rebuilding from the same input does not help: get a complete dump (check its SHA-256) and build again. |
 | `... is not a mount point or drive root` | You gave a folder on the card, or the card is not mounted. | Give the mount point itself (`/run/media/deck/<label>`, `E:`). For a test on a plain folder add `--i-know-what-i-am-doing`. |
 | `... does not exist` / `... is not a directory` | Wrong path, card not inserted, or a device path (`/dev/sdb1`). | `stage` takes the mounted path, not the device; `card-check` and `card-fix` take the device. |

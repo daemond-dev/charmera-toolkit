@@ -4,9 +4,10 @@ Tools for backing up, inspecting, verifying, recovering and modding the Kodak Ch
 (original 2025 series, Generalplus GPCV2247F, 2 MiB Puya PY25D16HB SPI flash). Windows and Linux, Python 3.9+,
 standard library only.
 
-Status: every command is unit-tested against two public dumps and the published update files. Nothing has been
-flashed to a camera yet; [Flash candidates](docs/03-FLASH-CANDIDATES.md) lists the first files meant to be tried,
-with hashes and the exact bytes they change.
+Status: every command is unit-tested against two public dumps and the published update files. One camera has been
+flashed with files from the public dump, and it did not fit: the camera boots but cannot take pictures
+([what happened](docs/FIRST-FLASH-INCIDENT.md)). The rule that follows is baked in everywhere: **no backup of your own
+camera, no flash.** [Flash candidates](docs/03-FLASH-CANDIDATES.md) records the withdrawn files and what the test showed.
 
 **Start with [The first flash](docs/01-FIRST-FLASH.md).** It walks through backup, choosing a file, verifying,
 putting it on the card, flashing and undoing, and links to every other document at the step where you need it.
@@ -30,23 +31,28 @@ Examples for every command are in the [Command reference](docs/07-USAGE.md).
 | `tweak` | a file | Experimental start-up and power-off byte patches, each checked against the stock bytes. |
 | `frames` | a file | List, extract, preview or replace the four photo frames (PNG in and out, budgets checked). |
 | `resources` | nothing / a file | List or extract every resource entry; replace a JPEG resource such as the boot logo. |
-| `pack` | a file | Turn an image into a correctly named update file, optionally with settings and photos blanked. |
+| `pack` | a file | Turn an image into a correctly named update file (community or official size), optionally with settings and photos blanked. |
 | `stage` | the card | Re-verify an update file, copy it to the card root and read it back. |
 | `card-check` / `card-fix` | nothing / the card | Diagnose and fix the exFAT dirty-bit problem that stops phones reading the card. |
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
 
-On a phone, the [Charmera Card app](android/README.md) does the whole flash with no computer: it makes the
-reviewed update file from the public stock dump and puts it on the camera's card over the USB-C cable
+On a phone, the [Charmera Card app](android/README.md) does the card part with no computer: it makes the published
+stock restore file from the public stock dump, compares it with a dump of your own camera's chip, and puts it on the
+camera's card over the USB-C cable; without that dump it writes nothing
 ([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk);
 the repository is private, so sign in to GitHub in the phone's browser first).
 
 Ground rules baked into the commands:
 
+- No backup of your own camera, no flash. Whether a firmware fits a camera cannot be told from the file, the version
+  stamp or the body; a dump of the camera's own chip is the one file known to fit it and the only way back. `verify
+  --stock <that dump>` is the one check that compares a file with your camera, and the app refuses to write without it.
 - Read-only by default. Nothing is written to a card, a chip or a camera without a typed confirmation.
 - Anything that produces a flashable or modified image needs an explicit flag and prints its plan first.
-- `pack` refuses an input it cannot identify as the original 2025 series, and `verify` fails any file whose
-  erase footprint would reach beyond what the published update files touch.
+- `pack` refuses an input without the Charmera build marks, `verify` names a build by a fingerprint over its bytes
+  (never by the version stamp, which two different builds share) and says what a match does and does not prove, and
+  it fails any file whose erase footprint would reach beyond what the known update sizes touch.
 - No Kodak or Reto firmware is distributed here. The tools work on your own backup; upstream files are referenced
   by URL and hash in the [Research report](docs/13-PHASE1-REPORT.md).
 
@@ -60,7 +66,7 @@ Before and during a flash:
 1. [The first flash](docs/01-FIRST-FLASH.md): start here; the whole path, with the point of no return marked.
 2. [Recovery](docs/02-RECOVERY.md): read before you flash; the SD updater and CH341A routes back, and the editions
    that must never be flashed.
-3. [Flash candidates](docs/03-FLASH-CANDIDATES.md): the first three files to try, their hashes and what each changes.
+3. [Flash candidates](docs/03-FLASH-CANDIDATES.md): the three withdrawn files, their hashes, what each changed and what the one test showed.
 4. [Putting the file on the card](docs/04-STAGE.md): the `stage` command and what each refusal means.
 5. [SD card problems](docs/05-CARDS.md): why phones reject a card the camera has used, and the fix.
 6. [Using an Android phone](docs/06-ANDROID.md): what a phone can do and what needs a computer.
