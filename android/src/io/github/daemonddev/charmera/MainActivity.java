@@ -32,6 +32,7 @@ import java.io.InputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -41,9 +42,9 @@ import java.util.concurrent.Executors;
  * flashes itself from the card. Also removes update files from the card afterwards.
  *
  * No backup of the camera, no flash: the app writes to the card only while a dump of that camera's own flash chip is
- * on record (step 0), and only an update file that it has compared with that dump. A file identical to the public
- * dump proves nothing about the camera it goes into; the comparison with the camera's own firmware is the one check
- * that does.
+ * on record (step 0), and only an update file that it has compared with that dump; WriteGate decides, from the check
+ * and the backup on record now. A file identical to the public dump proves nothing about the camera it goes into; the
+ * comparison with the firmware in a dump read before the camera was ever flashed is the one check that does.
  *
  * Every text on screen is for the owner reading it on a phone: what happened first (shown in bold), then what to do
  * next, with buttons named exactly as they are labelled; sums and Android's own error words come last, as "Detail:".
@@ -72,6 +73,12 @@ public class MainActivity extends Activity {
     private static final String GITHUB_REFUSED = "GitHub did not send the file";
     /** How a write that worked begins; write() offers the eject screen only after it. */
     private static final String WRITTEN = "Done: the update file is on the card.";
+    /** How a saved copy that worked begins, under its own name or another. */
+    private static final String SAVED = "Saved";
+    /** How a write begins when the card already holds the same file; it sends the owner on to the flash, as WRITTEN. */
+    private static final String NOTHING_TO_WRITE = "Nothing to write:";
+    private static final String WRITING = "Writing the update file to the card…";
+    private static final String REMOVING = "Removing from the card…";
 
     /**
      * One worker for the whole process, never shut down: a write or removal finishes even when the screen that
@@ -81,6 +88,42 @@ public class MainActivity extends Activity {
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     /** Downloads run apart from card work, so a slow connection never holds up a card listing or a write. */
     private static final ExecutorService NET = Executors.newSingleThreadExecutor();
+    /** Where the worker hands back how a write or removal ended, whether or not the screen that started it is open. */
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    /**
+     * A write or a removal. It runs on the worker and belongs to the process, not to the screen that started it: a
+     * screen made while it runs (a dark-mode, font or language change recreates the screen; Back and opening the app
+     * again, or "Open with", makes a new one) keeps Eject, Write and the card buttons off, and the screen open when it
+     * ends shows how it ended. Read and written on the main thread only.
+     */
+    private static final class Operation {
+        /** A write, or else a removal. */
+        final boolean write;
+        /** For a removal: how many files it removes, for the eject prompt's title. */
+        final int files;
+        /** For a write: the backup the file was checked against, its SHA-256 and name. */
+        final String backupSha256;
+        final String backupName;
+        /** How it ended, for the status under its button; null while it runs. */
+        String outcome;
+        /** A write that put the file on the card, or a removal that removed every file it named. */
+        boolean succeeded;
+        /** A screen has shown how it ended and offered the eject screen; a later screen does not show it again. */
+        boolean shown;
+
+        Operation(boolean write, int files, String backupSha256, String backupName) {
+            this.write = write;
+            this.files = files;
+            this.backupSha256 = backupSha256;
+            this.backupName = backupName;
+        }
+    }
+
+    /** The latest write or removal, running or ended; null before the first one. Main thread only. */
+    private static Operation last;
+    /** The screen last resumed, the one an operation that ends reports to; null once it is destroyed. Main thread only. */
+    private static MainActivity screen;
     private static final int SAVE_COPY = 4;
     private static final int PICK_BACKUP = 5;
     private static final String STATE_BACKUP_URI = "backupUri";
@@ -99,13 +142,19 @@ public class MainActivity extends Activity {
     private Button cleanButton;
     private Button downloadButton;
     private Button ejectButton;
+    private Button chooseButton;
     private TextView cleanStatus;
     private Button saveButton;
     /** The owner's dump of this camera's flash chip, once chosen and accepted; the update file is compared with it. */
     private byte[] backup;
+    /**
+     * Its SHA-256, by which every check names the backup it was made against (null while none is on record). The
+     * worker reads it just before it writes, so it is volatile, as are the two flags WriteGate also reads.
+     */
+    private volatile String backupSha256;
     private String backupName;
     private Uri backupUri;
-    private boolean loadingBackup;
+    private volatile boolean loadingBackup;
     /** The public stock dump once downloaded or picked and checked; kept so choosing again needs no new download. */
     private byte[] stockDump;
     private boolean downloading;
@@ -118,15 +167,31 @@ public class MainActivity extends Activity {
     private boolean fileChosen;
     /** Bumped by every loadFile, so a slow read of an earlier file cannot replace a later one. */
     private int fileRequest;
+    /** The file in step 1 is being checked again, against the backup on record now; nothing is written meanwhile. */
+    private volatile boolean checking;
+    /** Bumped by every check of the file again, so only the latest one is shown. */
+    private int checkRequest;
     private Uri tree;
     private Card card;
     /** Bumped by every inspectCard, so only the latest look at the card is shown. */
     private int cardRequest;
     private boolean inspecting;
-    /** A write, a removal or a comparison with the card is running. */
-    private boolean busy;
+    /** A comparison of the update file with the copy on the card is running (a write or removal is an Operation). */
+    private boolean comparing;
+    /** The write or removal whose progress this screen shows, until it has shown how it ended. */
+    private Operation watching;
+    /**
+     * The backup (SHA-256 and name) the file step 3 says is on the card was checked against, and the one the copy
+     * step 1 says was saved was checked against: once another backup is on record, those messages no longer hold.
+     */
+    private String writtenWith;
+    private String writtenName;
+    private String savedWith;
+    private String savedName;
     /** The confirmation dialog on screen, or null. */
     private AlertDialog dialog;
+    /** The write confirmation while it is on screen, or null: it goes when the backup or the check changes. */
+    private AlertDialog writeDialog;
 
     /** The card's tree as chosen, and what was found the last time it was looked at. */
     private static final class Card {
@@ -171,23 +236,28 @@ public class MainActivity extends Activity {
                 + "Only for the original 2025 series: matte body, yellow Kodak boot screen. Never flash a Millennium"
                 + " Edition (blue boot screen) or a CLOT edition.\n"
                 + "Charge the camera's battery fully first."));
-        col.addView(body("Flashing replaces the two photos the camera keeps in its own memory. The stock restore file"
-                + " carries the two photos of the camera it was copied from, but its photo list is empty, so the camera"
-                + " does not show them; your own two are gone all the same. If they matter, copy the SPIDCIM folder off"
-                + " the card before you flash, with the Files app or on a computer. That is where the camera copies"
-                + " them."));
+        col.addView(body("A file of the longer size the camera takes (1,966,080 bytes, as the stock restore file is)"
+                + " replaces the two photos the camera keeps in its own memory. The stock restore file carries the two"
+                + " photos of the camera it was copied from, but its photo list is empty, so the camera does not show"
+                + " them; your own two are gone all the same. A file of the shorter size (1,478,656 bytes) leaves them in"
+                + " the camera's memory but erases the list, so the camera no longer shows them either. If they matter,"
+                + " copy the SPIDCIM folder off the card before you flash, with the Files app or on a computer. That is"
+                + " where the camera copies them."));
 
         col.addView(heading("0. Back up this camera first"));
         col.addView(body("Whether a firmware fits a camera cannot be told from outside. Two cameras of the same series"
                 + " can need different firmware, because they carry different image sensors, and nothing in a file or"
-                + " on the camera's screen shows which one is fitted. The public dump already left one original-series"
-                + " camera unable to take pictures. The one file known to fit your camera is a dump of its own flash"
-                + " chip, and without that dump a flash that does not fit cannot be undone.\n"
+                + " on the camera's screen shows which one is fitted. After the public dump's firmware was flashed, one"
+                + " original-series camera could no longer take pictures. The one file known to fit your camera is a"
+                + " dump of its own flash chip read before the camera was ever flashed, and without a dump of the chip"
+                + " a flash that does not fit cannot be undone.\n"
                 + "So first read the chip with a CH341A clip on a computer (the toolkit's backup command;"
                 + " docs/02-RECOVERY.md, section B), keep that 2 MB file somewhere safe, copy it to the phone, and tap "
-                + q(BACKUP) + ". The app takes it only if it is a complete dump that is not one of the public copies."
-                + " It then compares the update file with it: the two must drive the image sensor the same way, or the"
-                + " app will not write."));
+                + q(BACKUP) + ". The app takes it only if it is a complete dump that is not one of the public copies;"
+                + " which camera it was read from, and when, the app cannot tell. It then compares the update file with"
+                + " it: the two must drive the image sensor the same way, or the app will not write. A dump read after a"
+                + " flash is still the way back to what the camera runs now, but it holds what was flashed, not what"
+                + " fits: when its firmware is a public build, the app says so."));
         backupButton = button(BACKUP, v -> pickBackup());
         col.addView(backupButton);
         backupStatus = body("");
@@ -196,9 +266,10 @@ public class MainActivity extends Activity {
         col.addView(heading("1. Get the update file"));
         col.addView(body("The update file is the file the camera flashes itself from. Tap " + q(DOWNLOAD) + ". The app"
                 + " downloads the stock dump from GitHub (2 MB): a public copy of one working camera's memory. It checks"
-                + " the stock dump and makes the stock restore file from it: the file other owners have put back on"
-                + " cameras that already ran this build. It puts such a camera back to stock, settings included. The"
-                + " app uses it only if it matches the published file exactly.\n"
+                + " the stock dump and makes the stock restore file from it. Several owners report working cameras after"
+                + " flashing it; what their cameras ran before is not known. On a camera that ran the public build it"
+                + " puts that build back, with the settings of the camera the dump came from. The app uses it only if"
+                + " it matches the published file exactly.\n"
                 + "That the file is exactly the public one says nothing about your camera. The app compares it with"
                 + " your camera's backup from step 0 and says whether the two drive the image sensor the same way."));
         downloadButton = button(DOWNLOAD, v -> downloadDump());
@@ -238,8 +309,10 @@ public class MainActivity extends Activity {
                 + " Android does not let an app choose the top folder of a card in the phone's slot.\n"
                 + "On Android 11 and later, for the slot: tap " + q(SAVE) + " in step 1. Copy that file to the card's"
                 + " top folder with the Files app. Then tap " + q(USE_FILE) + " and choose the copy on the card to have"
-                + " it checked. Then skip to step 4."));
-        col.addView(button(CHOOSE, v -> pickCard()));
+                + " it checked. Only when step 1 then says \"OK to put on the card\", compared with this camera's"
+                + " backup, go on with step 4."));
+        chooseButton = button(CHOOSE, v -> pickCard());
+        col.addView(chooseButton);
         cardStatus = body("");
         col.addView(cardStatus);
 
@@ -320,6 +393,10 @@ public class MainActivity extends Activity {
         if (savedBackup != null) {
             loadBackup(Uri.parse(savedBackup));     // the screen was recreated (dark mode, font size): read it again
         }
+        // A write or removal another screen started may still run, or have ended with no screen open to show it.
+        if (last != null && !last.shown) {
+            watching = last;
+        }
         updateButtons();
         // A file the app was opened with is handled once: not again by a recreated screen (state != null), and not
         // when Recents starts the app again with the intent it was first opened with.
@@ -347,8 +424,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        screen = this;
+        catchUp();
         // The card may have been inserted, removed or changed while the app was in the background.
-        if (tree != null && !busy && !inspecting && dialog == null) {
+        if (tree != null && !busy() && !inspecting && dialog == null) {
             inspectCard();
         }
     }
@@ -356,12 +435,87 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         dismissDialog();
+        if (screen == this) {
+            screen = null;
+        }
         super.onDestroy();
     }
 
     /** True once this screen is closing; work that finishes later must not touch its views or open dialogs. */
     private boolean gone() {
         return isFinishing() || isDestroyed();
+    }
+
+    /** A write or a removal is running, started by this screen or by an earlier one. */
+    private static boolean working() {
+        return last != null && last.outcome == null;
+    }
+
+    /** A write, a removal or a comparison with the card is running. */
+    private boolean busy() {
+        return comparing || working();
+    }
+
+    /** Starts a write or removal as the process's operation; this screen shows its progress. */
+    private Operation start(boolean write, int files) {
+        Operation op = new Operation(write, files, write ? backupSha256 : null, write ? backupName : null);
+        last = op;
+        watching = op;
+        return op;
+    }
+
+    /**
+     * Runs on the worker when a write or removal ends, whatever happened to the screen that started it: the outcome
+     * goes to the screen open now, or waits for the next one.
+     */
+    private static void finish(Operation op, String outcome, boolean succeeded) {
+        MAIN.post(() -> {
+            op.outcome = outcome;
+            op.succeeded = succeeded;
+            MainActivity s = screen;
+            if (s != null && !s.gone()) {
+                s.watching = op;
+                s.catchUp();
+            }
+        });
+    }
+
+    /**
+     * Shows the write or removal this screen is watching: while it runs, that it runs, with Eject and the card buttons
+     * off; once it has ended, how, under its button, then the card is looked at again and the eject screen offered.
+     */
+    private void catchUp() {
+        Operation op = watching;
+        if (op == null) {
+            return;
+        }
+        TextView status = op.write ? writeStatus : cleanStatus;
+        if (op.outcome == null) {
+            setStatus(status, op.write ? WRITING : REMOVING);
+            updateButtons();
+            return;
+        }
+        watching = null;
+        boolean first = !op.shown;
+        op.shown = true;
+        setStatus(status, op.outcome);
+        if (op.write && op.succeeded) {
+            writtenWith = op.backupSha256;
+            writtenName = op.backupName;
+        }
+        inspectCard();
+        if (op.succeeded && first) {
+            if (op.write) {
+                done("The update file is on the card", "After ejecting, unplug the cable, or take the card out of"
+                        + " the reader, and go on with step 4.");
+            } else {
+                done(op.files == 1 ? "Update file removed" : "Update files removed", "If you have just"
+                        + " flashed: after ejecting, unplug the cable. Then switch the camera off and on again, and"
+                        + " check the boot screen, the live view and a test photo.\n"
+                        + "If you removed an old update file before writing: tap \"Later\" and go on with step 3.");
+            }
+        }
+        updateButtons();
     }
 
     private TextView warning(String s) {
@@ -457,18 +611,26 @@ public class MainActivity extends Activity {
     }
 
     private void updateButtons() {
-        boolean idle = !busy && dialog == null;
-        // The gate: a file that passed, compared with this camera's backup. A flash from a copy saved to the phone is a
-        // flash too, so the copy is gated the same way.
-        boolean fileOk = fileData != null && fileCheck != null && fileCheck.ok && backup != null && fileCheck.compared;
+        boolean idle = !busy() && dialog == null;
+        // The gate (WriteGate): a file that passed, checked against the backup on record now, with no backup being read
+        // and no check still running. A flash from a copy saved to the phone is a flash too, so the copy is gated the
+        // same way.
+        boolean fileOk = gate(fileCheck, fileData) == null;
         boolean cardOk = card != null && card.state.writable();
         writeButton.setEnabled(idle && fileOk && cardOk);
         cleanButton.setEnabled(idle && card != null && card.state.listed && !card.state.updateFiles.isEmpty());
         downloadButton.setEnabled(idle && !downloading);
         backupButton.setEnabled(idle && !loadingBackup);
         saveButton.setEnabled(idle && fileOk);
+        // Another drive picked during a write would show the write's result under the wrong drive.
+        chooseButton.setEnabled(!busy());
         // Ejecting while a write or a removal runs would cut it short.
-        ejectButton.setEnabled(!busy);
+        ejectButton.setEnabled(!busy());
+    }
+
+    /** WriteGate's answer for this file and check, with the backup on record now: null when it may go to the card. */
+    private String gate(UpdateCheck.Result check, byte[] data) {
+        return WriteGate.refusal(check, data, backupSha256, loadingBackup, checking);
     }
 
     private void dismissDialog() {
@@ -477,6 +639,14 @@ public class MainActivity extends Activity {
             dialog = null;
             d.dismiss();
         }
+    }
+
+    /** A write confirmation names the backup and the check it was opened with; once either changes, it goes. */
+    private void dismissWriteDialog() {
+        if (writeDialog != null && dialog == writeDialog) {
+            dismissDialog();
+        }
+        writeDialog = null;
     }
 
     // --- wording ------------------------------------------------------------------------------------------------
@@ -584,7 +754,7 @@ public class MainActivity extends Activity {
     // --- the backup of this camera ------------------------------------------------------------------------------
 
     private void pickBackup() {
-        if (busy || dialog != null || loadingBackup) {
+        if (busy() || dialog != null || loadingBackup) {
             return;
         }
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -606,62 +776,128 @@ public class MainActivity extends Activity {
         WORKER.execute(() -> {
             String name = displayName(uri);
             byte[] data = null;
+            String sha = null;
             String text;
             try {
                 data = readAll(getContentResolver().openInputStream(uri));
+                sha = UpdateCheck.sha256Hex(data, 0, data.length);
                 String problem = UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S);
                 if (problem != null) {
+                    boolean isPublic = false;
+                    for (String s : Candidates.PUBLIC_DUMP_SHA256S) {
+                        isPublic |= s.equals(sha);
+                    }
                     data = null;
-                    text = "Not taken as a backup: " + sentence(problem) + " The app needs the 2 MB file the toolkit's"
-                            + " backup command read from this camera's flash chip. Tap " + q(BACKUP) + " to choose it.\n"
+                    sha = null;
+                    text = "Not taken as a backup: " + sentence(problem) + (isPublic
+                            ? " If it is a read of this camera, keep it: it is the way back to what the camera runs now."
+                            + " It cannot show what fits the camera, so the app has nothing to compare an update file"
+                            + " with, and does not write to the card. A camera that can no longer take pictures since a"
+                            + " flash needs the donor route, on a computer (docs/02-RECOVERY.md, section D)."
+                            : " The app needs the 2 MB file the toolkit's backup command read from this camera's flash"
+                            + " chip. Tap " + q(BACKUP) + " to choose it.") + "\n"
                             + "File: " + name + ".";
                 } else {
+                    StringBuilder notes = new StringBuilder();
+                    for (String note : UpdateCheck.backupNotes(data, UpdateCheck.PUBLIC_BUILD)) {
+                        notes.append('\n').append(note);
+                    }
                     text = "Backup on record: " + name + ", " + UpdateCheck.bytes(data.length) + ". The app compares the"
                             + " update file with it in step 1, and writes to the card only while this backup is here."
                             + " Keep the file itself somewhere safe: it is the only way back to what the camera runs now."
-                            + detail("SHA-256 " + UpdateCheck.sha256Hex(data, 0, data.length) + ".");
+                            + notes + detail("SHA-256 " + sha + ".");
                 }
             } catch (IOException | RuntimeException e) {
                 data = null;
+                sha = null;
                 text = "The backup could not be read: " + sentence(cause(e, "the file could not be opened. It may have"
                         + " been moved, or the app that holds it did not hand it over")) + " Tap " + q(BACKUP)
                         + " to choose it again." + detail(detailOf(e));
             }
             final byte[] d = data;
+            final String h = sha;
             final String t = text;
             final String n = name;
             ui.post(() -> {
                 if (gone()) {
                     return;
                 }
+                String before = backupSha256;
                 loadingBackup = false;
                 backup = d;
+                backupSha256 = h;
                 backupName = d == null ? null : n;
                 backupUri = d == null ? null : uri;
                 setStatus(backupStatus, t);
+                if (!Objects.equals(before, h)) {
+                    dismissWriteDialog();
+                }
+                outdated(h);
                 recheckFile();
                 updateButtons();
             });
         });
     }
 
-    /** The file in step 1 is checked again whenever the backup changes, so its sensor and software lines compare with it. */
+    /**
+     * Once the backup on record is no longer the one the file on the card, or the copy saved to the phone, was checked
+     * against, their "Done" and "Saved" no longer hold: they are replaced with what to do about that file. A screen
+     * recreated meanwhile reads the same backup again, and nothing changes.
+     */
+    private void outdated(String now) {
+        String written = writeStatus.getText().toString();
+        if (writtenWith != null && !writtenWith.equals(now)
+                && (written.startsWith(WRITTEN) || written.startsWith(NOTHING_TO_WRITE))) {
+            setStatus(writeStatus, "The update file on the card was checked against the backup chosen before, "
+                    + writtenName + ", and step 0 has changed since. Unless step 1 says \"OK to put on the card\" again,"
+                    + " remove the file from the card (step 5) before the card goes back into the camera.");
+            writtenWith = null;
+        }
+        String saved = saveStatus.getText().toString();
+        if (savedWith != null && !savedWith.equals(now) && saved.startsWith(SAVED)) {
+            setStatus(saveStatus, "The copy saved to the phone was checked against the backup chosen before, "
+                    + savedName + ", and step 0 has changed since. Do not put it on the card unless step 1 says \"OK to"
+                    + " put on the card\" again.");
+            savedWith = null;
+        }
+    }
+
+    /**
+     * Checks the file in step 1 again, against the backup on record now, whenever its check was made against another
+     * one (or none). Until the new check is in, nothing is written or saved (WriteGate), and step 1 says so.
+     */
     private void recheckFile() {
         final byte[] data = fileData;
         final String name = fileName;
         if (data == null || name == null) {
+            checking = false;
             return;
         }
+        if (!checking && fileCheck != null && Objects.equals(fileCheck.referenceSha256, backupSha256)) {
+            return;   // already checked against this backup
+        }
+        dismissWriteDialog();
         final int request = fileRequest;
+        final int check = ++checkRequest;
         final byte[] ref = backup;
         final String origin = fileOrigin;
         final boolean chosen = fileChosen;
+        checking = true;
+        fileCheck = null;
+        showFile("Checking the update file again, against the backup now on record…", null);
+        updateButtons();
         WORKER.execute(() -> {
             final UpdateCheck.Result result = UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
             ui.post(() -> {
-                if (gone() || request != fileRequest || fileData != data) {
+                if (gone() || request != fileRequest || check != checkRequest || fileData != data) {
                     return;
                 }
+                checking = false;
+                if (!Objects.equals(result.referenceSha256, backupSha256)) {
+                    recheckFile();   // the backup changed again meanwhile
+                    return;
+                }
+                dismissWriteDialog();
                 fileCheck = result;
                 showChecked(result, origin, chosen);
                 updateButtons();
@@ -669,12 +905,30 @@ public class MainActivity extends Activity {
         });
     }
 
+    /**
+     * Applies a check made on the worker to step 1, unless it was made against another backup than the one on record
+     * now: then the file is kept and checked again, and the old check is never shown or used.
+     */
+    private void applyCheck(byte[] data, UpdateCheck.Result result, String name, String origin, boolean chosen) {
+        fileData = data;
+        fileName = name;
+        fileOrigin = origin;
+        fileChosen = chosen;
+        if (!Objects.equals(result.referenceSha256, backupSha256)) {
+            fileCheck = null;
+            recheckFile();
+            return;
+        }
+        fileCheck = result;
+        showChecked(result, origin, chosen);
+    }
+
     /** Step 1's readout for a file that was checked: the verdict, where the file came from, and what to do next. */
     private void showChecked(UpdateCheck.Result result, String origin, boolean chosen) {
         String next;
         if (!result.ok) {
             next = "";
-        } else if (backup == null) {
+        } else if (!result.compared) {
             next = "Next: choose this camera's backup in step 0, so the app can compare the file with it. It does not"
                     + " write to the card without that.";
         } else {
@@ -682,7 +936,7 @@ public class MainActivity extends Activity {
         }
         showFile(result.verdict() + "\n" + origin + "\n" + next,
                 "Detail: " + UpdateCheck.bytes(result.size) + ", SHA-256 " + result.sha256 + ".\n\nThe app's checks"
-                        + (backup == null ? " (no backup to compare with yet)" : ", compared with " + backupName) + ":\n\n"
+                        + (result.compared ? ", compared with " + backupName : " (not compared with a backup)") + ":\n\n"
                         + result.report());
     }
 
@@ -706,8 +960,7 @@ public class MainActivity extends Activity {
 
     /** Save the checked update file where the owner chooses, for copying to a card the app cannot reach. */
     private void saveCopy() {
-        if (busy || dialog != null || UpdateCheck.confirms(fileCheck, fileData) != null || backup == null
-                || !fileCheck.compared) {
+        if (busy() || dialog != null || gate(fileCheck, fileData) != null) {
             return;
         }
         saveData = fileData;
@@ -729,10 +982,34 @@ public class MainActivity extends Activity {
         final UpdateCheck.Result check = saveCheck;
         saveData = null;
         saveCheck = null;
-        if (data == null || UpdateCheck.confirms(check, data) != null) {
+        // Checked again against the backup on record now: it may have changed while the save screen was open. A check
+        // of another file in step 1 does not concern these bytes; a changed backup shows in its SHA-256.
+        final String refusal = data == null ? "the app was restarted while the save screen was open (a dark-mode, font"
+                + " or language change can do that), so it no longer had the file to save"
+                : WriteGate.refusal(check, data, backupSha256, loadingBackup, false);
+        if (refusal != null) {
+            // The save screen has already made an empty file under the update file's name: it must not stay behind.
+            setStatus(saveStatus, "Not saving the copy; removing the empty file the save screen made…");
+            WORKER.execute(() -> {
+                String name = displayName(uri);
+                String failed = delete(uri);
+                final String tt = "No copy was saved: " + sentence(refusal) + (failed == null
+                        ? " The empty file the save screen made was deleted."
+                        : " The save screen made an empty file, " + name + ", and the app could not delete it: delete"
+                        + " it yourself, so it never goes on a card.") + " Then tap " + q(SAVE) + " again."
+                        + detail(failed);
+                ui.post(() -> {
+                    if (gone()) {
+                        return;
+                    }
+                    setStatus(saveStatus, tt);
+                });
+            });
             return;
         }
         setStatus(saveStatus, "Saving the copy…");
+        final String with = check.referenceSha256;
+        final String withName = backupName;
         WORKER.execute(() -> {
             String text;
             try {
@@ -771,19 +1048,25 @@ public class MainActivity extends Activity {
                     return;
                 }
                 setStatus(saveStatus, tt);
+                if (tt.startsWith(SAVED)) {
+                    savedWith = with;
+                    savedName = withName;
+                    outdated(backupSha256);   // the backup may have changed while the copy was written
+                }
             });
         });
     }
 
-    /** Download the public stock dump from its pinned upstream address, then ask which candidate to make. */
+    /** Download the public stock dump from its pinned upstream address, then make the stock restore file from it. */
     private void downloadDump() {
         dismissDialog();
         final int request = ++fileRequest;
         fileData = null;
         fileCheck = null;
         fileName = null;
+        checking = false;          // a check of the earlier file still running is dropped (fileRequest)
         saveStatus.setText("");
-        if (!busy) {
+        if (!busy()) {
             writeStatus.setText("");
         }
         if (stockDump != null) {               // already downloaded and checked: make the file again without a new download
@@ -899,17 +1182,16 @@ public class MainActivity extends Activity {
                 if (gone() || request != fileRequest) {
                     return;
                 }
-                fileData = dd;
-                fileCheck = r;
                 if (r == null) {
+                    fileData = null;
+                    fileCheck = null;
                     fileName = null;
                     showFile(pp, xx);
                 } else {
-                    fileName = kind.fileName;
-                    fileOrigin = from + " Made " + kind.fileName + " from it: it matches the published file exactly. "
-                            + kind.label;
-                    fileChosen = false;
-                    showChecked(r, fileOrigin, false);
+                    // Checked against the backup on record when the download started; applyCheck checks it again if
+                    // another backup has come in since.
+                    applyCheck(dd, r, kind.fileName, from + " Made " + kind.fileName + " from it: it matches the"
+                            + " published file exactly. " + kind.label, false);
                 }
                 updateButtons();
             });
@@ -946,8 +1228,9 @@ public class MainActivity extends Activity {
         fileData = null;
         fileCheck = null;
         fileName = null;
+        checking = false;          // a check of the earlier file still running is dropped (fileRequest)
         saveStatus.setText("");
-        if (!busy) {
+        if (!busy()) {
             writeStatus.setText("");
         }
         updateButtons();
@@ -967,34 +1250,42 @@ public class MainActivity extends Activity {
                 if (stock != null) {
                     summary = "";
                 } else if (data.length == Candidates.DUMP_SIZE) {
-                    String reason = "";
-                    try {
-                        Candidates.stockDump(data);
-                    } catch (IllegalArgumentException e) {
-                        reason = e.getMessage();
+                    if (UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S) == null) {
+                        // Most likely the owner's own backup, picked in the wrong step.
+                        summary = "\"" + name + "\" looks like a dump of a camera's flash chip, not an update file, and a"
+                                + " dump never goes on a card as it is. If it is this camera's backup, choose it with "
+                                + q(BACKUP) + " in step 0: the app then compares the update file with it. An update file"
+                                + " is made from a dump with charmera pack on a computer.";
+                    } else {
+                        String reason = "";
+                        try {
+                            Candidates.stockDump(data);
+                        } catch (IllegalArgumentException e) {
+                            reason = e.getMessage();
+                        }
+                        String[] parts = split(reason);
+                        summary = "\"" + name + "\" is a 2 MB dump, but "
+                                + sentence(parts[0].isEmpty() ? "it is not the public stock dump" : parts[0])
+                                + "\nA dump never goes on a card as it is.";
+                        technical = detailBlock(parts[1]);
                     }
-                    String[] parts = split(reason);
-                    summary = "\"" + name + "\" is a 2 MB dump, but "
-                            + sentence(parts[0].isEmpty() ? "it is not the public stock dump" : parts[0])
-                            + "\nA dump never goes on a card as it is. To restore the camera, tap " + q(DOWNLOAD)
-                            + " instead.";
-                    technical = detailBlock(parts[1]);
                 } else {
                     result = UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
                     boolean renamed = result.cardName != null && !result.cardName.equals(name);
                     boolean restore = Candidates.Kind.RESTORE.sha256.equals(result.sha256);
                     Candidates.Kind withdrawn = withdrawnKind(result.sha256);
                     if (withdrawn != null) {
-                        // Its checks pass, but it is a candidate the app no longer offers.
-                        summary = "Do not put this file on the card. It is "
+                        // A candidate the app no longer offers, whatever its checks say.
+                        summary = "The app refuses this file: do not put it on the card. It is "
                                 + withdrawn.label.substring(0, 1).toLowerCase(java.util.Locale.ROOT)
-                                + withdrawn.label.substring(1) + " The app offers only the stock restore file. Tap "
-                                + q(DOWNLOAD) + " instead.\n"
+                                + withdrawn.label.substring(1) + " The only file the app makes itself is the stock"
+                                + " restore file, which is only for a camera whose backup shows the public build.\n"
                                 + "File: " + name + ".\n"
                                 + "If this file is on the card, remove it before the card goes back into the camera:"
                                 + " see step 5.";
-                    } else if (restore && !result.ok) {
-                        // The bytes are the stock restore file, so only its name can have failed.
+                    } else if (restore && UpdateCheck.nameIsTheOnlyProblem(result)) {
+                        // The bytes are the stock restore file and only its name failed; anything else, a sensor
+                        // table that differs from the backup's above all, is shown in full by showChecked below.
                         summary = "Not OK to put on the card: the camera would not use it under this name. It is exactly"
                                 + " the stock restore file, under another name. Tap " + q(DOWNLOAD) + " to make it"
                                 + " with its right name.\n"
@@ -1042,14 +1333,13 @@ public class MainActivity extends Activity {
                     buildRestore(s, request, from);
                     return;
                 }
-                fileData = d;
-                fileCheck = r;
                 if (r != null && o != null) {
-                    fileName = n;
-                    fileOrigin = o;
-                    fileChosen = c;
-                    showChecked(r, o, c);
+                    // Checked against the backup on record when the file was picked; applyCheck checks it again if
+                    // another backup has come in since.
+                    applyCheck(d, r, n, o, c);
                 } else {
+                    fileData = null;
+                    fileCheck = null;
                     showFile(t, x);
                 }
                 updateButtons();
@@ -1090,6 +1380,9 @@ public class MainActivity extends Activity {
     // --- the card -----------------------------------------------------------------------------------------------
 
     private void pickCard() {
+        if (busy()) {
+            return;     // a write or removal reports on the drive it runs on; another one picked now would take its place
+        }
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
@@ -1131,7 +1424,7 @@ public class MainActivity extends Activity {
             writeCopy(uri);
         } else if (request == PICK_CARD) {
             // Results about the previous drive, or an earlier look at this one, no longer apply.
-            if (!busy) {
+            if (!busy()) {
                 writeStatus.setText("");
                 cleanStatus.setText("");
             }
@@ -1268,16 +1561,16 @@ public class MainActivity extends Activity {
     // --- writing ------------------------------------------------------------------------------------------------
 
     private void confirmWrite() {
-        // Everything the dialog shows is captured here, and Write uses exactly that, whatever is loaded later.
+        // Everything the dialog shows is captured here, and Write uses exactly that, whatever is loaded later. The
+        // backup it names is the one the check was made against: the gate allows no other.
         final byte[] data = fileData;
         final UpdateCheck.Result check = fileCheck;
         final Card c = card;
-        if (busy || dialog != null || UpdateCheck.confirms(check, data) != null || c == null || !c.state.writable()
-                || backup == null || !check.compared) {
+        if (busy() || dialog != null || gate(check, data) != null || c == null || !c.state.writable()) {
             return;
         }
         final String name = check.cardName;
-        final String backupLine = backupName;
+        final String backupLine = backupName + ", SHA-256 " + backupSha256.substring(0, 16) + "…";
         CardState.Item same = c.state.sameFile(check);
         if (same != null) {
             compareWithCard(c, same, check);
@@ -1295,6 +1588,8 @@ public class MainActivity extends Activity {
                         + "Update file: " + name + "\n"
                         + "Compared with this camera's backup: " + backupLine + "\n"
                         + "Card: " + (c.state.label == null ? "the chosen card" : c.state.label) + "\n\n"
+                        + "The app cannot tell which camera a backup was read from: write only if that backup is a"
+                        + " read of the camera this card goes into.\n\n"
                         + "Detail: " + UpdateCheck.bytes(check.size) + ", SHA-256 " + check.sha256 + ".")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Write", (di, w) -> write(c, data, check))
@@ -1303,17 +1598,21 @@ public class MainActivity extends Activity {
             if (dialog == di) {
                 dialog = null;
             }
+            if (writeDialog == di) {
+                writeDialog = null;
+            }
             if (!gone()) {
                 updateButtons();
             }
         });
         dialog = d;
+        writeDialog = d;
         d.show();
         updateButtons();
     }
 
     private void compareWithCard(Card c, CardState.Item same, UpdateCheck.Result check) {
-        busy = true;
+        comparing = true;
         setStatus(writeStatus, "Checking the update file already on the card…");
         updateButtons();
         WORKER.execute(() -> {
@@ -1330,9 +1629,13 @@ public class MainActivity extends Activity {
                 if (gone()) {
                     return;
                 }
-                busy = false;
+                comparing = false;
+                if (equal) {
+                    writtenWith = check.referenceSha256;
+                    writtenName = backupName;
+                }
                 setStatus(writeStatus, equal
-                        ? "Nothing to write: the card already holds this exact update file, " + check.cardName + ".\n"
+                        ? NOTHING_TO_WRITE + " the card already holds this exact update file, " + check.cardName + ".\n"
                         + "Eject the drive and go on with step 4. If you have already flashed with it, go on with step"
                         + " 5 instead."
                         : read
@@ -1347,33 +1650,35 @@ public class MainActivity extends Activity {
     }
 
     private void write(Card c, byte[] data, UpdateCheck.Result check) {
-        busy = true;
-        setStatus(writeStatus, "Writing the update file to the card…");
+        // Tapped in the confirmation: the gate is asked again, with the backup on record at this moment.
+        String refusal = busy() ? "a write or a removal is already running" : gate(check, data);
+        if (refusal != null) {
+            setStatus(writeStatus, "Nothing was written to the card: " + sentence(refusal));
+            updateButtons();
+            return;
+        }
+        final Operation op = start(true, 1);
+        setStatus(writeStatus, WRITING);
         cleanStatus.setText("");          // a result about an earlier removal no longer applies
         updateButtons();
         WORKER.execute(() -> {
-            String outcome = writeAndReport(c.tree, data, check);
-            ui.post(() -> {
-                if (gone()) {
-                    return;
-                }
-                busy = false;
-                setStatus(writeStatus, outcome);
-                inspectCard();
-                if (outcome.startsWith(WRITTEN)) {
-                    done("The update file is on the card", "After ejecting, unplug the cable, or take the card out of"
-                            + " the reader, and go on with step 4.");
-                }
-            });
+            String outcome = null;
+            try {
+                outcome = writeAndReport(c.tree, data, check);
+            } finally {
+                String o = outcome != null ? outcome : "Writing stopped with an unexpected error. Step 2 shows what the"
+                        + " card holds now: do not switch the camera on with this card in it while it lists an update"
+                        + " file.";
+                finish(op, o, o.startsWith(WRITTEN));
+            }
         });
     }
 
     /** Runs on the worker. Checks again, lists the card again, writes, reads back; says what is on the card after a failure. */
     private String writeAndReport(Uri t, byte[] data, UpdateCheck.Result check) {
-        String refusal = UpdateCheck.confirms(check, data);
-        if (refusal == null && !check.compared) {
-            refusal = "the update file was not compared with this camera's backup; choose the backup in step 0 first";
-        }
+        // Against the backup on record now, which may have changed since Write was tapped. A check of another file in
+        // step 1 does not concern these bytes; a changed backup shows in its SHA-256.
+        String refusal = WriteGate.refusal(check, data, backupSha256, loadingBackup, false);
         if (refusal != null) {
             return "Nothing was written to the card: " + sentence(refusal);
         }
@@ -1494,7 +1799,7 @@ public class MainActivity extends Activity {
 
     private void confirmClean() {
         final Card c = card;
-        if (busy || dialog != null || c == null || !c.state.listed || c.state.updateFiles.isEmpty()) {
+        if (busy() || dialog != null || c == null || !c.state.listed || c.state.updateFiles.isEmpty()) {
             return;
         }
         // Exactly the files the dialog names are removed.
@@ -1524,47 +1829,42 @@ public class MainActivity extends Activity {
     }
 
     private void clean(Uri t, List<CardState.Item> files) {
-        busy = true;
-        setStatus(cleanStatus, "Removing from the card…");
+        if (busy()) {
+            return;
+        }
+        final Operation op = start(false, files.size());
+        setStatus(cleanStatus, REMOVING);
         writeStatus.setText("");          // a result about the write before the flash no longer applies
         updateButtons();
         WORKER.execute(() -> {
-            StringBuilder sb = new StringBuilder();
-            StringBuilder reasons = new StringBuilder();
+            String outcome = null;
             boolean all = true;
-            for (CardState.Item f : files) {
-                String failed;
-                try {
-                    failed = delete(DocumentsContract.buildDocumentUriUsingTree(t, f.documentId));
-                } catch (RuntimeException e) {
-                    failed = why(e);
+            try {
+                StringBuilder sb = new StringBuilder();
+                StringBuilder reasons = new StringBuilder();
+                for (CardState.Item f : files) {
+                    String failed;
+                    try {
+                        failed = delete(DocumentsContract.buildDocumentUriUsingTree(t, f.documentId));
+                    } catch (RuntimeException e) {
+                        failed = why(e);
+                    }
+                    if (failed == null) {
+                        sb.append("Removed ").append(f.name).append(".\n");
+                    } else {
+                        all = false;
+                        sb.append("Could not remove ").append(f.name).append(".\n");
+                        reasons.append(reasons.length() == 0 ? "" : "; ").append(f.name).append(": ").append(failed);
+                    }
                 }
-                if (failed == null) {
-                    sb.append("Removed ").append(f.name).append(".\n");
-                } else {
-                    all = false;
-                    sb.append("Could not remove ").append(f.name).append(".\n");
-                    reasons.append(reasons.length() == 0 ? "" : "; ").append(f.name).append(": ").append(failed);
-                }
+                String headline = !all ? "Not everything was removed."
+                        : files.size() == 1 ? "Done: the update file is removed." : "Done: the update files are removed.";
+                outcome = headline + "\n" + sb + "\n" + readCard(t).state.afterwards(true) + detail(reasons.toString());
+            } finally {
+                finish(op, outcome != null ? outcome : "Removing stopped with an unexpected error. Step 2 shows what"
+                        + " the card holds now: do not switch the camera on with this card in it while it lists an"
+                        + " update file.", outcome != null && all);
             }
-            final boolean allRemoved = all;
-            String headline = !allRemoved ? "Not everything was removed."
-                    : files.size() == 1 ? "Done: the update file is removed." : "Done: the update files are removed.";
-            final String s = headline + "\n" + sb + "\n" + readCard(t).state.afterwards(true) + detail(reasons.toString());
-            ui.post(() -> {
-                if (gone()) {
-                    return;
-                }
-                busy = false;
-                setStatus(cleanStatus, s);
-                inspectCard();
-                if (allRemoved) {
-                    done(files.size() == 1 ? "Update file removed" : "Update files removed", "If you have just"
-                            + " flashed: after ejecting, unplug the cable. Then switch the camera off and on again, and"
-                            + " check the boot screen, the live view and a test photo.\n"
-                            + "If you removed an old update file before writing: tap \"Later\" and go on with step 3.");
-                }
-            });
         });
     }
 }

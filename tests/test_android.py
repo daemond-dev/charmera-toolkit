@@ -16,8 +16,15 @@ REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "android" / "src" / "io" / "github" / "daemonddev" / "charmera"
 SRC = PKG / "UpdateCheck.java"
 ACTIVITY = PKG / "MainActivity.java"
+GATE = PKG / "WriteGate.java"
 WORKFLOW = REPO / ".github" / "workflows" / "android.yml"
 ANDROID_README = REPO / "android" / "README.md"
+BUILD = REPO / "android" / "build.sh"
+
+
+def _joined(java: str) -> str:
+    """The source with each run of concatenated string literals ("a" + "b") read as one, so wording can be found."""
+    return re.sub(r'"\s*\+\s*"', "", java)
 
 
 def _code_area_constant(java: str) -> str:
@@ -66,7 +73,13 @@ def test_app_names_the_film_mods_build_as_image_py_does():
     if restore.is_file():
         data = restore.read_bytes()
         assert f'"{hashlib.sha256(data[:0x120000]).hexdigest()}"' in block
+        assert f'"{hashlib.sha256(data[0x200:0x240]).hexdigest()}"' in block      # the ARM vector table
         assert hashlib.sha256(data).hexdigest() == b.official_sha256 and hashlib.sha1(data).hexdigest() == b.official_sha1
+
+
+def _build_block(java: str, name: str) -> str:
+    start = java.index(f"{name} = new Build(")
+    return java[start: java.index(");", start)]
 
 
 def test_app_code_area_hash_is_the_stock_dumps(stock_image):
@@ -76,6 +89,69 @@ def test_app_code_area_hash_is_the_stock_dumps(stock_image):
     assert image.PUBLIC_BUILD.official_sha256 == hashlib.sha256(stock_image[:image.OFFICIAL_UPDATE_SIZE]).hexdigest()
     assert image.PUBLIC_BUILD.official_sha1 == hashlib.sha1(stock_image[:image.OFFICIAL_UPDATE_SIZE]).hexdigest()
     assert image.PUBLIC_BUILD.official_byte_sum == checksum.byte_sum(stock_image[:image.OFFICIAL_UPDATE_SIZE])
+    # The vector table the app compares a file laid out like the public build with, when no backup is given.
+    assert f'"{hashlib.sha256(stock_image[0x200:0x240]).hexdigest()}"' in _build_block(java, "PUBLIC_BUILD")
+    assert "VECTORS = 0x200" in java and "VECTORS_END = 0x240" in java and image.HEADER_SIZE == 0x200
+
+
+def test_app_finds_the_sensor_program_by_the_same_rule_as_image_py(stock_image):
+    """S6: the code literal is looked for at 4-byte-aligned offsets only, every referenced init table is kept so that
+    several programs fail, and a changed copy of a known build needs that build's sensor table."""
+    java = SRC.read_text(encoding="utf-8")
+    find = _bodies(java, "public static Marks findMarks(byte[] data)")[0]
+    assert "alignedIndexOf(data, literal, VA_OFFSET, end)" in find and "indexOf(data, literal" not in find
+    aligned = _bodies(java, "static int alignedIndexOf(")[0]
+    assert "& ~3" in aligned and "i += 4" in aligned
+    assert "referenced.add(" in find and "pickedReferenced" not in find
+    sensor = java[java.index("if (marks.severalPrograms())"): java.index("// The software: against the backup")]
+    assert "several sensor programs" in sensor
+    assert "ref.referencedFrom >= 0 && marks.referencedFrom < 0" in sensor
+    assert "marks.sensorSha256.equals(layout.sensorSha256)" in java and "laid out like" in java
+    # the literal of the real table lies at an aligned offset, so the rule keeps finding it
+    tables = image.find_sensor_tables(stock_image)
+    assert tables.referenced_from == 0x7B91C and tables.referenced_from % 4 == 0
+
+
+def test_app_says_what_a_backup_of_a_known_build_proves():
+    """S3: a backup whose firmware is a known, public build makes the same table a warning, not a pass; the sensor
+    line speaks of the firmware in the backup, never of the camera's own; a backup made of the exact public dump
+    stays refused with the reason that allows it is this camera's read."""
+    java = _joined(SRC.read_text(encoding="utf-8"))
+    sensor = java[java.index("if (marks.severalPrograms())"): java.index("// The software: against the backup")]
+    assert "Build refBuild = knownBuildOf(reference, known);" in sensor
+    warn = sensor[sensor.index("} else if (refBuild != null) {"):]
+    assert warn.index("Level.WARN") < warn.index("Level.PASS")
+    assert "only if the backup was read before the camera was ever flashed" in warn
+    assert "your camera's own firmware" not in java and "the way its own firmware does" not in java
+    problem = _bodies(java, "public static String backupProblem(")[0]
+    assert "a read of a camera that was flashed with the public restore file and has changed no setting since" in problem
+    assert "resourceProblems(data, entries)" in problem and "charmera inspect" in problem
+    notes = _bodies(java, "public static List<String> backupNotes(")[0]
+    assert "knownBuildOf(data, knownBuilds(build))" in notes and "not blank" in notes
+
+
+def test_app_offers_the_stock_restore_file_only_for_the_public_build():
+    """The leftover 0.4 wording is gone: a failed check never sends the owner to the stock restore file as the way to
+    restore a camera, and no screen says that owners put it back on cameras that ran this build."""
+    for path in sorted(PKG.glob("*.java")):
+        text = _joined(path.read_text(encoding="utf-8"))
+        assert "To restore the camera, tap" not in text, path.name
+        assert "already ran this build" not in text, path.name
+        assert "left unable to take pictures by" not in text, path.name
+    java = _joined(SRC.read_text(encoding="utf-8"))
+    assert "The stock restore file is only for a camera whose backup shows the public build." in java
+    for path in (PKG / "Candidates.java", ACTIVITY):
+        assert "what their cameras ran before is not known" in _joined(path.read_text(encoding="utf-8")), path.name
+
+
+def test_app_uses_no_library_call_newer_than_its_minimum_android():
+    """minSdkVersion is 24 (Android 7.0); String.join and the other Java 8 library additions below came with API 26."""
+    manifest = (REPO / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
+    assert 'android:minSdkVersion="24"' in manifest
+    for path in sorted(PKG.glob("*.java")):
+        text = path.read_text(encoding="utf-8")
+        for call in ("String.join(", "List.of(", "Map.of(", "Set.of(", ".stream()", "java.time.", "Files.readAllBytes"):
+            assert call not in text, f"{path.name}: {call}"
 
 
 def _bodies(java: str, opener: str):
@@ -102,9 +178,34 @@ def test_app_work_that_finishes_late_never_touches_a_closed_screen():
     for body in posted:
         assert re.match(r"\{\s*if \(gone\(\)", body), body[:120]
     assert "return isFinishing() || isDestroyed();" in java
+    # A write or removal reports through MAIN to the screen open when it ends, and only to one that is not gone.
+    ended = _bodies(java, "MAIN.post(() ->")
+    assert len(ended) == 1 and "s != null && !s.gone()" in ended[0], ended
     # The worker lives as long as the process and is never shut down, so a late inspectCard cannot hit a dead executor.
     assert re.search(r"private static final ExecutorService WORKER\b", java)
     assert ".shutdown" not in java
+
+
+def test_app_keeps_a_running_write_or_removal_across_screens():
+    """app-7: the running operation is the process's, not the screen's. A recreated or second screen keeps Eject and
+    the card buttons off while it runs and shows how it ended; the outcome is handed over in a finally."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    assert "private static Operation last;" in java and "private static MainActivity screen;" in java
+    assert "return comparing || working();" in java and "return last != null && last.outcome == null;" in java
+    create = _bodies(java, "protected void onCreate(")[0]
+    assert "if (last != null && !last.shown)" in create and "watching = last;" in create
+    resume = _bodies(java, "protected void onResume()")[0]
+    assert resume.index("screen = this;") < resume.index("catchUp();") < resume.index("inspectCard()")
+    assert "if (screen == this)" in _bodies(java, "protected void onDestroy()")[0]
+    for opener in ("private void write(", "private void clean("):
+        body = _bodies(java, opener)[0]
+        assert "start(" in body and "} finally {" in body and "finish(op, " in body.split("} finally {")[1], opener
+        assert "busy = " not in body and "ui.post(" not in body, opener
+    catch_up = _bodies(java, "private void catchUp()")[0]
+    assert "inspectCard();" in catch_up and catch_up.rstrip("}\n ").endswith("updateButtons();")
+    buttons = _bodies(java, "private void updateButtons()")[0]
+    assert "chooseButton.setEnabled(!busy())" in buttons
+    assert "if (busy())" in _bodies(java, "private void pickCard()")[0]
 
 
 def test_app_survives_unusual_picker_results():
@@ -135,7 +236,7 @@ def test_app_writes_exactly_what_the_dialog_showed_after_checking_and_listing_ag
     write = _bodies(java, "private void write(")[0]
     assert "fileData" not in write and "fileCheck" not in write
     report = _bodies(java, "private String writeAndReport(")[0]
-    first_check = report.index("UpdateCheck.confirms(check, data)")
+    first_check = report.index("WriteGate.refusal(check, data, backupSha256, loadingBackup, false)")
     relist = report.index("readCard(t)")
     assert first_check < relist < report.index("writeAndVerify(")
     assert "writeRefusal()" in report
@@ -211,17 +312,29 @@ def test_app_candidates_match_the_documented_ones():
 
 
 def test_app_writes_nothing_without_a_backup_of_the_camera():
-    """The hard stop: Write and Save a copy need a backup on record and a check compared with it; the write path
-    checks it again on the worker; the app's README says so."""
+    """The hard stop: Write and Save a copy need a backup on record and a check made against that one backup (WriteGate);
+    the confirmation, the tap on Write, the saved copy and the worker ask again; the app's README says so."""
     java = ACTIVITY.read_text(encoding="utf-8")
+    gate = GATE.read_text(encoding="utf-8")
+    assert "import android" not in gate
+    refusal = _bodies(gate, "static String refusal(")[0]
+    for clause in ("if (backupLoading)", "if (backupSha256 == null)", "if (checking)", "UpdateCheck.confirms(check, data)",
+                   "!backupSha256.equals(check.referenceSha256)"):
+        assert clause in refusal, clause
+    assert "WriteGate.refusal(check, data, backupSha256, loadingBackup, checking)" in _bodies(java, "private String gate(")[0]
     buttons = _bodies(java, "private void updateButtons()")[0]
-    assert "backup != null && fileCheck.compared" in buttons
+    assert "boolean fileOk = gate(fileCheck, fileData) == null;" in buttons
     assert "writeButton.setEnabled(idle && fileOk && cardOk)" in buttons and "saveButton.setEnabled(idle && fileOk)" in buttons
-    assert "ejectButton.setEnabled(!busy)" in buttons
-    for opener in ("private void confirmWrite()", "private void saveCopy()"):
-        assert "backup == null" in _bodies(java, opener)[0], opener
+    assert "ejectButton.setEnabled(!busy())" in buttons
+    assert "gate(check, data) != null" in _bodies(java, "private void confirmWrite()")[0]
+    assert "gate(fileCheck, fileData) != null" in _bodies(java, "private void saveCopy()")[0]
+    assert "gate(check, data)" in _bodies(java, "private void write(")[0]
+    worker = "WriteGate.refusal(check, data, backupSha256, loadingBackup, false)"
+    assert worker in _bodies(java, "private void writeCopy(")[0]
     report = _bodies(java, "private String writeAndReport(")[0]
-    assert "!check.compared" in report and report.index("!check.compared") < report.index("readCard(t)")
+    assert worker in report and report.index(worker) < report.index("readCard(t)")
+    assert "volatile String backupSha256" in java and "volatile boolean loadingBackup" in java
+    assert "volatile boolean checking" in java
     load = _bodies(java, "private void loadBackup(")[0]
     assert "UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S)" in load
     # a new write clears the old removal result, and the other way round; a new drive clears both
@@ -232,3 +345,65 @@ def test_app_writes_nothing_without_a_backup_of_the_camera():
     readme = ANDROID_README.read_text(encoding="utf-8")
     assert re.search(r"No backup of your own camera, no flash", readme)
     assert "Choose this camera's backup" in readme and "Choose this camera's backup" in java
+
+
+def test_app_never_uses_a_check_made_against_another_backup():
+    """app-1, app-2: a check that lands after the backup changed is never shown or used; the file is checked again,
+    nothing is written meanwhile, and a write confirmation, a "Done" and a "Saved" made with the old backup go."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    apply = _bodies(java, "private void applyCheck(")[0]
+    stale = apply.index("if (!Objects.equals(result.referenceSha256, backupSha256)) {")
+    assert stale < apply.index("recheckFile();") < apply.index("showChecked(result, origin, chosen);")
+    assert "fileCheck = null;" in apply[stale:apply.index("recheckFile();")]
+    for opener in ("private void loadFile(", "private void buildRestore("):
+        body = _bodies(java, opener)[0]
+        assert "applyCheck(" in body and "fileCheck = r;" not in body, opener
+    recheck = _bodies(java, "private void recheckFile()")[0]
+    assert "checking = true;" in recheck and "fileCheck = null;" in recheck and "dismissWriteDialog();" in recheck
+    posted = _bodies(recheck, "ui.post(() ->")[0]
+    assert "check != checkRequest" in posted and "checking = false;" in posted and "dismissWriteDialog();" in posted
+    load = _bodies(java, "private void loadBackup(")[0]
+    changed = load[load.index("if (!Objects.equals(before, h)) {"):]
+    assert changed.index("dismissWriteDialog();") < changed.index("outdated(h);") < changed.index("recheckFile();")
+    # "Done" and "Saved" go once the backup on record is not the one that file was checked against (by SHA-256, so a
+    # recreated screen that reads the same backup again changes nothing).
+    outdated = _bodies(java, "private void outdated(")[0]
+    assert "writtenWith != null && !writtenWith.equals(now)" in outdated and "startsWith(WRITTEN)" in outdated
+    assert "savedWith != null && !savedWith.equals(now)" in outdated and "startsWith(SAVED)" in outdated
+    assert "writtenWith = op.backupSha256;" in _bodies(java, "private void catchUp()")[0]
+    assert "savedWith = with;" in _bodies(java, "private void writeCopy(")[0]
+    for opener in ("private void loadFile(", "private void downloadDump()"):
+        assert "checking = false;" in _bodies(java, opener)[0], opener
+    show = _bodies(java, "private void showChecked(")[0]
+    assert "backup == null" not in show and show.count("result.compared") == 2
+
+
+def test_app_refuses_the_withdrawn_candidates_and_blames_the_name_only_for_a_name_problem():
+    """app-12: a withdrawn C, A or B is shown and never kept for writing, even if its own checks pass; the restore
+    file's "only its name failed" message needs every failing line to be about the name (UpdateCheck)."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    load = _bodies(java, "private void loadFile(")[0]
+    assert "Candidates.Kind withdrawn = withdrawnKind(result.sha256);" in load
+    assert load.index("if (withdrawn != null) {") < load.index("} else if (restore && UpdateCheck.nameIsTheOnlyProblem(result)) {")
+    assert re.search(r"result = null;[^\n]*\n\s*data = null;", load)
+    posted = _bodies(load, "ui.post(() ->")[0]
+    refused = posted[posted.index("} else {", posted.index("applyCheck(")):]
+    assert "fileData = null;" in refused and "fileCheck = null;" in refused
+    name_only = _bodies(SRC.read_text(encoding="utf-8"), "public static boolean nameIsTheOnlyProblem(")[0]
+    for name in ('"name"', '"product"', '"checksum"', '"stamp"'):
+        assert name in name_only
+    assert '"sensor-table"' not in name_only
+
+
+def test_build_runs_every_jvm_test_and_compiles_the_gate():
+    """build.sh compiles every plain-Java class the app has and runs every test in android/test before it builds."""
+    build = BUILD.read_text(encoding="utf-8")
+    step1 = build[build.index('echo "1/4'): build.index('echo "2/4')]
+    for path in sorted(PKG.glob("*.java")):
+        if path.name != "MainActivity.java":
+            assert f"src/io/github/daemonddev/charmera/{path.name}" in step1, path.name
+    for path in sorted((REPO / "android" / "test").glob("*.java")):
+        assert f"test/{path.name}" in step1, path.name
+        package = re.search(r"^package ([\w.]+);", path.read_text(encoding="utf-8"), re.M)
+        cls = (package.group(1) + "." if package else "") + path.stem
+        assert re.search(rf"^java -cp out/test {re.escape(cls)}$", step1, re.M), cls
