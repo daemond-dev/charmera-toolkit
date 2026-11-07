@@ -407,3 +407,16 @@ def test_build_runs_every_jvm_test_and_compiles_the_gate():
         package = re.search(r"^package ([\w.]+);", path.read_text(encoding="utf-8"), re.M)
         cls = (package.group(1) + "." if package else "") + path.stem
         assert re.search(rf"^java -cp out/test {re.escape(cls)}$", step1, re.M), cls
+
+
+def test_release_workflow_runs_the_source_and_doc_checks_before_it_builds():
+    """critic wf-1: the checks that hold the backup gate (tests/test_android.py) and the flash docs run in the job that
+    publishes, before build.sh, with the public dump in place; the publish conditions stay as they were."""
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    run = wf.index("tests/test_android.py tests/test_flash_docs.py tests/test_docs.py")
+    assert wf.index("actions/setup-python@") < run
+    assert wf.index('echo "CHARMERA_STOCK_IMAGE=') < run < wf.index("./build.sh")
+    assert "python -m pytest" in wf[wf.rindex("\n", 0, run): run]
+    assert "environment:" not in wf
+    publish = wf[wf.index("- name: Publish on Releases"):]
+    assert "if: github.ref == 'refs/heads/main' && steps.key.outputs.release == 'true'" in publish.splitlines()[1]
