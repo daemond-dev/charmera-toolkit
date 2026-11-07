@@ -3,15 +3,16 @@
 Reading order: 11 of 13 · previous: [Photo dates (EXIF)](10-EXIF.md) · next: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)
 
 What is where in a 2 MiB Charmera flash dump, and how the SD update file relates to it. Every offset below was
-checked against the two public dumps and the published update files; where something is inferred rather than
-read off the bytes it says so. The long form, with sources, is in the [Research report](13-PHASE1-REPORT.md).
+checked against the two public dumps and the published update files, and those of the film-mods build against that
+project's public restore file; where something is inferred or reported rather than read off the bytes it says so.
+The long form, with sources, is in the [Research report](13-PHASE1-REPORT.md).
 
 File offset = runtime address + 0x200. The flash is a Puya PY25D16HB: 2 MiB, 64 KiB erase blocks, 256-byte pages.
 
 | File offset | Size | Contents |
 |---|---|---|
 | 0x000000 | 0x200 | Boot header, magic `SPII`. Register/value pairs the boot ROM applies before jumping to the code: 0xD0000088 = 0xA12B and 0xD000008C = 0x2495 are the PLL/power unlock keys, 0xD0000028 = 0x8005, 0xD00000AC = 0x104. One word (0x1B0000) has no known meaning. |
-| 0x000200 | ~0xFF870 | ARM7TDMI code and read-only data, vector table first. In the public dump: build stamp `202505201029` at 0x218C4, build string `JH5408  20250520` at 0x18964, compile date `Oct 14 2025` at 0xF3978, the sensor reset table at 0xF5BFC and the 61-write sensor init table at 0xF5C6C. Another build keeps them elsewhere (the film-mods build: stamp at 0x218D0, init table at 0xF5D34), so the toolkit finds them by content; see [Build identity](#build-identity). |
+| 0x000200 | ~0xFF870 | ARM7TDMI code and read-only data, vector table first (0x200..0x240). In the public dump: build stamp `202505201029` at 0x218C4, build string `JH5408  20250520` at 0x18964, compile date `Oct 14 2025` at 0xF3978, the sensor reset table at 0xF5BFC and the 61-write sensor init table at 0xF5C6C. Another build keeps them elsewhere (the film-mods build, VERIFIED from that project's public restore file: build string at 0x1897C, stamp at 0x218D0, compile date `Nov 19 2025` at 0xF3604, init table at 0xF5D34), so the toolkit finds them by content; see [Build identity](#build-identity). |
 | 0x0FFA70 | 0xB6C0 | Initialised data (`.data`), copied to RAM at boot. |
 | 0x10B130 | to 0x120000 | Zero padding. 0x110000..0x120000 is the heap placeholder. |
 | 0x120000 | 0x48E9A | Resource pack: magic `GP+\0` followed by two u16 words (both 3 in the stock build; meaning unknown) and zero padding to +0x18, then 24-byte directory entries of a 20-byte name plus a u32 sector number (×512 from 0x120000), 43 in the stock build; the list ends at the first name starting with 0x00 or 0xFF. No checksum. Holds the five UI sounds, the logo and menu JPEGs, the GPZP frames, `GPRS.PAK` at 0x141400. Ends at 0x168E9A; 0xFF to 0x16E000. |
@@ -20,7 +21,7 @@ File offset = runtime address + 0x200. The flash is a Puya PY25D16HB: 2 MiB, 64 
 | 0x17F000 | 0x200 | Photo directory: two 8-byte entries {u16 number, u16 used, u32 length}. Also sector 120 of the settings bank, which is why the stock camera misbehaves after about 120 settings saves. |
 | 0x180000 | 0x25800 | Internal photo slot 0 (0x590-byte header + JPEG). |
 | 0x1A5800 | 0x25800 | Internal photo slot 1. |
-| 0x1CB000 | to 0x200000 | Unused, 0xFF. |
+| 0x1CB000 | to 0x200000 | Unused, 0xFF in every known dump. 0x1E0000..0x1EFFFF is the one block a 0x1E0000-byte update and its final erase never touch (see [Update file](#update-file-jh_5408stamp_sumbin)). |
 
 ## Settings record fields
 
@@ -39,41 +40,70 @@ Offsets within the 252-byte record. Verified means the firmware's setter and rea
 
 What identifies a build, and what does not. The version stamp `202505201029` is carried by two different builds: the
 public dump and the build on the charmera-film-mods author's camera, which has different bytes (its author confirmed
-it from their own dump on 2026-11-06). The build string, the compile date, the yellow boot screen and the
-"original series" body do not tell them apart either. So:
+it from their own dump on 2026-11-06, and that project's public restore file holds it). The two share the build
+string `JH5408  20250520` too. Their compile dates differ: `Oct 14 2025` in the public dump, `Nov 19 2025` in the
+film-mods build, so the factory rebuilt the firmware under one stamp. A different compile date shows that two builds
+differ, never that a file fits a camera, and the same date would not show that two builds are the same. The
+film-mods author's boot screen and body are not known; the yellow boot screen and the "original series" body did not
+tell the public build from what the 2026-11-06 camera needed. So:
 
-- The toolkit names a build by a fingerprint over its bytes: SHA-256 of 0..0x169000 (the span an official-size file writes)
-  for the public dump, `bffddd53…`; SHA-1 `d1f21227…` and byte sum `0852B369` over the same span, which is what the
-  film-mods author compared against (their build: SHA-1 `91499bd3…`, sum `0852C329`). A modified copy of a known build
-  is recognised by its marks lying where that build keeps them.
+- The toolkit names a build by a fingerprint over its bytes: SHA-256 of 0..0x169000 (the span a 0x169000-byte file
+  writes) for the public dump, `bffddd53…`; SHA-1 `d1f21227…` and byte sum `0852B369` over the same span, which is
+  what the film-mods author compared against (their build: SHA-1 `91499bd3…`, sum `0852C329`, SHA-256 `5b352e46…` of
+  that project's public restore file, VERIFIED). A modified copy of a known build is recognised by its marks lying
+  where that build keeps them and its sensor table being that build's; a file with the marks there and another table
+  is "a build this toolkit does not know, laid out like" that build.
 - The build marks are found by content, never at a fixed offset: the stamp as 12 ASCII digits ending in NUL (by
   preference the one that follows the `*.bin` pattern the updater matches with), the build string as `JH5408` plus
   spaces plus 8 digits, and the sensor tables as the reset table `fd 00 20 00 ff ff` followed by the first
   register/value table that starts with a page select (`fd 00`), switches page at least once more, holds at least 16
-  writes and ends with `ff ff`; the init table found this way is cross-checked against the code literal that holds
-  its RAM address (file offset minus 0x200; in the public dump at 0x7B91C).
+  writes and ends with `ff ff`. The code literal that holds the init table's RAM address (file offset minus 0x200) is
+  searched for at 4-byte-aligned offsets only: in the public dump it is at 0x7B91C, in the film-mods build at 0x7B5A8.
+  A table the code refers to is preferred. More than one referenced init table with different contents is a FAIL
+  ("several sensor programs"). Without `--stock`, a table the code does not refer to is a WARN; with `--stock`, outside
+  the donor route, a file whose table is not referred to fails when the one in `--stock` is. The app follows the same
+  rule.
+- The ARM vector table at 0x200..0x240 is where the camera starts. In a file laid out like its reference (the stamp,
+  the build string and the sensor table at the same offsets) it must be byte-identical to the reference's: `--stock`
+  or the app's backup when given, otherwise the known build the file is laid out like, by a SHA-256 of those bytes
+  kept for each known build (the two known builds carry the same 64 bytes, SHA-256 `cf38b73d…`, VERIFIED). A
+  difference is a FAIL that `stage` cannot be told to accept, since a camera with a broken reset vector may not start
+  far enough to run the card updater again. When no layout matches, a WARN says the table could not be compared.
 - A build match says which public image a file was made from. It does not say whether the file fits the camera it
   goes into: both known builds carry the same 61-write sensor table, byte for byte, and drive one sensor without
   reading which is fitted, and the public dump left an original-series camera unable to take pictures. The one check
   that does say something about a camera is `verify --stock <a dump of that camera>`, which compares the file's
-  sensor table and software with the camera's own.
+  sensor table and software with the camera's own, and only when that dump was read before the camera was ever
+  flashed. When `--stock`, or the app's backup, is itself one of the known builds (as the read of a camera flashed
+  with the public restore file is), a matching sensor table is a WARN, not a PASS; a match with a build nobody has
+  published stays a PASS.
 
 ## Update file (`JH_5408<stamp>_<sum>.bin`)
 
-- Two lengths. The community files are 0x1E0000 bytes: the first 0x1E0000 bytes of a dump, including the settings
-  bank and the photo slots of whoever made it (`pack` can blank those), and the updater's extra erase lands on the
-  blank block 0x1F0000. The film-mods files are 0x169000 bytes (`pack --official-size`, a name taken from that
-  project's reading that official updates would end there; no official Charmera update has ever been published): the
-  code and the whole resource pack, nothing of the camera's own area, and the extra erase lands on 0x170000, the
-  settings bank and the photo directory, so the camera starts with factory defaults and an empty photo list; the
-  stored photo data at 0x180000 and the blocks above 0x1E0000 are not touched. `pack` also takes a software-only
-  image of exactly 0x170000 bytes, or an official-size file, and pads it; any other shorter input is refused as
-  truncated, because the updater programs whatever the file holds and padding a cut-off file would erase part of the
-  code or the resource pack.
+- Two lengths, and `verify` and `stage` take no other (`verify --allow-odd-size` takes another as a WARN; `stage`
+  never passes that flag). The community files are 0x1E0000 bytes: the first 0x1E0000 bytes of a dump, including the
+  settings bank and the photo slots of whoever made it (`pack` can blank those), and the updater's extra erase lands
+  on the blank block 0x1F0000. The film-mods files are 0x169000 bytes (`pack --official-size`, a name taken from that
+  project's reading that official updates would end there; no official Charmera update has ever been published). That
+  author reports flashing a 0x169000-byte file on their own camera (REPORTED); this project has flashed none. Such a
+  file holds the code and the whole resource pack, nothing of the camera's own area, and the extra erase lands on
+  0x170000, the settings bank and the photo directory, so the camera starts with factory defaults and an empty photo
+  list; the stored photo data at 0x180000 and the blocks above 0x1E0000 are not touched.
+  `pack` also takes a software-only image of exactly 0x170000 bytes, or an official-size file, and pads it; any other
+  shorter input is refused as truncated, because the updater programs whatever the file holds and padding a cut-off
+  file would erase part of the code or the resource pack.
+- The block 0x1E0000..0x1EFFFF (block 30) is the one block that a 0x1E0000-byte file and its final erase never touch:
+  the file ends at its start, and the final erase hits the block after it. Whatever a camera's chip held there before
+  its first such flash is still there after any number of them, probably 0xFF as in every known dump (INFERRED). A
+  first backup reads it with the rest of the chip; keep that backup as it is. `pack` leaves the block out when it
+  trims a 2 MiB dump and only notes data there, since a 0x1E0000-byte flash leaves it on the chip; it refuses a dump
+  whose last block, 0x1F0000..0x200000, is not blank, because the final erase clears that block.
 - `<stamp>` is 12 ASCII digits (0-9 only; the camera reads fixed character positions) and must differ from the stamp
-  compiled into the running firmware or the updater ignores the file. Both known builds carry `202505201029`. The
-  toolkit never changes the stamp inside the file, so a toolkit-built file flashes again at every power-on while it is
-  on the card; the film-mods tool writes the new stamp inside its files too, so a camera ignores them once it runs one.
+  compiled into the running firmware or the updater ignores the file. Both known builds carry `202505201029`; with
+  `--stock`, `verify` also refuses the stamp found there (`stamp-camera`). The toolkit never changes the stamp inside
+  the file, so a toolkit-built file flashes again at every power-on while it is on the card; the film-mods tool writes
+  the new stamp inside its files too, so a camera ignores them once it runs one (REPORTED in that project's notes; that
+  the camera then ignores the file follows from the stamp compare, INFERRED).
 - `<sum>` is the unsigned 32-bit sum of every byte of the file, as 8 hex digits. A mismatch shows "Program error"
   and nothing is written.
 - The updater looks only in the card's root, only during the first 5 seconds after power-on, erases 64 KiB
@@ -98,9 +128,10 @@ directory and inside the file, must not be erased (all 0xFF), and must hold the 
 | `.GPZP`, `.GPZ` | `GPZP`, a raw DEFLATE stream that inflates, a trailer whose CRC-32 and length match, fixed-Huffman blocks only |
 | `.PAK` | starts `GPRS` |
 
-The two public dumps, the published stock restore file and the three withdrawn [flash candidates](03-FLASH-CANDIDATES.md)
-pass. A cut-off download padded with 0xFF fails here even when the rest of the file looks right. In an official-size
-file the last entry's slot ends at 0x169000 instead of 0x16E000.
+The two public dumps, the published stock restore file, the film-mods restore file and the three withdrawn
+[flash candidates](03-FLASH-CANDIDATES.md) pass this check (`verify` refuses the candidates for what they are, not for
+their resources). A cut-off download padded with 0xFF fails here even when the rest of the file looks right. In an
+official-size file the last entry's slot ends at 0x169000 instead of 0x16E000.
 
 ## Resource sound slots
 

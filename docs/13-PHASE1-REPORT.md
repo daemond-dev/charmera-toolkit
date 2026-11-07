@@ -15,8 +15,13 @@ stamp identifies no build; the toolkit now finds the build marks and the sensor 
 fingerprint ([Image layout](11-FORMAT.md#build-identity)). Both known builds carry the same 61-write sensor table. The
 sensor is set up at boot, before the card mounts; more exactly than section 9 says, after 10 failed attempts at one
 register the firmware abandons the rest of the table and its caller ignores the error. The 2 MiB file's final erase
-is no longer unknown: it wraps to block 1 and bricks the camera (film-mods author, on hardware). And the rule that
-follows from all of it: no backup of your own camera, no flash.
+is no longer unknown: it wraps to block 1 and bricks the camera (film-mods author, on hardware). The toolkit now also
+builds 0x169000-byte update files (`pack --official-size`), the size of the film-mods files, which that project's
+author reads as where an official update would end (no official update file has been published or examined here);
+that author reports flashing such a file on their camera, and this project has flashed none. Its final erase lands
+on the settings block (section 4, step 5). Where a statement below no longer holds, it is marked "Superseded
+2026-11-06" or corrected in place, and the original wording is kept. And the rule that follows from all of it: no
+backup of your own camera, no flash.
 
 Labels used throughout: **VERIFIED** = reproduced here from the binaries or files; **REPORTED** = stated by a community source and cited, not reproduced here; **INFERRED** = reasoned from the evidence, with the reasoning given; **UNKNOWN** = nobody has shown it.
 
@@ -47,6 +52,7 @@ Repositories hold no other issues or PRs of relevance: keychain-camera-plus, chr
 | keychain-camera-plus `dumps/charmera_webcam.bin` | 2,097,152 | e457913fe34db2bfd13e6fcb317a3519cfb6a6cb051102e1ba16c0ef36813d02 |
 | keychain-camera-plus `dumps/charmera_super.bin` | 2,097,152 | 9670cc0812af745148671118d019f8bcce67c6fdf4164cd2e9bc363419541445 |
 | chromacrank V3.1 `JH_5408202611021513_0EFA893C.bin` (not downloaded; from release notes) | 1,966,080 | ca8ac1a01b513998cfdd7f2f8aa9f79d6f3bc38ef9efdaf63c48395feedf5b06 |
+| Hyperlite-Media/charmera-film-mods release Charmera_Restore `JH_5408202505201029_0852C329.bin` (added 2026-11-06: the film-mods build's code and resources) | 1,478,656 | 5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f |
 
 None of these files will be redistributed by the toolkit; it will reference them by URL and hash.
 
@@ -62,7 +68,7 @@ None of these files will be redistributed by the toolkit; it will reference them
 
 **Board.** The camera flex has 10 contacts (the "1" and "10" printed at its board end belong to the camera connector, which sits at the top edge of the board's back under a cream tape or glue patch); 10 contacts are too few for a parallel sensor bus, so the link is probably 1-lane MIPI (INFERRED). Single test pads "3V" and "ISP" lie below that connector, and pads "RX_A6", "TX_A7" and "G" near the LED on the front, probably a 3.3 V UART (INFERRED; corrected 2026-11-06 from "a 10-pin ISP header footprint"). The main board silkscreen reads "DC28 5408A". The battery is a 200 mAh cell soldered to B+/B- pads, with no plug, and taped to the board; the speaker hangs on two thin soldered wires (VERIFIED from byjp's photos).
 
-**Editions.** Original 2025 series (yellow boot screen, this build); Millennium Edition, June 2026 (blue boot screen; press says same hardware); CLOT x Kodak edition, September 2026. Two owners report that the original-series image boots on the other editions but live view freezes or capture fails (REPORTED, Project-Sirius issues 1 and 2). No Millennium or CLOT dump is public. The only ways to tell editions apart without a dump are the body, the boot screen colour and the filter/frame names in the menu (REPORTED). The firmware's own JPEGs identify the chip, not the edition: EXIF Make "Generalplus", Model "CBB3" (VERIFIED inside the two stored photos at 0x18032C and 0x1A5B2C).
+**Editions.** Original 2025 series (yellow boot screen, this build); Millennium Edition, June 2026 (blue boot screen; press says same hardware); CLOT x Kodak edition, September 2026. Two owners report that the original-series image boots on the other editions but live view freezes or capture fails (REPORTED, Project-Sirius issues 1 and 2). No Millennium or CLOT dump is public. The only ways to tell editions apart without a dump are the body, the boot screen colour and the filter/frame names in the menu (REPORTED). (Superseded 2026-11-06: these tell an edition, not the firmware a camera needs; an original-series camera with the yellow boot screen did not fit the public build. See the note at the top.) The firmware's own JPEGs identify the chip, not the edition: EXIF Make "Generalplus", Model "CBB3" (VERIFIED inside the two stored photos at 0x18032C and 0x1A5B2C).
 
 **Relation to the Godox C100.** Same Generalplus card-DVR SDK lineage and the same USB ID, which is why its sound-slot work transfers. But its community identifies the C100 SoC as a GP22B (ARM926, FreeRTOS) with a different boot-header family ("PGpssiipps", app at file 0x10200) (REPORTED), so "same platform" is only true at the SDK level. The C100's sound slots live at 0x170000; the Charmera's live at 0x120000.
 
@@ -84,7 +90,7 @@ A note on method: the boot header has no public specification for this chip, so 
 
 **0x1B0000 to 0x200000** is 0xFF on every known camera; the slot 1 photo area nominally extends to 0x1CB000 but all known dumps end at 0x1AF000.
 
-**Update files** are the first 0x1E0000 bytes of this layout (sections 3 and 4).
+**Update files** are the first 0x1E0000 bytes of this layout (sections 3 and 4). (Superseded 2026-11-06: that held for the files examined when this was written and is not a rule; the film-mods files are the first 0x169000 bytes, and `pack --official-size` builds that size too.)
 
 ## 3. The update filename checksum (VERIFIED)
 
@@ -110,7 +116,7 @@ VERIFIED by disassembly (file offsets) and consistent with the SDK source and th
 2. **Checksum.** The eight characters name[20..27] are parsed case-insensitively (0x211FC; other characters count as zero). The whole file is byte-summed in 64 KiB chunks and compared (0x2144C) before any flash operation. On mismatch a flag is set, "Program error" and "check file" are shown, and a 2-second loop clears the power-hold bit so the camera turns itself off. Nothing is erased (matches isaackwok's hardware test).
 3. **Preparation.** On a good sum it deletes the SD, USB, key/battery/auto-off, root and display tasks, then runs from RAM with interrupts masked, exactly as the SDK source does.
 4. **Programming.** From flash offset 0: for each 64 KiB block, erase (opcode D8), program 256-byte pages up to the file size, read back and verify; a page that verifies wrong is rewritten up to 5 times after checking it is blank; a block that still fails is retried up to 20 times in total. "Upgrade NN%" advances per block. The file is programmed byte for byte, so a file whose length is not a multiple of 256 bytes gets stale buffer bytes in its last page; the rest of the last block stays erased. Whole 64 KiB multiples avoid the question entirely.
-5. **Final erase.** After the last block, one more 64 KiB block is erased at (file length rounded up to 256) + 0x10000, masked to the block (0x217B4; benbadio's observation is correct). Consequences by file size: 0x1E0000 → 0x1F0000, an empty block, harmless (hardware-proven by several owners). 0x169000 (code plus resources only) → 0x170000, which wipes the settings bank, after which the firmware recreates defaults and a blank photo directory: a factory reset, probably the SDK's intent. 0x170000 → 0x180000, which erases the first 64 KiB of photo slot 0 while the directory still lists it. 0x200000 → 0x210000, beyond the chip; what the Puya part does with address bit 21 is UNKNOWN, and one owner reports a brick after an SD update (cause unconfirmed). Never send a 2 MiB file.
+5. **Final erase.** After the last block, one more 64 KiB block is erased at (file length rounded up to 256) + 0x10000, masked to the block (0x217B4; benbadio's observation is correct). Consequences by file size: 0x1E0000 → 0x1F0000, an empty block, harmless (hardware-proven by several owners). 0x169000 (code plus resources only) → 0x170000, which wipes the settings bank, after which the firmware recreates defaults and a blank photo directory: a factory reset, probably the SDK's intent (INFERRED; the film-mods author reads it as the reset after an official file ending there, REPORTED). 0x170000 → 0x180000, which erases the first 64 KiB of photo slot 0 while the directory still lists it. 0x200000 → 0x210000, beyond the chip; what the Puya part does with address bit 21 is UNKNOWN, and one owner reports a brick after an SD update (cause unconfirmed). (Superseded 2026-11-06: the address wraps to block 1, which is left erased, and the camera no longer boots; the film-mods author reports this from their own camera.) Never send a 2 MiB file.
 6. **End.** The updater does not delete or rename the file (only open/stat/read/lseek/close exist in it), so a camera re-flashes on every boot while that card is in. It then loops forever; holding the power key about a second (20 polls of the PMU key bit at 50 ms) clears the power-hold bit and the camera switches off. There is no chime, no card-detect read and no soft reset; benbadio's "card-removal debounce at 0x0217DC" is this power-key hold. Removing the card first is still the right order, so the next boot does not flash again.
 7. **What is never checked:** header magic, size, a size limit, version, series, battery level or DC-in, CRC or signature. The firmware also never reads the flash chip's JEDEC ID and never issues a chip erase; it uses only the classic command set (06, 05, 03, 02, 20, D8, 01, 04), so a replacement chip with that command set would work (INFERRED).
 
@@ -118,7 +124,7 @@ Open: nothing above has been timed on hardware except the community's 15 to 20 s
 
 ## 5. The two public stock dumps compared (VERIFIED)
 
-Both are the same firmware build. They are byte-identical from 0x000000 to 0x16FFFF (header, code, tables, the whole resource pack) and from 0x1B0000 to the end (all 0xFF). SHA-256 of bytes 0 to 0x170000 in both: `fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8`. That hash is what the toolkit uses as the "original 2025 series, unmodified software" fingerprint.
+Both are the same firmware build. They are byte-identical from 0x000000 to 0x16FFFF (header, code, tables, the whole resource pack) and from 0x1B0000 to the end (all 0xFF). SHA-256 of bytes 0 to 0x170000 in both: `fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8`. That hash is the toolkit's software hash for the public dump's build. (Corrected 2026-11-06: this report first called it the "original 2025 series, unmodified software" fingerprint. The series names no build, and the toolkit names the public build by SHA-256, SHA-1 and byte sum over 0..0x169000; see the note at the top.)
 
 They differ only in the camera's own state, which is why their whole-file hashes differ:
 
@@ -133,23 +139,23 @@ Record 0 of the settings store (the factory default) is identical in both, CRC 0
 Consequences:
 
 - Either dump is a valid reference for the code and resources; chromacrank builds on Project-Sirius, keychain-camera-plus on its own dump, and both are right to.
-- The published stock-restore update file is the first 0x1E0000 bytes of the keychain dump (VERIFIED, byte for byte). Flashing it writes benbadio's settings records and his two photos into the recipient camera. Harmless, but not "factory" either. The photo index in that file is zero, so the camera will not show the photos.
-- Your own backup is the only restore image that is truly yours. The toolkit's `pack` can blank the settings store and the photo area when building an update file from a public dump; the firmware's behaviour on a blank store (recreate defaults) is INFERRED from arjunbazinga's emulation and not yet hardware-tested, so this report treats "flash a public dump as published" as the proven path and "blanked" as the cleaner but less proven one.
+- The published stock-restore update file is the first 0x1E0000 bytes of the keychain dump (VERIFIED, byte for byte). Flashing it writes benbadio's settings records and their two photos into the recipient camera. Harmless, but not "factory" either. (Superseded 2026-11-06: harmless only on a camera the public build fits; see the note at the top.) The photo index in that file is zero, so the camera will not show the photos.
+- Your own backup is the only restore image that is truly yours. The toolkit's `pack` can blank the settings store and the photo area when building an update file from a public dump; the firmware's behaviour on a blank store (recreate defaults) is INFERRED from arjunbazinga's emulation and not yet hardware-tested, so this report treats "flash a public dump as published" as the proven path and "blanked" as the cleaner but less proven one. (Superseded 2026-11-06: owners report working cameras after flashing it, but what those cameras ran before is not known. Flashed as published, the public build left an original-series camera unable to take pictures; no file made from a public dump is known to fit a camera whose own chip has not been read.)
 
 ## 6. Recovery paths, in order of preference
 
-**Before anything else: a verified full-flash backup of your own camera.** Every path below is only as good as the image you restore. The public dumps are the same build but carry another owner's settings and photos, and they are useless for a Millennium or CLOT body.
+**Before anything else: a verified full-flash backup of your own camera.** Every path below is only as good as the image you restore. The public dumps are the same build but carry another owner's settings and photos, and they are useless for a Millennium or CLOT body. (Superseded 2026-11-06: they are no safe choice for an original-series body either; one did not fit. See the note at the top and [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).)
 
 ### 6.1 SD-card updater with a known-good image (preferred when the camera boots)
 
 Works whenever the camera gets far enough to mount the card, which the reports so far say it does even when capture is broken (the two cross-edition owners both still had a working updater). Procedure (VERIFIED mechanics, REPORTED procedure):
 
-1. Build the update file from your own backup with `pack` (0x1E0000 bytes, fresh stamp, byte-sum name) and run `verify` on it.
+1. Build the update file from your own backup with `pack` (0x1E0000 bytes, fresh stamp, byte-sum name) and run `verify` on it. (Superseded 2026-11-06: `pack --official-size` builds a 0x169000-byte file as well, and `verify` takes your backup as `--stock`.)
 2. FAT32 card (the camera's exFAT formatting also works for reading the update, but FAT32 avoids the Android problem), only that one `JH_5408*.bin` in the root.
 3. Camera off, card in, power on. Screen shows "Upgrade 0%" to "100%" in roughly 15 to 20 seconds, then stays on that screen (section 4 step 6). Remove the card, then hold the power key about a second to switch off; power on.
 4. Delete the file from the card; the camera would flash again on every boot with that card.
 
-Failure modes: wrong checksum in the name → "Program error", nothing erased, camera turns itself off (safe). Power loss during the 15 seconds → the chip is partly erased and the camera will not boot; only path 6.2 remains. A file whose length is not a multiple of 256 bytes gets stale bytes in its last page; a file shorter than 0x1E0000 moves the final erase into the settings bank or the photo area (section 4); keep to 0x1E0000. A full 2 MiB file → the final erase targets 0x210000, beyond the chip; what the Puya part does with that address is UNKNOWN and one owner reports a brick after an SD update, cause unconfirmed. Never send a 2 MiB file. The card must be inserted before power-on (the updater only arms in the first 5 seconds), and the file is never deleted by the camera.
+Failure modes: wrong checksum in the name → "Program error", nothing erased, camera turns itself off (safe). Power loss during the 15 seconds → the chip is partly erased and the camera will not boot; only path 6.2 remains. A file whose length is not a multiple of 256 bytes gets stale bytes in its last page; a file shorter than 0x1E0000 moves the final erase into the settings bank or the photo area (section 4); keep to 0x1E0000. A full 2 MiB file → the final erase targets 0x210000, beyond the chip; what the Puya part does with that address is UNKNOWN and one owner reports a brick after an SD update, cause unconfirmed. Never send a 2 MiB file. (Superseded 2026-11-06: a 0x169000-byte file is the other size in use, and its final erase on the settings bank is the factory reset of section 4, step 5; `verify` and `stage` take 0x1E0000 and 0x169000 bytes only. The 2 MiB file's erase wraps to block 1 and bricks the camera, as the film-mods author reports.) The card must be inserted before power-on (the updater only arms in the first 5 seconds), and the file is never deleted by the camera.
 
 ### 6.2 In-circuit SPI read and write with a 3.3 V programmer (the only path for a camera that will not boot)
 
@@ -157,7 +163,7 @@ What is known: SOP8 package with legs, so a SOIC-8 clip works (REPORTED, two own
 
 flashrom: no chip entry by name; `-c "SFDP-capable chip"` worked for the community (REPORTED). Linux needs udev access to USB 1a86:5512 or root; Windows needs the libusb driver via Zadig and a Windows flashrom build. Elnec and XGecu programmers list PY25D16HB explicitly (REPORTED, vendor lists) if a dedicated programmer is preferred.
 
-Restore source order: your own backup; then the published stock update's full-image equivalent (the keychain dump, or Project-Sirius) only for an original-series body, accepting that it carries someone else's settings and two photos (or let `pack --blank-settings --blank-photos` clear them, INFERRED-safe).
+Restore source order: your own backup; then the published stock update's full-image equivalent (the keychain dump, or Project-Sirius) only for an original-series body, accepting that it carries someone else's settings and two photos (or let `pack --blank-settings --blank-photos` clear them, INFERRED-safe). (Superseded 2026-11-06: an original-series body is no reason to trust a public dump; one did not fit. A public dump is a last resort for a camera with no backup, after [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).)
 
 ### 6.3 Boot-ROM level: nothing usable is known
 
@@ -197,14 +203,14 @@ Nothing here has been flashed yet. The first mute test on a camera waits for you
 
 ## 8. Risks
 
-1. **No boot-ROM fallback is known.** A failed SD update, or a bad image, means a clip write or a dead camera. Mitigation: verified backup first; only block-aligned 0x1E0000 files; full battery; never a 2 MiB file.
-2. **Firmware that does not fit the camera.** The original-series image boots on a Millennium or CLOT body but capture fails, and on 2026-11-06 it did the same on an original-series body. The image carries no marker the tool can read from the camera, and the body, the boot screen and the stamp prove nothing. Mitigation, since then: no backup of the owner's own camera, no flash; `verify --stock <that backup>` compares the sensor table; and the mods are built from the owner's own backup, never a public dump.
-3. **Programmer voltage.** A black CH341A at 5 V can damage the flash and the SoC. Mitigation: documented, and the backup tool prints the warning before every run.
+1. **No boot-ROM fallback is known.** A failed SD update, or a bad image, means a clip write or a dead camera. Mitigation: verified backup first; only block-aligned 0x1E0000 files; full battery; never a 2 MiB file. (Superseded 2026-11-06: 0x169000-byte files too, the other size `verify` and `stage` take.)
+2. **Firmware that does not fit the camera.** The original-series image boots on a Millennium or CLOT body but capture fails, and on 2026-11-06 it did the same on an original-series body. The image carries no marker the tool can read from the camera, and the body, the boot screen and the stamp prove nothing. Mitigation, since then: no backup of the owner's own camera, no flash; `verify --stock <that backup>` compares the sensor table, which shows what fits only for a backup read before the camera was ever flashed; and the mods are built from the owner's own backup, never a public dump.
+3. **Programmer voltage.** A black CH341A at 5 V can damage the flash and the SoC. Mitigation: documented, and the backup tool prints the warning before every run. (Corrected 2026-11-06: until then it did not. `probe` and `backup` now print a checklist before they run: a 3.3 V programmer, never an unmodified black CH341A, the battery lead lifted, pin 1 on the dot.)
 4. **Back-powering the SoC through the flash VCC pin.** Causes unstable reads and could stress the board. Mitigation: battery disconnected, double read with compare, stop if the chip is not detected cleanly.
 5. **A public restore image is not a factory image.** It carries another owner's settings records and two photos; a blanked variant is cleaner but its behaviour on a blank settings store is only emulation-verified.
 6. **Resource edits that change sizes.** Any sound or frame replacement that outgrows its slot shifts nothing by itself (sectors are fixed), but anything beyond the slot overwrites the next resource. Mitigation: `sounds replace` keeps the stock PCM length; frame work (later) must respect the slot budgets from the directory.
 7. **Code patches.** keychain-camera-plus hit a watchdog reboot loop with a one-word patch at 0x006D10 and had to revert; the zero block at 0x110000 that looks like free space is the heap; two helper functions live inside the "dead" Wi-Fi stack. Mitigation: Phase 3 starts with data-only mods; code patches only after the backup path is proven on your camera.
-8. **The "final erase" of the updater.** VERIFIED: one extra 64 KiB block at (file length rounded to 256) + 0x10000. 0x1F0000 for a 0x1E0000 file (empty, harmless); 0x170000 for a resource-sized package (settings reset); 0x180000 for a 0x170000 file (corrupts internal photo 0); beyond the chip for 2 MiB. The toolkit only ever builds 0x1E0000 and `verify` prints where the extra erase lands.
+8. **The "final erase" of the updater.** VERIFIED: one extra 64 KiB block at (file length rounded to 256) + 0x10000. 0x1F0000 for a 0x1E0000 file (empty, harmless); 0x170000 for a resource-sized package (settings reset); 0x180000 for a 0x170000 file (corrupts internal photo 0); beyond the chip for 2 MiB. When this was written the toolkit built only 0x1E0000 files (corrected 2026-11-06: `pack --official-size` also builds 0x169000 files, whose final erase is the settings reset above); `verify` prints where the extra erase lands.
 9. **Stock settings-bank bug.** After about 120 saves the photo-directory sector is misread as a settings record and the camera resets to defaults and blanks the directory (INFERRED from the verified algorithm). Not caused by the toolkit, but a settings-only mute would be undone by it; the data-only PCM mute would not.
 
 ## 9. Open questions
@@ -227,7 +233,7 @@ Already built in `charmera-toolkit` (read-only unless a gate flag is given): `in
   bytes, with the marks found by content, because the stamp is shared by two builds; a known build is named, an unknown
   one is said to be unknown, and neither is taken as proof that a file fits a camera. When another dump appears, it
   gets its own fingerprint entry.
-- Update files are always 0x1E0000 bytes, never 2 MiB, never odd-sized; the stamp must differ from 202505201029; the name is derived from the byte sum, never typed.
+- Update files are always 0x1E0000 bytes, never 2 MiB, never odd-sized; the stamp must differ from 202505201029; the name is derived from the byte sum, never typed. (Superseded 2026-11-06: 0x1E0000 or 0x169000 bytes, the two sizes `verify` and `stage` take; with `--stock` the stamp must also differ from the one found in the owner's backup.)
 - Mods are data-only and are verified by diffing 64 KiB blocks against the owner's stock backup, so `verify` can state exactly which blocks a mod touches.
 - Nothing produces a flashable file without an explicit flag, and every such file comes with a manifest and a SHA-256.
 - No firmware is distributed; the toolkit works on the owner's backup and references the public dumps by hash only.
