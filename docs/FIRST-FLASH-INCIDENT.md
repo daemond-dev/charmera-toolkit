@@ -1,41 +1,67 @@
 # The first flash: what was done and what went wrong
 
-Written 2026-11-06. Times are UTC.
+Written 2026-11-06, and brought up to date the same evening by a second session. Times are UTC.
 
 ## Where things stand
 
-The camera, an original-series Charmera in the 1987 blind-box design, boots normally. Menus, playback and
-settings work. Photo and video modes freeze, with or without a card: the screen stays on the mode menu, the
-shutter sound plays, then the camera locks up until it switches itself off. Its original firmware was overwritten
-by the first flash, and no backup of it exists. The card updater still works, so the camera can still be flashed
-from a card if the right firmware turns up.
+The camera, an original-series Charmera in the 1987 blind-box design, bought in Japan in November 2026, boots
+normally. Menus, playback and settings work. Photo and video modes freeze, with or without a card: the screen stays
+on the mode menu, the shutter sound plays, then the camera locks up until it switches itself off. Its original
+firmware was overwritten by the first flash, and no backup of it exists. The card updater still works, so the camera
+can still be flashed from a card if the right firmware turns up.
 
-The most likely cause is that this unit's image sensor differs from the one the public stock firmware drives. The
-public dump was flashed twice, once modified (candidate C) and once unmodified (the stock restore file), and both
-gave the same result. Millennium and CLOT owners report the same symptom with the same image. This is an inference
-(about 70 percent at the time), not something measured on the camera.
+The most likely cause is firmware that does not fit this camera's hardware. The evidence, as of the evening of
+2026-11-06:
 
-The public firmware drives exactly one sensor, with no check of which one is fitted. It writes a fixed list of
-61 register settings to a sensor at bus address 0x78, never reads the chip's ID, and carries on when a write
-fails. So a different sensor and a loose or damaged sensor ribbon look the same from the firmware's side. Only
-the sensor's markings or a dump from a matching camera can tell them apart.
+- The camera took photos on its own firmware before the first flash, and it was never opened or dropped (your
+  account). So its sensor and the ribbon to it worked then, and a loose ribbon is unlikely.
+- Seven photos it took on that firmware survive unedited. Their JPEG header is the bare 624-byte kind, with no EXIF
+  block. Neither known build writes a still photo that way: both write every still photo with the 0x590-byte EXIF
+  header, at every size, quality and clock setting, and use the bare header only for thumbnails, video frames and
+  the USB-camera and Wi-Fi streams. That is VERIFIED by two independent static analyses of the public dump, and the
+  film-mods build is the same code there. So the camera's original firmware was a third build, one nobody has
+  published (INFERRED, strongly).
+- The public dump froze the camera the same way twice, once modified (candidate C) and once unmodified (the stock
+  restore file). Millennium and CLOT owners report the same symptom with the same image.
+- The two known builds are identical in everything that touches the sensor: power, reset, clock, the bus pins and
+  address, the driver, both register tables, the image processing and the preview path (VERIFIED by a byte-level
+  diff, checked a second time independently). They differ only in shutter-sound timing, one playback guard, build
+  strings and network code that never runs. So neither has a program for another sensor or other wiring, and flashing
+  either one gives this camera the same result.
 
-Two firmware builds are known: the public dump and the film-mods author's. They contain the same sensor init
-table, byte for byte; the film-mods author confirmed this from their own factory dump on 2026-11-06. So neither
-build has a program for any other sensor, and flashing either one would give this camera the same result.
+What is not known: whether this unit's sensor is a different part, or the same part wired, powered or clocked
+differently. The firmware drives exactly one sensor, with no check of which one is fitted: it writes a fixed list of
+61 register settings to a sensor at bus address 0x78, never reads the chip's ID, and carries on when a write fails.
+Only the marking on the camera module's flex, or a dump of a camera like this one, can tell more.
+
+The known builds all carry the version stamp `202505201029`, the one the updater compares, so the stamp identifies
+none of them:
+
+| Build | Source tree | Compiled | Copies | Sensor table |
+|---|---|---|---|---|
+| The public dump's | `v006` | Oct 14 2025 | benbadio/keychain-camera-plus, Khimira/Project-Sirius and aschenbecherwespe/recharmera: three cameras, the same bytes up to 0x170000 | `aea3976b…` |
+| The film-mods author's | `v008_test` | Nov 19 2025 | Hyperlite-Media/charmera-film-mods, release Charmera_Restore (code and resources only) | `aea3976b…`, the same |
+| This camera's original | unknown | unknown | gone; its photos show it differed in the photo code | unknown |
+
+So the factory rebuilt the firmware under one stamp at least twice within five weeks in 2025, and a camera sold in
+November 2026 can carry a later build.
 
 ## What was built
 
-- **The toolkit** (Python, Windows and Linux): the research report, `pack`, `verify` and `stage` for update
-  files, settings, sounds, frames and resources, card checks and repair, EXIF repair, CH341A backup and restore
-  scripts, and start-up tweaks. It has 286 tests, and CI runs on Windows and Ubuntu.
-- **Three flash candidates**, all built from benbadio's public stock dump (commit 209c25a). C has stock code and
-  resources with a factory settings record and blank internal photos. A is C with the interface sounds off. B is A
-  with the sound files silenced.
-- **Charmera Card**, the Android app. It downloads the dump, checks its hash and makes the update file. It writes
-  that file to the camera's card over the camera's USB-C cable, then walks through the flash and cleanup. Builds are signed with a permanent key and published by GitHub Actions. Version 0.4 is published. Version 0.5,
-  with the backup step and the review fixes, is on the branch `claude/charmera-firmware-toolkit-0kilzl` and has not
-  been published.
+- **The toolkit** (Python, Windows and Linux): the research report, `pack`, `verify` and `stage` for update files,
+  settings, sounds, frames and resources, card checks and repair, EXIF repair, CH341A backup and restore scripts,
+  start-up tweaks, the donor route for a camera whose own firmware is gone, and `photo-id`, which reads a photo's
+  header and says which kind of firmware wrote it. CI runs the tests on Windows and Ubuntu, with the public dump and
+  the film-mods restore file fetched at fixed versions and checked by hash. Until the evening of 2026-11-06 CI had no
+  dump, so every test on real firmware was skipped there.
+- **Three flash candidates**, all built from benbadio's public stock dump (commit 209c25a), all withdrawn. C has stock
+  code and resources with a factory settings record and blank internal photos. A is C with the interface sounds off.
+  B is A with the sound files silenced.
+- **Charmera Card**, the Android app. It downloads the dump, checks its hash and makes the stock restore file. It
+  writes that file to the camera's card over the camera's USB-C cable, then walks through the flash and cleanup.
+  Builds are signed with a permanent key and published by GitHub Actions. Version 0.4 is published, and it has no
+  backup step: it must not be used to flash. Version 0.5, with the backup step, the write gate and the review fixes,
+  is on the branch `claude/charmera-firmware-toolkit-0kilzl` and has not been published.
 
 ## Timeline
 
@@ -66,6 +92,25 @@ build has a program for any other sensor, and flashing either one would give thi
   bytes long, and its sha256 `aea3976b…` is identical to the public dump's, so their build won't help. They said
   they would rather not give you anything to flash, because it can't fix a sensor difference and could make
   things worse. Their advice is to confirm the sensor part first, and they offered to keep helping from there.
+- **11-06, evening: a second session.**
+  - An audit of the work the first session had marked done found 110 problems that a second reviewer could not
+    refute, 3 of them critical and 18 high. Among them: `stage` wrote to a card without a backup while the docs said
+    nothing would; `restore` rewrote the chip through the clip with no fresh read first; a chip read taken after a
+    flash passed as proof that the public firmware fits; the app could enable Write with a check made against a
+    different backup than the one it showed; and the app's headline said "OK to put on the card" when nothing had
+    been compared. All of them are fixed on the branch.
+  - You decided: `stage` warns when no backup is given but still writes; the donor route is built now, on the
+    computer only, and the app never takes it.
+  - You told me the camera took photos before the first flash and was never opened or dropped, that you have no
+    clip programmer, and you copied seven of those photos to the computer.
+  - Research: no official firmware exists anywhere (Reto, Kodak and the Japanese distributor SAEDA publish none); no
+    public dump comes from a camera with another sensor; the reference module marking is KE28-V1, not KC28; the
+    film-mods build is public as that project's restore file; a third camera's dump (recharmera) is the public build.
+  - Your photos: neither known build writes their header for a still photo, so the original firmware was a third
+    build.
+  - The two known builds were diffed byte for byte: they drive the sensor identically.
+  - What a working camera reveals without being opened: roughly which build it runs, through its photos, its videos
+    and its Setup > Version screen; never its firmware or its sensor.
 
 ## What I got wrong
 
@@ -82,24 +127,24 @@ build has a program for any other sensor, and flashing either one would give thi
 3. **The first flash used a modified file.** C was not the plain stock file. It also reset the settings and
    erased the internal photos. Its program code was identical, so this didn't cause the freeze, but a first
    flash should change as little as possible.
-4. **The update file overwrites more than an official update does.** Our files are 0x1E0000 bytes long. They
-   rewrite the firmware, the resources, the settings bank and the internal photo area, and then the camera's
-   updater erases the 64 KiB block at 0x1F0000. Official updates and the film-mods files stop after the
-   resources, at 0x169000, so the updater's erase lands on the settings block. So the flash replaced your
-   camera's settings and photo area with another camera's and erased its last block. Anything your unit kept
-   there is gone. That is probably not what broke photo mode, but nobody knows, because there is no backup.
-5. **I didn't foresee that the cable powers the camera on.** Plugging the cable into a switched-off camera
-   started it and ran the updater again from the card. The instructions caused an unintended second flash of C.
-   It did no harm, but it showed the instructions had never been checked against the real hardware.
+4. **The update file overwrites more than it needs to.** Our files are 0x1E0000 bytes long. They rewrite the
+   firmware, the resources, the settings bank and the internal photo area, and then the camera's updater erases the
+   64 KiB block at 0x1F0000. The film-mods files stop after the resources, at 0x169000, so the updater's erase lands
+   on the settings block instead. So the flash replaced your camera's settings and photo area with another camera's
+   and erased its last block. Anything your unit kept there is gone. One block survived every flash: 0x1E0000 to
+   0x1EFFFF, which a 0x1E0000-byte file does not write and its final erase does not reach. It is blank on every known
+   camera, so it probably holds nothing, but a first read of the chip should keep it.
+5. **I didn't foresee that the cable powers the camera on.** Plugging the cable into a switched-off camera started it
+   and ran the updater again from the card. The instructions caused an unintended second flash of C. It did no harm,
+   but it showed the instructions had never been checked against the real hardware.
 6. **The app's cleanup was unclear.** The result appeared away from the button, and Android doesn't let an app
    eject a drive, so you had to find the eject screen yourself.
 7. **I diagnosed wrongly and stated it too strongly.** First I blamed the card, then C's settings, and I claimed
    the diff "confirms" it. On that basis I withdrew the candidates, shipped a release and had you flash the
-   camera again. `docs/03-FLASH-CANDIDATES.md` still blames C's settings.
+   camera again.
 8. **I missed the film-mods repo.** I didn't search again in the day between my survey and your flash. It also
-   shows that two different firmware builds carry the same version stamp, 202505201029. The public dump and the
-   film-mods author's working camera both have it, but their bytes differ. So a matching edition, boot screen or
-   version string doesn't prove a camera matches the public dump.
+   shows that two different firmware builds carry the same version stamp, 202505201029. So a matching edition, boot
+   screen or version string doesn't prove a camera matches the public dump.
 9. **I got the edition wrong.** I said I didn't know a 1987 edition, when it is the original series.
 10. **I put the blame on you.** The first community draft said "lesson learned", as though the missing backup
     were your mistake. It was mine.
@@ -109,80 +154,122 @@ build has a program for any other sensor, and flashing either one would give thi
       draft.
     - Version 0.2 changed the signing key and had to be uninstalled before the update.
 
+The second session found these in the first follow-up:
+
+12. **Work marked done that was not done.** These notes said "no backup of your own camera, no flash" was a hard
+    stop in the docs and the app. On the computer, `stage`, `restore`, `pack` and the mod commands could all write
+    without one, and the docs said they could not. The app's README said 0.5 was "built and tested on a computer";
+    it had never been built.
+13. **A check that pointed the wrong way.** The sensor comparison treated any backup as the camera's own firmware.
+    A backup read after a flash holds whatever was flashed, so a read of this camera would have "proved" that the
+    public firmware fits it, and the check would have refused the one kind of file that could fix it.
+14. **Facts without a source, or wrong.** "Official updates are 0x169000 bytes" was the film-mods author's reading;
+    no official update file has ever been published. The module marking "KC28" came from an AI-assisted reading of
+    a teardown photo that shows "KE28-V1". "The compile date does not tell the builds apart" was false: Oct 14 and
+    Nov 19 2025. The EXIF notes said the camera writes an `IDIT` date chunk into its videos; the public build writes
+    none. The test counts quoted were from before the code they described.
+15. **CI did not test what it seemed to.** Without the dump, every test on real firmware was skipped in CI, so a
+    green check said less than it looked.
+
 ## Routes to a working camera
 
-1. **The seller.** The camera was bought in Japan in November 2026. Reto's 30-day exchange covers only
-   purchases from Reto's own store, so it most likely doesn't apply. The shop it came from is the place to ask.
-   Say plainly that it was reflashed.
-2. **The community.** The request for a dump from a working original-series unit is posted in Project-Sirius #2.
-3. **The film-mods author's build is ruled out.** Their sensor init table is identical to the public dump's.
-   - They suggest identifying the sensor part first, from the marking on the sensor module or from an ID
-     register. The public firmware never reads a sensor ID, though, so on this camera the marking is the way.
-     That means opening the camera.
-   - If the part differs from what the firmware targets, the only fix is a dump from a unit carrying that
-     sensor.
-   - They are willing to keep helping once the sensor is known.
-   - Nothing from their repo goes on this camera's card. Their loader and payload are written for their build's
-     addresses, not the public dump's.
-4. **Identify the sensor.** Read the part marking on the sensor module or its ribbon and compare it with what
-   other owners report for the public firmware: an SP140A-family sensor (SuperPix), module marking KC28. A
-   different part confirms the mismatch and tells donors what to look for. The same part points to a loose or
-   damaged ribbon instead.
-5. **A replacement camera.** Read its chip before flashing anything.
+1. **The seller.** The camera was bought in Japan in November 2026. Japanese stock comes through three importers:
+   on and on Co. (since October 2025), Hilight Brands Japan (Kodak Apparel stores) and SAEDA (Reto's official
+   distributor since February 2026). The warranty card in the box names which one. Their terms exchange faulty units
+   within 30 days and exclude modified ones; say plainly that it was reflashed.
+2. **A dump from a camera like this one.** It has to come from a camera running a later build than the two known
+   ones, ideally bought in Japan in late 2026, ideally with the same module marking. Before anyone opens it, two
+   checks show whether it is a candidate:
+   - its photos: still photos with the same bare 624-byte header as this camera's come from neither known build
+     (`charmera photo-id <photo>`, on a photo copied straight off its card);
+   - its Setup > Version screen: both known builds show `JH5408  20250520`, so a different string means a different
+     build (the same string proves nothing).
+   Its firmware can then only be had by reading its chip with a clip: a stock camera gives none of it up over USB
+   (VERIFIED: its memory-read commands need an authorisation level that nothing sets). The donor route takes that
+   read ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
+3. **The community.** Project-Sirius #2 has no reply yet. The film-mods author and aschenbecherwespe (recharmera)
+   have working cameras and readers, but both their builds are known ones, and neither has said when or where their
+   camera was bought. isaackwok, a CLOT owner, offered on 2026-10-04 to post a CLOT dump; nothing since. What to ask
+   anyone: one unedited photo straight off the card, a photo of the camera module's flex, when and where they bought
+   the camera, and, from anyone with a clip, a dump.
+4. **Identify the sensor.** Open the camera ([Recovery, section B](02-RECOVERY.md#opening-the-camera)) and
+   photograph the camera module's flex (byjp's unit reads `KE28-V1`), the board silkscreen (`DC28 5408A` there) and
+   the processor's marking with its date code. A different flex code points to a different module. The same code
+   points to a difference in wiring, power or clock between builds, not to the ribbon, since the camera worked
+   before. The lens is glued to the sensor: do not try to read the die.
+5. **A programmer before any flash.** Every route ends in a flash of firmware that has never run on this camera. If
+   it does not start far enough to run the card updater, only a clip write can bring the camera back. So a 3.3 V
+   programmer (a CH341A switched to 3.3 V, a CH347 or a Pico) and a SOIC-8 clip come first, and with them a read of
+   the chip as it is now.
+6. **Nothing from the film-mods repo goes on this camera's card.** Their loader and payload are written for their
+   build's addresses; their restore file carries the stamp this camera now runs, so the camera would ignore it; and
+   their build drives the sensor exactly as the public one does.
 
 ## Open work in the toolkit
 
-Status on 2026-11-06, after the work on the branch `claude/charmera-firmware-toolkit-0kilzl`:
+Status at the end of the evening of 2026-11-06, on the branch `claude/charmera-firmware-toolkit-0kilzl`:
 
-- Done: "no backup of your own camera, no flash" is a hard stop in the docs (`01-FIRST-FLASH.md` step 1, `03`, `06`,
-  the app's README) and in the app: a new step 0 takes a dump of the camera's own chip (a 2 MiB file with the build
-  marks, never one of the public dumps), the update file is compared with it (the sensor table must be the same, the
-  software line says whether it is the camera's own firmware), and the write and the save-a-copy buttons stay off
-  without it. Not done: the command-line `stage` still writes without a backup; `verify` and `stage` only say so.
-  Whether `stage` should refuse without `--stock` is a decision to make.
-- Done: `docs/03-FLASH-CANDIDATES.md` now says the likely cause is firmware that does not fit the sensor, not C's
+- Done: "no backup of your own camera, no flash" in every tool that writes. The app writes to the card only while a
+  dump of the camera's own chip is on record and the update file was checked against that very dump; `restore` reads
+  the chip twice before it writes and keeps that read; `pack` and the mod commands refuse camera cards and
+  update-file names; `stage` writes without `--stock` only with a warning, as you decided.
+- Done: a read taken after a flash is never taken as proof of fit. A backup whose firmware is a known public build
+  gives a warning, not a pass, when its sensor table matches.
+- Done: the donor route (`verify` and `stage` with `--donor`), the film-mods fingerprint, the compile date and the
+  source-tree folder as build marks, only the two update sizes the camera is known to take, the vector-table check,
+  refusal of several sensor programs, the withdrawn candidates refused by `verify` as by the app, and `photo-id`.
+- Done: `docs/03-FLASH-CANDIDATES.md` says the likely cause is firmware that does not fit the camera, not C's
   settings, and why the candidates stay withdrawn.
-- Done: official-size update files (0x169000 bytes): `pack --official-size` builds them, `verify` and the app accept
-  them and say what the final erase does (settings block erased: factory defaults and an empty photo list at the next
-  start; the stored photo data and the blocks above 0x1E0000 untouched). Not tested on hardware by this project; the
-  size itself is what Reto's updates and the film-mods files use.
-- Done: the pending 0.4 review fixes, on the branch as version 0.5: withdrawn C/A/B files picked from the phone are
-  refused (it was already so; checked), the photo warning says the restore file's photo list is empty, the README's
-  USB paragraph says what the first run showed, the eject button is off while a write or removal runs, old results
-  clear when a new action starts (a write clears the removal result and the other way round; picking a drive clears
-  both), the dead file chooser and the leftover wording are gone. Not done: the full Android build and the publish;
-  the build runs only in CI, and a push to `main` publishes.
-- Done: the toolkit and the app find the stamp, the build string and the sensor table by content, cross-check the
-  table against the code literal that points at it (0x7B91C in the public dump), name builds by a fingerprint over
-  0..0x169000 (the public dump VERIFIED; the film-mods build by the SHA-1 and byte sum its author reported), and say
-  everywhere that a build match tells which public image a file was made from, not whether it fits a camera. "Original
-  series" and the stamp are no longer treated as proof of anything.
-- Done: the research report carries a dated note with the corrections, including the sensor-write failure handling
-  (after 10 failed attempts at one register the rest of that table is abandoned and the caller ignores the error) and
-  the fact that the sensor is started at boot, before the card mounts.
+- Not verified on hardware: the official-size file's final erase (factory settings and an empty photo list at the
+  next start), `restore`'s new read-first flow on a real chip, and the donor route. Not yet run on a phone: version
+  0.5 of the app. It is published only when the branch is merged into `main`, which is your call.
+
+## Evidence from the camera's own photos
+
+Seven photos taken on the original firmware were copied straight off the card. Two more were rotated and saved again
+by the phone; they say nothing about the camera and are left out.
+
+- All seven have the same 624-byte header: SOF0 first, 1440x1080, Y sampling 4:2:0, a comment segment of length 11
+  holding exactly `GPEncoder`, two quantisation tables that are the standard IJG tables at quality 80, a restart
+  interval of 0, four Huffman tables, then the scan. No APP1, so no EXIF.
+- The public build writes the same frame size (its default), the same sampling, the same quality-80 tables (its
+  quality setting 1, which the dump's own settings hold) and the same Huffman tables, but always inside its 0x590-byte
+  EXIF header, with a comment of length 17 (`GPEncoder` and six spaces) and Make `Generalplus`, Model `CBB3`. Its one
+  path that could write a bare header into a photo file, a snapshot from a video frame, is never triggered by anything
+  in the firmware and could not carry quality-80 tables.
+- The header is byte for byte the firmware's bare template, apart from the bytes its encoder fills in, so the camera
+  wrote it: no phone or editor makes that exact comment segment.
+- Nothing in a photo names the sensor. The photos show that the build differed, not how.
 
 ## Build comparison details
 
-These come from the public dump plus the addresses in film-mods' `docs/NOTES.md` and `mods/*.c`, and were checked
-twice independently. The film-mods author confirmed the sensor table result from their own dump.
-
 - **Fingerprints over 0x000000–0x168FFF.**
-  - Public dump: SHA-1 `d1f21227ab402bc842134070acc29a77041b4a63`, byte sum 0x0852B369.
-  - film-mods build: SHA-1 `91499bd3bff3acde053cb8c8255a73cdeb6e3d33`, byte sum 0x0852C329.
-  - Both carry the stamp 202505201029: at file 0x218C4 in the public dump, 0x218D0 in film-mods'.
-- **Address offsets.** Film-mods addresses are RAM, and file = RAM + 0x200. Public file offset minus film file
-  offset is:
-  - −0x18 in early code;
-  - −0xC from about RAM 0x1E240 to 0x30F08;
-  - +0x374 from RAM 0x645E4 to 0xF3940;
-  - −0xC8 for the sensor and image data from 0xF5764 to 0xF7FCC;
-  - −0xC0 for RAM variables.
-
-  The public dump's 0x380 extra bytes lie between film RAM 0x30F08 and 0x645E4, mostly unused Wi-Fi/lwIP code.
-- **Sensor bus.** The bus is bit-banged, with clock on GPIO 0x11 and data on GPIO 0x12. The write address is
-  0x78 (7-bit 0x3C), with 8-bit registers and page select through register 0xFD.
-- **Sensor tables.** A reset table (`fd 00 20 00 ff ff`) at public file 0xF5BFC, then the 61-write init table
-  at 0xF5C6C. That table is 124 bytes, sha256 `aea3976b…`, starts `fd 00 2f 1b` and ends `ff ff`. There is one
-  1280x720 mode. Exposure goes to page 1 registers 0x03/0x04 and gain to 0x24, latched by 0x01 = 1.
-- **One sensor only.** One sensor is registered at boot, with no probe. The read routines are never called, so
-  no ID is read. The "Check chip id fail" string belongs to the unused Wi-Fi driver.
+  - Public dump: SHA-256 `bffddd53…`, SHA-1 `d1f21227ab402bc842134070acc29a77041b4a63`, byte sum 0x0852B369.
+  - film-mods build: SHA-256 `5b352e46…` (the whole restore file), SHA-1 `91499bd3bff3acde053cb8c8255a73cdeb6e3d33`,
+    byte sum 0x0852C329.
+  - Both carry the stamp 202505201029: at file 0x218C4 in the public dump, 0x218D0 in film-mods'. Both carry the build
+    string `JH5408  20250520` (0x18964 and 0x1897C). The compile dates differ (`Oct 14 2025` at 0xF3978, `Nov 19 2025`
+    at 0xF3604), and so do the source-tree folders in their 27 source paths (`v006`, `v008_test`). The ARM vector
+    tables (0x200..0x240) are identical.
+- **Offsets.** Public file offset minus film-mods file offset, measured from the bytes: 0 up to 0xAF80; −0x18 to
+  0x1D6FC; −0xC to 0x3A1A4; then rising through the network code to +0x374 by 0x5EE14; +0x374 to 0xF3FD1; falling to
+  −0xC8 by 0xF579C; −0xC8 to 0x109688 (sensor and image tables, read-only and initialised data); −0xC0 after that and
+  for RAM variables. The resource pack at 0x120000–0x169000 is byte-identical at the same offsets. Film-mods
+  addresses in that project's notes are RAM addresses, and file = RAM + 0x200.
+- **What differs.** The photo state's shutter sequence (film-mods plays the sound, then waits 200 ms; the public build
+  waits 20 ms, plays the sound, then waits 100 ms, and waits another 100 ms after a capture), a 50 ms wait-and-repost
+  guard in playback, the build strings and their placement, and small differences in network code that never runs.
+  The video state is identical.
+- **What is the same, byte for byte after relocation.** The sensor driver and its call tree (403 functions), the
+  bring-up order with its single 20 ms wait, the reset and init tables, the table writer (10 attempts per register),
+  the bus (bit-banged, clock on GPIO 0x11, data on GPIO 0x12, write address 0x78, 8-bit registers, page select
+  through register 0xFD), the boot GPIO table, the clock select, the sensor interface and its configuration, the image
+  processing, the exposure stepper, the tone and edge tables, and the preview path. Which GPIO powers down or resets
+  the sensor, and which register is its regulator, are UNKNOWN; every byte involved is identical.
+- **Sensor tables.** A reset table (`fd 00 20 00 ff ff`) at public file 0xF5BFC, then the 61-write init table at
+  0xF5C6C: 124 bytes, sha256 `aea3976b…`, starting `fd 00 2f 1b` and ending `ff ff`. Its first six writes are those
+  of the open-source SuperPix SP140A driver for 1-lane MIPI 1280x720, whose chip ID (0x14, 0x0A) sits at page-0
+  registers 0x02/0x03; this firmware never reads them. There is one 1280x720 mode. Exposure goes to page 1 registers
+  0x03/0x04 and gain to 0x24, latched by 0x01 = 1.
+- **One sensor only.** One sensor is registered at boot, with no probe. The read routines are never called, so no
+  ID is read. The "Check chip id fail" string belongs to the unused Wi-Fi driver.
