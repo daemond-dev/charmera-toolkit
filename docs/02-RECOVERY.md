@@ -107,7 +107,7 @@ and the camera will most likely not boot. That is [section C](#c-an-interrupted-
 
 This route opens the camera and clips a programmer onto the flash chip. It is the only known way to
 recover a camera that no longer boots (there is no documented boot-ROM recovery for this SoC, UNKNOWN
-status for the "ISP" header; see [section C](#c-an-interrupted-flash)). Done carefully it is routine; done at the wrong voltage it
+status for the "ISP" test pad; see [section C](#c-an-interrupted-flash)). Done carefully it is routine; done at the wrong voltage it
 can destroy the chip or the SoC. Read all of this section first.
 
 ### Tools
@@ -141,7 +141,19 @@ From JP's teardown (REPORTED):
 - Two small cross-head screws hold the board.
 - The viewfinder lens is loose once the shell is open and falls out. Put it somewhere safe.
 - The speaker wires are fragile. Do not let the speaker hang from them.
-- The battery is wired, not socketed, and taped to the board.
+- The battery is wired, not socketed: its leads are soldered to the B+ and B- pads on the back of the board, and the
+  cell is taped down. Do not short the bare B+ pad while working near it.
+
+What to photograph while it is open, to identify the parts (from byjp's board photos, 2026-08-20; VERIFIED there,
+compare yours):
+
+- The camera module's flex, where it runs from the lens holder to its 10-contact connector at the top edge of the
+  board's back (under a cream tape or glue patch). byjp's unit reads `KE28-V1`. A different code points to a
+  different module, and likely a different sensor. The lens is glued to the sensor, so do not try to read the die.
+- The board silkscreen near the battery pads (`DC28 5408A` on byjp's unit) and the processor's marking with its date
+  code (`GPCV2247F -QVM31 MPF6M23.00 2551` there). A different board code or revision letter points to a hardware
+  revision.
+- The flash chip, top right on the back between the processor and the buttons, for the clip.
 
 ### Identifying the flash chip
 
@@ -277,9 +289,9 @@ What is known and what is not:
 - A clip write interrupted part way leaves a mix of old and new data. Keep the clip on and run `restore`
   again; flashrom will erase and rewrite what differs. If the clip was already removed, start [section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)
   from the top.
-- No boot-ROM recovery mode is documented for the GPCV2247F (UNKNOWN). A 10-pin "ISP" header footprint
-  and a "3V" test pad exist on the board, but their pinout and function are not known (UNKNOWN). Do not
-  count on them. Without a clip write, a camera whose flash was partly erased is, as far as anyone has
+- No boot-ROM recovery mode is documented for the GPCV2247F (UNKNOWN). Single "ISP" and "3V" test pads
+  sit below the camera connector, and "RX_A6", "TX_A7" and "G" pads near the LED (probably a UART), but what
+  they do is not known (UNKNOWN). Do not count on them. Without a clip write, a camera whose flash was partly erased is, as far as anyone has
   published, unrecoverable.
 - If the camera still boots after an interruption (it was interrupted before the erase started, or
   "Program error" appeared), nothing was changed (VERIFIED for "Program error"). Go to [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card).

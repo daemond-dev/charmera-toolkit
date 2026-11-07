@@ -778,7 +778,8 @@ def test_pack_official_size_and_verify(tmp_path, synthetic_build):
     p = _named(tmp_path, official, "202611061200")
     # against the camera's own dump: everything passes, and the file carries nothing of the camera's own area
     by = {c.name: c for c in verify.verify_update(p, official, stock=img)}
-    assert by["size"].ok and by["size"].severity == "info" and "official update size" in by["size"].detail
+    assert by["size"].ok and by["size"].severity == "info" and "the official size" in by["size"].detail
+    assert "no official update file has ever been published" in by["size"].detail
     assert by["final-erase"].ok and by["final-erase"].severity == "warn" and "factory defaults" in by["final-erase"].detail
     assert by["sensor-table"].ok and by["sensor-table"].severity == "fail"       # a plain PASS
     assert by["software-region"].ok and "byte-identical to --stock" in by["software-region"].detail
@@ -796,7 +797,7 @@ def test_pack_official_size_and_verify(tmp_path, synthetic_build):
     # a resource pack that reaches past 0x169000 cannot be cut
     big = bytearray(img)
     big[checksum.OFFICIAL_UPDATE_SIZE + 0x100] = 0x55
-    with pytest.raises(ValueError, match="past the official update size"):
+    with pytest.raises(ValueError, match="past the official size"):
         pack.prepare_payload(bytes(big), official_size=True)
 
 
@@ -805,7 +806,7 @@ def test_pack_official_size_from_the_command_line(tmp_path, capsys, synthetic_bu
     src = tmp_path / "s.bin"; src.write_bytes(synthetic_image([make_record()]))
     assert cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "202611061200", "--official-size"]) == 0
     out = capsys.readouterr().out
-    assert "the official update size" in out and "final erase:     block 0x170000" in out
+    assert "the official size, as the film-mods files" in out and "final erase:     block 0x170000" in out
     assert "settings:        none in the file" in out and "stored photos:   none in the file" in out
     assert cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "202611061200", "--official-size",
                      "--i-understand-this-file-flashes-a-camera"]) == 0

@@ -42,7 +42,7 @@ public dump and the build on the charmera-film-mods author's camera, which has d
 it from their own dump on 2026-11-06). The build string, the compile date, the yellow boot screen and the
 "original series" body do not tell them apart either. So:
 
-- The toolkit names a build by a fingerprint over its bytes: SHA-256 of 0..0x169000 (the span official updates write)
+- The toolkit names a build by a fingerprint over its bytes: SHA-256 of 0..0x169000 (the span an official-size file writes)
   for the public dump, `bffddd53…`; SHA-1 `d1f21227…` and byte sum `0852B369` over the same span, which is what the
   film-mods author compared against (their build: SHA-1 `91499bd3…`, sum `0852C329`). A modified copy of a known build
   is recognised by its marks lying where that build keeps them.
@@ -62,7 +62,8 @@ it from their own dump on 2026-11-06). The build string, the compile date, the y
 
 - Two lengths. The community files are 0x1E0000 bytes: the first 0x1E0000 bytes of a dump, including the settings
   bank and the photo slots of whoever made it (`pack` can blank those), and the updater's extra erase lands on the
-  blank block 0x1F0000. Official updates and the film-mods files are 0x169000 bytes (`pack --official-size`): the
+  blank block 0x1F0000. The film-mods files are 0x169000 bytes (`pack --official-size`, a name taken from that
+  project's reading that official updates would end there; no official Charmera update has ever been published): the
   code and the whole resource pack, nothing of the camera's own area, and the extra erase lands on 0x170000, the
   settings bank and the photo directory, so the camera starts with factory defaults and an empty photo list; the
   stored photo data at 0x180000 and the blocks above 0x1E0000 are not touched. `pack` also takes a software-only
@@ -72,7 +73,7 @@ it from their own dump on 2026-11-06). The build string, the compile date, the y
 - `<stamp>` is 12 ASCII digits (0-9 only; the camera reads fixed character positions) and must differ from the stamp
   compiled into the running firmware or the updater ignores the file. Both known builds carry `202505201029`. The
   toolkit never changes the stamp inside the file, so a toolkit-built file flashes again at every power-on while it is
-  on the card; an official file carries its own stamp inside and is ignored once it runs.
+  on the card; the film-mods tool writes the new stamp inside its files too, so a camera ignores them once it runs one.
 - `<sum>` is the unsigned 32-bit sum of every byte of the file, as 8 hex digits. A mismatch shows "Program error"
   and nothing is written.
 - The updater looks only in the card's root, only during the first 5 seconds after power-on, erases 64 KiB

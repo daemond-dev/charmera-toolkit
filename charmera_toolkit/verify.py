@@ -292,7 +292,7 @@ def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow
         if marks.stamp is not None:
             if marks.stamp == name.stamp:
                 checks.append(Check("stamp-in-file", True, f"the file's own stamp at {marks.stamp_offset:#x} is {marks.stamp}, the same as in "
-                                    "its name, so a camera that runs this file ignores it afterwards (as official update files behave)", "info"))
+                                    "its name, so a camera that runs this file ignores it afterwards (as the film-mods files do)", "info"))
             else:
                 checks.append(Check("stamp-in-file", True, f"the file's own stamp at {marks.stamp_offset:#x} is {marks.stamp}, not the "
                                     f"{name.stamp} in its name, so a camera that runs this file flashes it again at every power-on while "
@@ -305,8 +305,9 @@ def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow
         checks.append(Check("size", True, f"{n} bytes = 30 blocks of 64 KiB, the size the community update files use (writes the settings "
                             "bank and the stored photos too)"))
     elif n == OFFICIAL_UPDATE_SIZE:
-        checks.append(Check("size", True, f"{n} bytes = the official update size: code, data and the resource pack only; nothing of the "
-                            "camera's own area (settings, stored photos) is written", "info"))
+        checks.append(Check("size", True, f"{n} bytes = the official size (the film-mods files' size; no official update file has ever been "
+                            "published): code, data and the resource pack only; nothing of the camera's own area (settings, stored "
+                            "photos) is written", "info"))
     elif n % 0x100 == 0 and SOFTWARE_END <= n <= 0x200000:
         checks.append(Check("size", True, f"{n} bytes, whole 256-byte pages" + ("" if n % BLOCK_SIZE == 0 else "; not a whole number of 64 KiB blocks (the remainder of the last block stays erased)"), "info"))
     elif n % 0x100:

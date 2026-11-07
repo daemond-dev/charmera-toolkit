@@ -312,7 +312,7 @@ def software_sha256(image: bytes) -> str:
 
 
 def official_fingerprint(image: bytes) -> Optional[tuple]:
-    """(sha256, sha1, byte sum) of bytes 0..0x169000, the span official updates write, or None if shorter."""
+    """(sha256, sha1, byte sum) of bytes 0..0x169000, the span an official-size file writes, or None if shorter."""
     if len(image) < OFFICIAL_UPDATE_SIZE:
         return None
     span = image[:OFFICIAL_UPDATE_SIZE]

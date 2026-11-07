@@ -74,7 +74,8 @@ charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jp
 or a software-only image of exactly 0x170000 bytes (the last two padded with an erased settings bank and a zeroed photo
 directory; the plan shows the padding, and names any damaged resource entry that `verify` will refuse). It refuses any
 other length below 0x1E0000 as truncated, because padding a cut-off download would put 0xFF over part of the code or
-the resource pack. `--official-size` cuts the result at 0x169000, where official updates end: the file then writes the
+the resource pack. `--official-size` cuts the result at 0x169000, where the film-mods files end (and official updates
+would, by that project author's reading of the updater; no official Charmera update has ever been published): the file then writes the
 code and the resources only, nothing of another camera's settings or photos, and the camera's final erase lands on the
 settings block, so it starts with factory settings and an empty photo list while its stored photo data and the blocks
 above 0x1E0000 are left alone ([Image layout](11-FORMAT.md#update-file-jh_5408stamp_sumbin)). `--out` must be a folder

@@ -92,7 +92,7 @@ def prepare_payload(image: bytes, blank_settings: bool = False, blank_photos: bo
     if official_size:
         end = find_resources_end(bytes(payload))
         if end > OFFICIAL_UPDATE_SIZE:
-            raise ValueError(f"the image holds data up to {end:#x}, past the official update size {OFFICIAL_UPDATE_SIZE:#x} (the "
+            raise ValueError(f"the image holds data up to {end:#x}, past the official size {OFFICIAL_UPDATE_SIZE:#x} (the "
                              "resource pack, or something between it and the settings bank such as the factory self-test sector at "
                              "0x16E000, blank in every known build); an official-size file would drop it. Build the 0x1E0000-byte file "
                              "instead.")
@@ -125,7 +125,7 @@ def describe(payload: bytes, stamp: str, input_len: Optional[int] = None) -> str
     lines += [
         f"filename:        {name.filename}",
         f"size:            {len(payload)} bytes ({len(payload) // 0x10000} blocks of 64 KiB"
-        + (f" plus {len(payload) % 0x10000:#x} bytes; the official update size" if official else "; the community update size") + ")",
+        + (f" plus {len(payload) % 0x10000:#x} bytes; the official size, as the film-mods files" if official else "; the community update size") + ")",
         f"final erase:     block {extra:#x}: {describe_erase_target(extra)}",
         f"byte sum:        {name.checksum:08X}",
         f"sha256:          {hashlib.sha256(payload).hexdigest()}",

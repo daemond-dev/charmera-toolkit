@@ -17,8 +17,8 @@ import java.util.zip.Inflater;
 
 /**
  * The checks `charmera verify` makes, for the two update-file sizes the camera is known to take: 0x1E0000 bytes (the
- * community files) and 0x169000 bytes (official updates). No Android imports, so it runs on a plain JVM for the tests in
- * android/test.
+ * community files) and 0x169000 bytes (the film-mods files' size, called official). No Android imports, so it runs on
+ * a plain JVM for the tests in android/test.
  *
  * A file passes only when every FAIL-level check passes. WARN lines are shown and do not block.
  *
@@ -33,7 +33,10 @@ import java.util.zip.Inflater;
 public final class UpdateCheck {
 
     public static final int UPDATE_SIZE = 0x1E0000;
-    /** Where official updates and the film-mods files end: code, data and the resource pack, nothing of the camera's own area. */
+    /**
+     * Where the film-mods files end (and official updates would, per their author; none has been published): code,
+     * data and the resource pack, nothing of the camera's own area.
+     */
     public static final int OFFICIAL_SIZE = 0x169000;
     public static final String PRODUCT = "5408";
     /** The stamp both known builds carry (the public dump and the film-mods author's build): it identifies neither. */
@@ -78,7 +81,7 @@ public final class UpdateCheck {
         final String softwareSha256;
         /** sha256 of bytes 0..0x120000: header, code and data, everything below the resource pack. */
         final String codeAreaSha256;
-        /** sha256 of bytes 0..0x169000: what an official update writes. */
+        /** sha256 of bytes 0..0x169000: what an official-size file writes. */
         final String officialSha256;
         /** sha256 of the sensor init table, end marker included. */
         final String sensorSha256;
@@ -564,9 +567,9 @@ public final class UpdateCheck {
             out.add(new Line(Level.INFO, "final-erase", "After the update", "the camera also erases the last part of"
                     + " its memory, which is empty anyway. Nothing to do.", "block 0x1F0000, 64 KiB."));
         } else if (official) {
-            out.add(new Line(Level.INFO, "size", "Size", "the right size: the one official updates have. It holds the"
-                    + " program, the pictures, the sounds and the menus only, nothing of another camera's settings or"
-                    + " photos.", bytes(n) + ", 22 blocks of 64 KiB and part of the 23rd."));
+            out.add(new Line(Level.INFO, "size", "Size", "the right size: the shorter of the two the camera takes, as the"
+                    + " film-mods files are. It holds the program, the pictures, the sounds and the menus only, nothing of"
+                    + " another camera's settings or photos.", bytes(n) + ", 22 blocks of 64 KiB and part of the 23rd."));
             out.add(new Line(Level.WARN, "final-erase", "After the update", "the camera also erases its settings"
                     + " block. At the next start it uses factory settings and an empty photo list: the photos in its"
                     + " own memory stay there, but are no longer shown. Nothing above that block is touched.",

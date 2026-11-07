@@ -49,7 +49,7 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         print(f"software sha256: {info['software_sha256']}  (bytes 0..0x170000)")
     fp = info.get("official_fingerprint")
     if fp:
-        print(f"official span:   sha1 {fp[1]}  byte sum {fp[2]:08X}  (bytes 0..0x169000, what official updates write; the film-mods author's build is 91499bd3... / 0852C329)")
+        print(f"official span:   sha1 {fp[1]}  byte sum {fp[2]:08X}  (bytes 0..0x169000, what an official-size file writes; the film-mods author's build is 91499bd3... / 0852C329)")
 
     # Filename check when it looks like an update file.
     try:
