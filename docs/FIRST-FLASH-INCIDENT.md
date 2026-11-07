@@ -233,7 +233,7 @@ The second session found these in the first follow-up:
 
 ## Open work in the toolkit
 
-Status at the end of the evening of 2026-11-06, on the branch `claude/charmera-firmware-toolkit-0kilzl`:
+Status on the morning of 2026-11-07, on the branch `claude/charmera-firmware-toolkit-0kilzl`:
 
 - Done: "no backup of your own camera, no flash" in every tool that writes. The app writes to the card only while a
   dump of the camera's own chip is on record and the update file was checked against that very dump; `restore` reads
@@ -246,6 +246,12 @@ Status at the end of the evening of 2026-11-06, on the branch `claude/charmera-f
   refusal of several sensor programs, the withdrawn candidates refused by `verify` as by the app, and `photo-id`.
 - Done: `docs/03-FLASH-CANDIDATES.md` says the likely cause is firmware that does not fit the camera, not C's
   settings, and why the candidates stay withdrawn.
+- Done: two more review rounds, each with its fixes checked by a reviewer who changed nothing. The donor route checks
+  the vector table and refuses several sensor programs in either file; `restore` refuses an image with several and
+  asks a second time when the chip has none or several; a file counts as a known build "with changes" only with that
+  build's stamp, sensor table, source-tree folder and compile date, in `verify` and the app alike; the app refuses a
+  read named as unverified as its backup; `photo-id` says no more than a header shows. On the branch, 399 Python
+  tests pass (39 skipped for a missing tool or another system) and the four JVM suites pass 153, 22, 43 and 18.
 - Not verified on hardware: the official-size file's final erase (factory settings and an empty photo list at the
   next start), `restore`'s new read-first flow on a real chip, and the donor route. Not yet run on a phone: version
   0.5 of the app. It is published only when the branch is merged into `main`, which is your call.
