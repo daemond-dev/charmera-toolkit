@@ -1,6 +1,6 @@
 # The first flash: what was done and what went wrong
 
-Written 2026-11-06, and brought up to date the same evening by a second session. Times are UTC.
+Written 2026-11-06, and brought up to date by a second session that evening and into 11-07. Times are UTC.
 
 ## Where things stand
 
@@ -18,9 +18,13 @@ The most likely cause is firmware that does not fit this camera's hardware. The 
 - Seven photos it took on that firmware survive unedited. Their JPEG header is the bare 624-byte kind, with no EXIF
   block. Neither known build writes a still photo that way: both write every still photo with the 0x590-byte EXIF
   header, at every size, quality and clock setting, and use the bare header only for thumbnails, video frames and
-  the USB-camera and Wi-Fi streams. That is VERIFIED by two independent static analyses of the public dump, and the
-  film-mods build is the same code there. So the camera's original firmware was a third build, one nobody has
-  published (INFERRED, strongly).
+  a Wi-Fi stream. That is VERIFIED by two independent static analyses of the public dump, and the film-mods build is
+  the same code there. So the camera's original firmware was a third build, one nobody has published (INFERRED,
+  strongly). The photos' header is itself the known builds' bare template with the size and quality filled in, so
+  this rests on that analysis of where the template is used, not on anything foreign in the photos.
+- Another owner, phobits, wrote on 2026-09-06 that their Charmera writes no EXIF block at all (REPORTED, in
+  [a pull request to an EXIF fixer](https://github.com/RAIT-09/kodak-charmera-exif-fixer/pull/3)). If that camera
+  was never flashed, a build like this camera's was already in other units by September (INFERRED).
 - The public dump froze the camera the same way twice, once modified (candidate C) and once unmodified (the stock
   restore file). Millennium and CLOT owners report the same symptom with the same image.
 - The two known builds are identical in everything that touches the sensor: power, reset, clock, the bus pins and
@@ -59,9 +63,10 @@ November 2026 can carry a later build.
   B is A with the sound files silenced.
 - **Charmera Card**, the Android app. It downloads the dump, checks its hash and makes the stock restore file. It
   writes that file to the camera's card over the camera's USB-C cable, then walks through the flash and cleanup.
-  Builds are signed with a permanent key and published by GitHub Actions. Version 0.4 is published, and it has no
-  backup step: it must not be used to flash. Version 0.5, with the backup step, the write gate and the review fixes,
-  is on the branch `claude/charmera-firmware-toolkit-0kilzl` and has not been published.
+  Builds are signed with a permanent key and published by GitHub Actions. Version 0.4 has no backup step and must
+  not be used to flash. When the repository went public on 11-06, its release was turned back into a draft, so its
+  download link is offline until 0.5 is published. Version 0.5, with the backup step, the write gate and the review
+  fixes, is on the branch `claude/charmera-firmware-toolkit-0kilzl` and has not been published.
 
 ## Timeline
 
@@ -111,6 +116,18 @@ November 2026 can carry a later build.
   - The two known builds were diffed byte for byte: they drive the sensor identically.
   - What a working camera reveals without being opened: roughly which build it runs, through its photos, its videos
     and its Setup > Version screen; never its firmware or its sensor.
+- **11-07, early: the same session.**
+  - You made the repository public. Its history held nothing private: every commit uses the noreply address, and no
+    photo, dump, archive or APK was ever committed. Since 0.4 and `main`'s app README were now public, the 0.4
+    release was turned back into a draft at your request.
+  - Your follow-up on Hyperlite-Media/charmera-film-mods#1 was posted at 04:44. It asks the author when and where they
+    bought their camera.
+  - You bought a second, unmodified camera and would rather not open it. Photos copied straight off its card can show
+    whether it writes the same bare header as this camera did; its firmware can only be had by opening it.
+  - The search of GitHub found no Charmera firmware beyond the two known builds and copies of them. Four of its ten
+    passes came back empty and were run again.
+  - Neither known build has the card-triggered whole-flash backup that some older firmware from the same factory has
+    (no `FirmwareUpgrade_Msg.ini` or `Firmware_Backup` string in either; VERIFIED by string search).
 
 ## What I got wrong
 
@@ -187,11 +204,16 @@ The second session found these in the first follow-up:
    Its firmware can then only be had by reading its chip with a clip: a stock camera gives none of it up over USB
    (VERIFIED: its memory-read commands need an authorisation level that nothing sets). The donor route takes that
    read ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
-3. **The community.** Project-Sirius #2 has no reply yet. The film-mods author and aschenbecherwespe (recharmera)
-   have working cameras and readers, but both their builds are known ones, and neither has said when or where their
-   camera was bought. isaackwok, a CLOT owner, offered on 2026-10-04 to post a CLOT dump; nothing since. What to ask
-   anyone: one unedited photo straight off the card, a photo of the camera module's flex, when and where they bought
-   the camera, and, from anyone with a clip, a dump.
+   The first candidate is your second camera, unmodified and yours. If its photos match, a read of its chip is the
+   only known copy of a firmware that should fit this camera; whether it does stays unverified until it is tried.
+3. **The community.** Project-Sirius #2 has no reply yet. The film-mods author has a working camera and a reader, but
+   their build is a known one; they advised against their files, and your question about when and where they bought
+   theirs is open. aschenbecherwespe (recharmera) also runs a known build. isaackwok, a CLOT owner, offered on
+   2026-10-04 to post a CLOT dump; nothing since. Photos straight off the card are the first thing to ask anyone
+   for, and asks are drafted for arjunbazinga (whose camera has never been flashed), Seabass567 (who works from photos
+   and asked owners for dump hashes) and phobits (whose camera writes no EXIF); none is posted yet. What to ask
+   anyone: one unedited photo straight off the card, a photo of the camera module's flex, when and in which country
+   they bought the camera, and, from anyone with a clip, a dump.
 4. **Identify the sensor.** Open the camera ([Recovery, section B](02-RECOVERY.md#opening-the-camera)) and
    photograph the camera module's flex (byjp's unit reads `KE28-V1`), the board silkscreen (`DC28 5408A` there) and
    the processor's marking with its date code. A different flex code points to a different module. The same code
@@ -238,7 +260,8 @@ by the phone; they say nothing about the camera and are left out.
   path that could write a bare header into a photo file, a snapshot from a video frame, is never triggered by anything
   in the firmware and could not carry quality-80 tables.
 - The header is byte for byte the firmware's bare template, apart from the bytes its encoder fills in, so the camera
-  wrote it: no phone or editor makes that exact comment segment.
+  wrote it: no phone or editor makes that exact comment segment. `tests/test_photo_id.py` holds this against the
+  dump: the template filled with 1440x1080, 4:2:0 and the quality-80 tables gives the photos' header exactly.
 - Nothing in a photo names the sensor. The photos show that the build differed, not how.
 
 ## Build comparison details
