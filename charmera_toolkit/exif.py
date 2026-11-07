@@ -86,6 +86,7 @@ TYPE_UNDEFINED = 7
 TAG_MAKE = 0x010F
 TAG_MODEL = 0x0110
 TAG_ORIENTATION = 0x0112
+TAG_SOFTWARE = 0x0131
 TAG_DATETIME = 0x0132
 TAG_YCBCR_POSITIONING = 0x0213
 TAG_EXIF_IFD = 0x8769
@@ -212,6 +213,7 @@ class ExifInfo:
     date_time: str = ""
     date_time_original: str = ""
     date_time_digitized: str = ""
+    software: str = ""  # read for photo-id; the rebuilt EXIF does not carry it
 
 
 def read_exif(tiff: bytes) -> ExifInfo:
@@ -254,6 +256,8 @@ def _read_dir(tiff: bytes, order: str, off: int, info: ExifInfo, in_exif: bool) 
                 info.make = _read_ascii(tiff, order, value, typ, cnt)
             elif tag == TAG_MODEL:
                 info.model = _read_ascii(tiff, order, value, typ, cnt)
+            elif tag == TAG_SOFTWARE:
+                info.software = _read_ascii(tiff, order, value, typ, cnt)
             elif tag == TAG_DATETIME:
                 info.date_time = _read_ascii(tiff, order, value, typ, cnt)
             elif tag == TAG_EXIF_IFD and typ == TYPE_LONG:

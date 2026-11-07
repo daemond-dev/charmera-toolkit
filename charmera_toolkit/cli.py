@@ -14,6 +14,7 @@ FEATURE_MODULES = [
     ("charmera_toolkit.inspect_cmd", "inspect: parse a dump or update file"),
     ("charmera_toolkit.verify", "verify: check an update file before it goes anywhere near a card"),
     ("charmera_toolkit.diff_cmd", "diff: compare two images region by region"),
+    ("charmera_toolkit.photo_id", "photo-id: what a photo's header shows about the firmware that took it"),
     ("charmera_toolkit.pack", "pack: build an update file (output gated)"),
     ("charmera_toolkit.sounds", "sounds: list, extract, mute or replace the UI sounds"),
     ("charmera_toolkit.resources", "resources: list, extract or replace entries of the resource pack"),
