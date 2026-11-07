@@ -101,8 +101,8 @@ def test_the_owners_photo_has_the_bare_header_neither_known_build_writes_for_a_p
     assert cli.main(["photo-id", str(FIXTURE)]) == 0
     out = capsys.readouterr().out
     assert "the bare template, no EXIF block, 0x270 bytes" in out and "IJG quality 80" in out and "1440x1080" in out
-    assert conclusion(out) == ("a bare header that neither known build writes for a still photo: a camera whose photos look "
-                               "like this runs another build")
+    assert conclusion(out) == ("a bare header that neither known build writes for a still photo: the camera ran another "
+                               "build when it took this photo")
 
 
 def test_the_owners_header_is_the_bare_template_with_its_size_and_quality(stock_image):
@@ -193,11 +193,12 @@ def test_what_another_program_or_another_build_could_write_tells_neither(tmp_pat
     assert conclusion(text) == EITHER and photo_id.CONCLUSIONS["resave-or-build"] == EITHER
 
 
-def test_a_header_without_tables_is_cut_short_or_not_a_cameras(tmp_path):
-    """A header without its DQT or its DHT segments is no camera's as it is: nothing to conclude from it (the round-two
-    review's SOI SOF0 SOS, and SOI APP1 with a truncated TIFF then SOS, among them)."""
-    no_tables = ("a header without its quantisation tables (DQT) or its Huffman tables (DHT) is cut short or not a camera's: "
-                 "nothing to conclude from it")
+def test_a_header_without_tables_leaves_nothing_to_conclude(tmp_path):
+    """A header without its DQT or its DHT segments is cut short, or comes from an encoder that leaves them out:
+    nothing to conclude from it (the round-two review's SOI SOF0 SOS, and SOI APP1 with a truncated TIFF then SOS,
+    among them)."""
+    no_tables = ("a header without its quantisation tables (DQT) or its Huffman tables (DHT) is cut short, or comes from "
+                 "an encoder that leaves them out: nothing to conclude from it")
     for data, missing in ((b"\xff\xd8" + sof() + SOS, ["no DQT segment", "no DHT segment"]),
                           (b"\xff\xd8" + seg(0xE1, b"Exif\x00\x00II") + SOS, ["no DQT segment", "no DHT segment"]),
                           (b"\xff\xd8" + sof() + dqt(80) + SOS, ["no DHT segment"])):
@@ -285,13 +286,14 @@ def test_help_explains_what_the_conclusions_mean():
     text = " ".join(sub.format_help().split()).replace("- ", "-")     # argparse may wrap a line after a hyphen
     for words in ("only the header", "never more than the first 64 KiB", "Make Generalplus, Model CBB3 and Software 20150615",
                   "only for thumbnails, video frames and a Wi-Fi stream",
-                  "a camera whose photos look like this runs another build", "says nothing about the camera",
+                  "the camera ran another build when it took the photo", "says nothing about the camera",
                   "an XMP block, an APP2, APP13 or APP14 segment, a progressive frame or a size taller than wide",
                   "'Neither known build writes this header as it is': an EXIF Make other than Generalplus, a JFIF segment, "
                   "the still comment without its EXIF block, or tables the camera's encoder never writes",
                   "another program may have saved the file again, or another build may have written it, and nothing here "
-                  "tells which", "A header without its quantisation tables or its Huffman tables is cut short or not a camera's",
-                  "the frame header does not tell the known builds apart (INFERRED)",
+                  "tells which", "A header without its quantisation tables or its Huffman tables is cut short, or comes from "
+                  "an encoder that leaves them out",
+                  "does not tell the known builds apart (INFERRED), any other frame header is not the one they write",
                   "a JUNK text other than 'GP$322 Generalplus AviPackerV3 20140916', the packer text both carry, shows that "
                   "other code wrote the file",
                   "does not show which build it runs", "a frame taken out of a video without re-encoding has the bare header too",
@@ -342,6 +344,25 @@ def test_the_frame_header_of_a_video_does_not_tell_the_known_builds_apart(tmp_pa
     assert conclusion(report(tmp_path, avi(edited), "MOVI0003.avi")) == RESAVED
     jfif = b"\xff\xd8" + JFIF + frame[2:]
     assert conclusion(report(tmp_path, avi(jfif), "MOVI0004.avi")) == EITHER
+    # the template fixes its frame, its restart interval and its four Huffman tables, so a frame that differs in any of
+    # them is not the one the known builds write, whatever its segment order (the round-three review's DHT and DRI)
+    t0 = photo_id.STANDARD_DHT[0]
+    other_dht = frame.replace(t0, t0[:-1] + bytes([t0[-1] ^ 1]))
+    assert conclusion(report(tmp_path, avi(other_dht), "MOVI0007.avi")) == EITHER
+    other_dri = frame.replace(DRI, seg(0xDD, b"\x00\x10"))
+    text = report(tmp_path, avi(other_dri), "MOVI0008.avi")
+    assert "no DRI 0" in text and conclusion(text) == photo_id.NOT_VIDEO
+    # MJPEG writers may leave the Huffman tables out of a frame; the known builds' frames carry all four
+    no_dht = b"\xff\xd8" + seg(0xE0, b"AVI1\x00" + b"\x00" * 9) + frame[2:].replace(DHT, b"")
+    text = report(tmp_path, avi(no_dht), "MOVI0009.avi")
+    assert "no DHT segment" in text and conclusion(text) == photo_id.NOT_VIDEO
+    assert "not a camera" not in text
+    # the frames' quality follows a rate control, so quantisation tables no IJG quality reproduces are no sign of
+    # other code in a frame that is otherwise the template's
+    rated = bytearray(frame)
+    rated[frame.index(b"\xff\xdb") + 15] += 1
+    assert header_of(bytes(rated)).qualities == []
+    assert conclusion(report(tmp_path, avi(bytes(rated)), "MOVI0010.avi")) == video
 
 
 def test_a_junk_text_other_than_the_packers_shows_other_code_wrote_the_video(tmp_path):
