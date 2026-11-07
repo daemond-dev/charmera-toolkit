@@ -1190,6 +1190,9 @@ def test_stock_image_as_stock_is_named_a_public_dump(stock_image, tmp_path):
 
 
 FILM_MODS_RESTORE = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
+# The name the film-mods release publishes the file under. The checks read the stamp and the sum from the name, so
+# the tests give the bytes this name, whatever the local copy is called (CI saves it as film-restore.bin).
+FILM_MODS_RESTORE_NAME = "JH_5408202505201029_0852C329.bin"
 
 
 @pytest.mark.skipif(not FILM_MODS_RESTORE.is_file(), reason="set CHARMERA_FILM_MODS_RESTORE to the film-mods Charmera_Restore file")
@@ -1200,7 +1203,7 @@ def test_film_mods_restore_file_is_named_by_its_fingerprint(tmp_path):
     assert m.marks.compiled == b"Nov 19 2025" and m.marks.stamp_offset == 0x218D0 and m.marks.build_offset == 0x1897C
     assert m.marks.sensor.sha256 == image.PUBLIC_BUILD.sensor_table_sha256
     # its stamp is the one both builds run, so a camera running either ignores it, and verify says so
-    by = {c.name: c for c in verify.verify_update(tmp_path / FILM_MODS_RESTORE.name, data)}
+    by = {c.name: c for c in verify.verify_update(tmp_path / FILM_MODS_RESTORE_NAME, data)}
     assert not by["stamp"].ok and "the charmera-film-mods author's build" in by["build"].detail
     # its vector table is the one image.py carries for that build, and its sensor literal is aligned
     assert image.vector_table_sha256(data) == image.FILM_MODS_BUILD.vector_table_sha256
@@ -1217,7 +1220,7 @@ def test_film_mods_restore_file_source_tree(tmp_path):
     assert (m.source_tree, m.source_tree_paths) == (image.FILM_MODS_BUILD.source_tree, 27) == ("v008_test", 27)
     assert data[m.source_tree_offset - 11: m.source_tree_offset] == b"\\2247\\5408\\"
     assert f"source tree:     v008_test at {m.source_tree_offset:#x}, named by 27 source paths" in pack.describe(data, "202611061433")
-    by = _checks(tmp_path / FILM_MODS_RESTORE.name, data)
+    by = _checks(tmp_path / FILM_MODS_RESTORE_NAME, data)
     assert "source tree v008_test" in by["series"].detail
 
 

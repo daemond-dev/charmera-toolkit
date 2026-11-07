@@ -780,9 +780,10 @@ public final class UpdateCheckTest {
 
         String film = System.getenv("CHARMERA_FILM_MODS_RESTORE");
         if (film != null && !film.isEmpty()) {
-            File f = new File(film);
-            byte[] d = Files.readAllBytes(f.toPath());
-            r = UpdateCheck.check(f.getName(), d);
+            // The name the release publishes it under: the stamp and the sum are read from the name, and a local copy
+            // may be called anything (CI saves it as film-restore.bin).
+            byte[] d = Files.readAllBytes(new File(film).toPath());
+            r = UpdateCheck.check("JH_5408202505201029_0852C329.bin", d);
             expect("the film-mods restore file is named by its fingerprint and refused for its stamp", !r.ok
                     && line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("charmera-film-mods")
                     && line(r, "stamp", UpdateCheck.Level.FAIL) && text(r, "series").contains("compiled Nov 19 2025"), r);
