@@ -130,6 +130,8 @@ November 2026 can carry a later build.
     GitHub, such as Reddit (blocked here), Discord and Chinese forums.
   - Neither known build has the card-triggered whole-flash backup that some older firmware from the same factory has
     (no `FirmwareUpgrade_Msg.ini` or `Firmware_Backup` string in either; VERIFIED by string search).
+  - At 06:54 your three asks for photos straight off the card went up, to arjunbazinga, Seabass567 and phobits
+    ([Routes, 3](#routes-to-a-working-camera)). Each was checked for its facts and its wording first.
 
 ## What I got wrong
 
@@ -212,8 +214,12 @@ The second session found these in the first follow-up:
    their build is a known one; they advised against their files, and your question about when and where they bought
    theirs is open. aschenbecherwespe (recharmera) also runs a known build. isaackwok, a CLOT owner, offered on
    2026-10-04 to post a CLOT dump; nothing since. Photos straight off the card are the first thing to ask anyone
-   for, and asks are drafted for arjunbazinga (whose camera has never been flashed), Seabass567 (who works from photos
-   and asked owners for dump hashes) and phobits (whose camera writes no EXIF); none is posted yet. alicanadal, who has
+   for, and on 11-07 you asked for them from arjunbazinga, whose camera has never been flashed
+   ([discussion #62](https://github.com/arjunbazinga/arjunbazinga.github.io/discussions/62)), Seabass567, who works
+   from photos and asked owners for dump hashes
+   ([comment](https://github.com/mombotro/Godox-C100-GHDK/issues/1#issuecomment-6703607185)), and phobits, whose
+   camera writes no EXIF
+   ([comment](https://github.com/RAIT-09/kodak-charmera-exif-fixer/pull/3#issuecomment-6703607354)). alicanadal, who has
    an orange Millennium unit, offered untouched sample photos in RickCaleg/charmera-importer#18; their header would
    show whether that edition's firmware writes photos the way this camera's did. What to ask
    anyone: one unedited photo straight off the card, a photo of the camera module's flex, when and in which country
