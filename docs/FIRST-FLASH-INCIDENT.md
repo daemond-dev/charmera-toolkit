@@ -125,7 +125,9 @@ November 2026 can carry a later build.
   - You bought a second, unmodified camera and would rather not open it. Photos copied straight off its card can show
     whether it writes the same bare header as this camera did; its firmware can only be had by opening it.
   - The search of GitHub found no Charmera firmware beyond the two known builds and copies of them. Four of its ten
-    passes came back empty and were run again.
+    passes came back empty and were run again, and the re-run found nothing that could restore the camera either. It
+    did find one more owner who offers untouched photos, of a Millennium unit. Not searched: anything outside
+    GitHub, such as Reddit (blocked here), Discord and Chinese forums.
   - Neither known build has the card-triggered whole-flash backup that some older firmware from the same factory has
     (no `FirmwareUpgrade_Msg.ini` or `Firmware_Backup` string in either; VERIFIED by string search).
 
@@ -211,7 +213,9 @@ The second session found these in the first follow-up:
    theirs is open. aschenbecherwespe (recharmera) also runs a known build. isaackwok, a CLOT owner, offered on
    2026-10-04 to post a CLOT dump; nothing since. Photos straight off the card are the first thing to ask anyone
    for, and asks are drafted for arjunbazinga (whose camera has never been flashed), Seabass567 (who works from photos
-   and asked owners for dump hashes) and phobits (whose camera writes no EXIF); none is posted yet. What to ask
+   and asked owners for dump hashes) and phobits (whose camera writes no EXIF); none is posted yet. alicanadal, who has
+   an orange Millennium unit, offered untouched sample photos in RickCaleg/charmera-importer#18; their header would
+   show whether that edition's firmware writes photos the way this camera's did. What to ask
    anyone: one unedited photo straight off the card, a photo of the camera module's flex, when and in which country
    they bought the camera, and, from anyone with a clip, a dump.
 4. **Identify the sensor.** Open the camera ([Recovery, section B](02-RECOVERY.md#opening-the-camera)) and
