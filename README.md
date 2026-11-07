@@ -7,7 +7,7 @@ standard library only.
 Status: every command is tested on synthetic images, and on real firmware when the public files are given
 ([Tests](#tests) says which). One camera has been flashed with files from the public dump, and it did not fit: the
 camera boots but cannot take pictures ([what happened](docs/FIRST-FLASH-INCIDENT.md)). The rule that follows: **no
-backup of your own camera, no flash.** The app holds to it from version 0.5, which is not published yet (below); on a
+backup of your own camera, no flash.** The app holds to it from version 0.5 (below); on a
 computer `stage` warns and leaves the stop to you (the [ground rules](#commands) below say exactly what each command
 does). [Flash candidates](docs/03-FLASH-CANDIDATES.md) records the withdrawn files and what the flashes showed.
 

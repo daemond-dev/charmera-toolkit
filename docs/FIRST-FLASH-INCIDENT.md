@@ -256,8 +256,9 @@ Status on the morning of 2026-11-07, on the branch `claude/charmera-firmware-too
   the vector table and refuses several sensor programs in either file; `restore` refuses an image with several and
   asks a second time when the chip has none or several; a file counts as a known build "with changes" only with that
   build's stamp, sensor table, source-tree folder and compile date, in `verify` and the app alike; the app refuses a
-  read named as unverified as its backup; `photo-id` says no more than a header shows. On the branch, 399 Python
-  tests pass (39 skipped for a missing tool or another system) and the four JVM suites pass 153, 22, 43 and 18.
+  read named as unverified as its backup; `photo-id` says no more than a header shows. On the branch, 400 Python
+  tests pass (39 skipped for a missing tool or another system) and the four JVM suites pass 153, 22, 43 and 18; CI
+  passes them on Windows and Ubuntu with Python 3.9 and 3.12, and builds a release-signed 0.5.
 - Not verified on hardware: the official-size file's final erase (factory settings and an empty photo list at the
   next start), `restore`'s new read-first flow on a real chip, and the donor route. Not yet run on a phone: version
   0.5 of the app. It is published only when the branch is merged into `main`, which is your call.
