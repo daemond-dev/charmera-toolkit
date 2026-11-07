@@ -1250,24 +1250,20 @@ public class MainActivity extends Activity {
                 if (stock != null) {
                     summary = "";
                 } else if (data.length == Candidates.DUMP_SIZE) {
-                    if (UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S) == null) {
+                    String problem = UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S);
+                    if (problem == null) {
                         // Most likely the owner's own backup, picked in the wrong step.
                         summary = "\"" + name + "\" looks like a dump of a camera's flash chip, not an update file, and a"
                                 + " dump never goes on a card as it is. If it is this camera's backup, choose it with "
                                 + q(BACKUP) + " in step 0: the app then compares the update file with it. An update file"
                                 + " is made from a dump with charmera pack on a computer.";
                     } else {
-                        String reason = "";
-                        try {
-                            Candidates.stockDump(data);
-                        } catch (IllegalArgumentException e) {
-                            reason = e.getMessage();
-                        }
-                        String[] parts = split(reason);
-                        summary = "\"" + name + "\" is a 2 MB dump, but "
-                                + sentence(parts[0].isEmpty() ? "it is not the public stock dump" : parts[0])
-                                + "\nA dump never goes on a card as it is.";
-                        technical = detailBlock(parts[1]);
+                        // Step 0 would refuse it too, so it is not pointed to: what is wrong with it is said instead.
+                        summary = "\"" + name + "\" is a 2 MB dump, but not the public stock dump, the one dump the app"
+                                + " makes an update file from. Nor is it one that step 0 takes as a backup: "
+                                + sentence(problem) + "\nA dump never goes on a card as it is.";
+                        technical = detailBlock("its SHA-256 is " + UpdateCheck.sha256Hex(data, 0, data.length)
+                                + "; the public stock dump's is " + Candidates.STOCK_DUMP_SHA256 + ".");
                     }
                 } else {
                     result = UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
@@ -1279,7 +1275,8 @@ public class MainActivity extends Activity {
                         summary = "The app refuses this file: do not put it on the card. It is "
                                 + withdrawn.label.substring(0, 1).toLowerCase(java.util.Locale.ROOT)
                                 + withdrawn.label.substring(1) + " The only file the app makes itself is the stock"
-                                + " restore file, which is only for a camera whose backup shows the public build.\n"
+                                + " restore file, which is only for a camera whose backup, read before the camera was"
+                                + " ever flashed, shows the public build.\n"
                                 + "File: " + name + ".\n"
                                 + "If this file is on the card, remove it before the card goes back into the camera:"
                                 + " see step 5.";

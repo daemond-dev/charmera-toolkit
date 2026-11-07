@@ -107,11 +107,21 @@ public final class UpdateCheckTest {
                 && !text(r, "sensor-table").contains("your camera's own firmware")
                 && r.verdict().equals("OK to put on the card. Every check passed."), r);
         r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(own));
-        expect("the same table with another program around it is a warning that says so", r.ok
+        expect("the same table with another program around it is a warning that says so", r.ok && r.compared
                 && line(r, "sensor-table", UpdateCheck.Level.WARN)
                 && text(r, "sensor-table").contains("the program around it differs from that firmware")
+                && text(r, "sensor-table").contains("a different program can drive the same sensor differently")
+                && !text(r, "sensor-table").contains("drives the image sensor the way that firmware does")
                 && line(r, "software", UpdateCheck.Level.WARN)
                 && text(r, "software").contains("differs from the firmware in your backup"), r);
+        // Against a backup of a known build, another program around the same table: both are said.
+        r = UpdateCheck.check(name(own, "202611050001"), own, build, chip(base));
+        expect("against a backup of a known build, another program around the same table is a warning that says both",
+                r.ok && r.compared && line(r, "sensor-table", UpdateCheck.Level.WARN)
+                        && text(r, "sensor-table").contains("the program around it differs from that firmware")
+                        && text(r, "sensor-table").contains("That firmware is synthetic test build, unchanged")
+                        && text(r, "sensor-table").contains("only if the backup was read before the camera was ever"
+                        + " flashed"), r);
         m = base.clone();
         m[0xF5C70] ^= 1;
         r = check(m, build);
@@ -174,21 +184,55 @@ public final class UpdateCheckTest {
         expect("a backup with several sensor programs cannot be compared with", !r.ok && !r.compared
                 && line(r, "sensor-table", UpdateCheck.Level.FAIL)
                 && text(r, "sensor-table").contains("the backup holds more than one"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
+        expect("nor is a file with several sensor programs compared with a backup", !r.ok && !r.compared
+                && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && text(r, "sensor-table").contains("the file holds more than one"), r);
+        m = base.clone();
+        m[0x218D0] = 'X';                      // no stamp: the build marks are not all there
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
+        expect("nor is a file without all the build marks, although a backup is given", !r.ok && !r.compared
+                && line(r, "series", UpdateCheck.Level.FAIL) && text(r, "sensor-table").isEmpty(), r);
 
-        // --- the stamp: a *.bin before it is preferred, several runs without one are refused ----------------
+        // --- the stamp: a *.bin before it is preferred, several runs without one are refused, and so are several
+        // different stamps after *.bin, as in image.py find_marks ------------------------------------------------
 
         m = base.clone();
+        m[0xFFFF] = 'x';
+        put(m, 0x10000, "202601010101");
+        m[0x1000C] = 0;                        // a second 12-digit run, before the real stamp
         m[0x30000] = 'x';
-        put(m, 0x30001, "202601010101");
-        m[0x3000D] = 0;                        // a second 12-digit run, before the real stamp
-        expect("two stamp runs and no *.bin before either: no stamp, so not Charmera firmware",
-                UpdateCheck.findMarks(m).stamp == null && !check(m, build).ok
-                        && line(check(m, build), "series", UpdateCheck.Level.FAIL), check(m, build));
+        put(m, 0x30001, "202601010202");
+        m[0x3000D] = 0;                        // and a third, after it
+        expect("three stamp runs and no *.bin before any: no stamp, so not Charmera firmware",
+                UpdateCheck.findMarks(m).stamp == null && UpdateCheck.findMarks(m).stampConflict.isEmpty()
+                        && !check(m, build).ok && line(check(m, build), "series", UpdateCheck.Level.FAIL), check(m, build));
         put(m, 0x218C4 - 8, "*.bin");
         m[0x218C4 - 3] = 0;
         UpdateCheck.Marks withBin = UpdateCheck.findMarks(m);
-        expect("the run after *.bin is the stamp, whatever comes before it", "202505201029".equals(withBin.stamp)
-                && withBin.stampOffset == 0x218C4, null);
+        expect("the run after *.bin is the stamp, with another run before it and one after it",
+                "202505201029".equals(withBin.stamp) && withBin.stampOffset == 0x218C4 && withBin.stampConflict.isEmpty()
+                        && check(m, build).ok, check(m, build));
+        byte[] two = m.clone();
+        put(two, 0x10000 - 8, "*.bin");
+        two[0x10000 - 3] = 0;                  // a *.bin before the first run too: two different stamps follow one
+        UpdateCheck.Marks conflicting = UpdateCheck.findMarks(two);
+        r = check(two, build);
+        expect("two different stamps after *.bin: no stamp, since which one the camera compares cannot be told",
+                conflicting.stamp == null && conflicting.stampOffset == -1
+                        && conflicting.stampConflict.equals(Arrays.asList("202601010101", "202505201029"))
+                        && !r.ok && line(r, "series", UpdateCheck.Level.FAIL)
+                        && text(r, "series").contains("the version stamp. 2 different stamps follow the \"*.bin\" the"
+                        + " updater looks for (202601010101, 202505201029), so which one the camera compares cannot be"
+                        + " told.") && detail(r, "series").contains("stamps after *.bin: 202601010101, 202505201029"), r);
+        String twoStamps = UpdateCheck.backupProblem(chip(two), new String[0]);
+        expect("nor is a dump with them a backup", twoStamps != null && twoStamps.endsWith("not a complete dump of the"
+                + " chip. 2 different stamps follow the \"*.bin\" the updater looks for (202601010101, 202505201029), so"
+                + " which one the camera compares cannot be told"), null);
+        put(two, 0x10000, "202505201029");     // the same stamp after both
+        UpdateCheck.Marks agreeing = UpdateCheck.findMarks(two);
+        expect("the same stamp after *.bin twice is the stamp, the first one", "202505201029".equals(agreeing.stamp)
+                && agreeing.stampOffset == 0x10000 && agreeing.stampConflict.isEmpty(), null);
 
         // --- the stamp of the firmware in the backup -----------------------------------------------------------
 
@@ -215,17 +259,37 @@ public final class UpdateCheckTest {
                 + " build") && text(r, "vector-table").contains("only a chip programmer"), r);
         r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
         expect("and against the backup", !r.ok && line(r, "vector-table", UpdateCheck.Level.FAIL), r);
-        m = base.clone();
-        m[0x18964] = 'X';
-        put(m, 0x18A00, "JH5408  20250520");
-        m[0x18A10] = 0;                        // the build string elsewhere: another build's layout
-        r = check(m, build);
+        byte[] elsewhere = base.clone();
+        elsewhere[0x18964] = 'X';
+        put(elsewhere, 0x18A00, "JH5408  20250520");
+        elsewhere[0x18A10] = 0;                // the build string elsewhere: another build's layout
+        // A backup laid out like another build does not let a broken table through: the file is then compared with
+        // the known build whose layout it has, as it is without a backup.
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(elsewhere));
+        expect("a destroyed vector table fails against a backup laid out like another build, by the known build whose"
+                + " layout the file has", !r.ok && line(r, "vector-table", UpdateCheck.Level.FAIL)
+                && text(r, "vector-table").contains("differs from the one in synthetic test build")
+                && text(r, "vector-table").contains("and from the one in your backup")
+                && r.verdict().startsWith("Not OK to put on the card. The app will not write this file. Program start:"), r);
+        byte[] otherStart = elsewhere.clone();
+        otherStart[0x210] ^= 1;                // and another vector table
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(otherStart));
+        expect("an intact vector table passes against it, by the known build whose layout the file has", r.ok
+                && line(r, "vector-table", UpdateCheck.Level.PASS)
+                && text(r, "vector-table").contains("the same as in synthetic test build, whose layout the file has")
+                && text(r, "vector-table").contains("not laid out like the firmware in your backup"), r);
+        r = check(elsewhere, build);
         expect("a file laid out like no known build: the vector table is not compared, a warning", r.ok
                 && line(r, "vector-table", UpdateCheck.Level.WARN) && line(r, "build", UpdateCheck.Level.WARN)
                 && text(r, "build").contains("a build the app does not know: not the public dump's"), r);
-        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
-        expect("nor against a backup laid out otherwise", line(r, "vector-table", UpdateCheck.Level.WARN)
-                && text(r, "vector-table").contains("not laid out like the firmware in your backup"), r);
+        r = UpdateCheck.check(name(elsewhere, "202611050001"), elsewhere, build, chip(own));
+        expect("against a backup laid out otherwise whose table it has, it passes: the same as the backup's", r.ok
+                && line(r, "vector-table", UpdateCheck.Level.PASS)
+                && text(r, "vector-table").contains("the same as in your backup"), r);
+        r = UpdateCheck.check(name(otherStart, "202611050001"), otherStart, build, chip(own));
+        expect("with another table, laid out like neither the backup nor a known build, it is a warning", r.ok
+                && line(r, "vector-table", UpdateCheck.Level.WARN) && text(r, "vector-table").contains("not laid out"
+                + " like the firmware in your backup, nor like a build the app knows"), r);
         m = base.clone();
         m[0xF5C6C] = 0;   // the init table no longer starts with a page select: no table found
         r = check(m, build);
@@ -242,6 +306,11 @@ public final class UpdateCheckTest {
         expect("another stamp is still a Charmera build mark, since the stamp is no identity", r.ok
                 && line(r, "series", UpdateCheck.Level.PASS) && text(r, "series").contains("stamp 202601010000")
                 && line(r, "stamp-in-file", UpdateCheck.Level.INFO), r);
+        expect("but a file laid out like a known build with another stamp is not that build with changes, as in"
+                + " image.py", line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("a build the app"
+                + " does not know, laid out like synthetic test build: its stamp is not that build's.")
+                && !text(r, "build").contains("with changes")
+                && detail(r, "build").contains("the stamp is 202601010000, that build's 202505201029"), r);
         UpdateCheck.Marks marks = UpdateCheck.findMarks(base);
         r = check(base, build);
         expect("the compile date is found by content and shown with the build marks", "Oct 14 2025".equals(marks.compiled)
@@ -249,6 +318,55 @@ public final class UpdateCheckTest {
         m = base.clone();
         m[0xF3983] = 'X';   // no NUL after the date: not a compile date any more
         expect("a date without its NUL is not a compile date", UpdateCheck.findMarks(m).compiled == null, null);
+
+        // --- the source folder: a build mark that shows another build, never the same one or a fit -------------
+
+        expect("the source folder is found by content and shown with the build marks, with what it shows",
+                "v006".equals(marks.sourceTree) && marks.sourceTrees.size() == 1 && marks.sourceTrees.get("v006") == 3
+                        && marks.sourceTreeOffset == 0x3A4C8 && text(r, "series").contains(", source folder v006, stamp")
+                        && text(r, "series").contains("A different source folder shows a different build, the same one"
+                        + " does not show the same build, and neither says whether the file fits your camera.")
+                        && detail(r, "series").contains("source folder named in 3 source paths, the first at 0x3a4c8"), r);
+        m = base.clone();
+        sourcePath(m, 0x50000, "v007", "host\\init.c");
+        m[0x50200] = 0;
+        put(m, 0x50201, "G:\\code\\2247\\5408\\v009");
+        m[0x50201 + 22] = 0;                   // no backslash after the folder's name: not a source path
+        UpdateCheck.Marks minority = UpdateCheck.findMarks(m);
+        r = check(m, build);
+        expect("a folder fewer paths name is not the source folder, and a name without a backslash after it is none",
+                "v006".equals(minority.sourceTree) && minority.sourceTrees.size() == 2
+                        && minority.sourceTrees.get("v007") == 1 && !minority.sourceTrees.containsKey("v009")
+                        && detail(r, "series").contains(", v007 in 1 path"), r);
+        sourcePath(m, 0x51000, "v007", "host\\os_wrapper\\MicroC\\rtos.c");
+        sourcePath(m, 0x52000, "v007", "host\\netstack_wrapper\\icomm_lwIP\\netstack.c");
+        expect("on a tie the folder found first is the source folder", "v006".equals(UpdateCheck.findMarks(m).sourceTree)
+                && UpdateCheck.findMarks(m).sourceTrees.get("v007") == 3, null);
+        sourcePath(m, 0x53000, "v007", "host\\tcpip\\lwip-1.4.0\\src\\core\\tcp.c");
+        r = check(m, build);
+        expect("a file laid out like a known build from another source folder is another build, not a changed copy",
+                "v007".equals(UpdateCheck.findMarks(m).sourceTree) && r.ok && line(r, "build", UpdateCheck.Level.WARN)
+                        && text(r, "build").contains("laid out like synthetic test build: its source folder is not that"
+                        + " build's.") && !text(r, "build").contains("with changes")
+                        && text(r, "series").contains("source folder v007")
+                        && detail(r, "build").contains("the source folder is v007, that build's v006"), r);
+        m = base.clone();
+        for (int at : new int[]{0x3A4C8, 0x3C448, 0x46608}) {
+            m[at + 1] = '3';                   // \3247\ in place of \2247\: no source path left
+        }
+        r = check(m, build);
+        expect("a file whose paths name no source folder shows none, and is not a changed copy of a build that has one",
+                UpdateCheck.findMarks(m).sourceTree == null && UpdateCheck.findMarks(m).sourceTrees.isEmpty()
+                        && UpdateCheck.findMarks(m).sourceTreeOffset == -1 && !text(r, "series").contains("source folder v")
+                        && !text(r, "series").contains("A different source folder")
+                        && detail(r, "series").contains("no source folder found") && line(r, "build", UpdateCheck.Level.WARN)
+                        && detail(r, "build").contains("the source folder is not found, that build's v006"), r);
+        m = base.clone();
+        m[0x62B8] ^= 0x08;
+        r = check(m, build);
+        expect("a code change keeps the build's layout, stamp, table and folder: that build with changes", r.ok
+                && line(r, "build", UpdateCheck.Level.INFO) && text(r, "build").contains("synthetic test build, with changes")
+                && detail(r, "build").contains("the stamp, the sensor table and the source folder are that build's"), r);
 
         // --- the official update size ------------------------------------------------------------------------
 
@@ -303,6 +421,13 @@ public final class UpdateCheckTest {
         String publicProblem = UpdateCheck.backupProblem(dump, new String[]{UpdateCheck.sha256Hex(dump, 0, dump.length)});
         expect("a read identical to the public dump is refused, and the reason allows that it is this camera's", publicProblem
                 .contains("flashed with the public restore file") && publicProblem.contains("not firmware known to fit"), null);
+        String otherPublic = UpdateCheck.backupProblem(dump, new String[]{repeat('0', 64),
+                UpdateCheck.sha256Hex(dump, 0, dump.length)});
+        expect("another public dump is not called the stock dump, nor a read after the stock restore file",
+                otherPublic.startsWith("it is byte for byte one of the public dumps, not the stock one:")
+                        && otherPublic.contains("flashed with a file made from that dump")
+                        && !otherPublic.contains("the public restore file") && otherPublic.contains("not firmware known to"
+                        + " fit"), null);
         byte[] cutOff = dump.clone();
         Arrays.fill(cutOff, 0x100000, cutOff.length, (byte) 0xFF);   // a clip that lost contact half way
         expect("a read that is blank from half way is not a backup: it could not put the camera back",
@@ -542,9 +667,9 @@ public final class UpdateCheckTest {
         r = UpdateCheck.check("firmware.bin", base, build);
         expect("a nameless file's verdict says what to do, and that the stock restore file is not everyone's",
                 r.verdict().contains("Name: this is not an update file's name") && r.verdict().contains("Do not make up a"
-                + " name") && r.verdict().contains("The stock restore file is only for a camera whose backup shows the"
-                + " public build") && r.verdict().contains("make the update file from its own backup with charmera"
-                + " pack on a computer") && !r.verdict().contains("To restore the camera, tap"), r);
+                + " name") && r.verdict().contains("The stock restore file is only for a camera whose backup, read before"
+                + " the camera was ever flashed, shows the public build. For any other camera, make the file from its"
+                + " own backup with charmera pack on a computer.") && !r.verdict().contains("To restore the camera, tap"), r);
 
         // --- a refused stock restore file: only a name problem is reported as one -----------------------------
 
@@ -583,6 +708,10 @@ public final class UpdateCheckTest {
             expect("the film-mods restore file is named by its fingerprint and refused for its stamp", !r.ok
                     && line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("charmera-film-mods")
                     && line(r, "stamp", UpdateCheck.Level.FAIL) && text(r, "series").contains("compiled Nov 19 2025"), r);
+            UpdateCheck.Marks fm = UpdateCheck.findMarks(d);
+            expect("its source folder is v008_test, named in all 27 of its source paths", "v008_test".equals(fm.sourceTree)
+                    && fm.sourceTrees.size() == 1 && fm.sourceTrees.get("v008_test") == 27 && fm.sourceTreeOffset == 0x464AF
+                    && text(r, "series").contains("source folder v008_test"), r);
         }
 
         String real = System.getenv("CHARMERA_UPDATE_FILES");
@@ -620,6 +749,10 @@ public final class UpdateCheckTest {
         System.arraycopy(UpdateCheck.SENSOR_RESET_TABLE, 0, d, 0xF5BFC, 6);
         System.arraycopy(SENSOR_TABLE, 0, d, 0xF5C6C, SENSOR_TABLE.length);
         putU32(d, 0x7B91C, 0xF5C6C - 0x200);
+        // three source paths of the kind the firmware's checks name their files by: the source folder is v006
+        sourcePath(d, 0x3A4C0, "v006", "host\\tcpip\\lwip-1.4.0\\src\\netif\\etharp.c");
+        sourcePath(d, 0x3C440, "v006", "host\\tcpip\\lwip-1.4.0\\src\\api\\api_lib.c");
+        sourcePath(d, 0x46600, "v006", "host\\init.c");
         // The resource pack: GP+, a directory of 43 entries, then each entry's content padded with 0xFF to its slot.
         Arrays.fill(d, 0x120000, 0x170000, (byte) 0xFF);
         Arrays.fill(d, 0x120000, 0x120018, (byte) 0);
@@ -700,8 +833,8 @@ public final class UpdateCheckTest {
     static UpdateCheck.Build buildFor(byte[] d) {
         return new UpdateCheck.Build("synthetic test build", "202505201029", UpdateCheck.sha256Hex(d, 0, 0x170000),
                 UpdateCheck.sha256Hex(d, 0, 0x120000), UpdateCheck.sha256Hex(d, 0, UpdateCheck.OFFICIAL_SIZE),
-                UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8), UpdateCheck.sha256Hex(d, 0x200, 0x240), 0x218C4, 0x18964,
-                0xF5C6C);
+                UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8), UpdateCheck.sha256Hex(d, 0x200, 0x240), "v006", 0x218C4,
+                0x18964, 0xF5C6C);
     }
 
     /** A 2 MiB read of a chip that holds the image d: d, then the blank 0xFF the rest of the chip is. */
@@ -710,6 +843,14 @@ public final class UpdateCheckTest {
         System.arraycopy(d, 0, c, 0, d.length);
         Arrays.fill(c, d.length, c.length, (byte) 0xFF);
         return c;
+    }
+
+    /** A NUL, then the source path G:\code\2247\5408\<folder>\<file> and its NUL, at off; the prefix is at off + 8. */
+    static void sourcePath(byte[] d, int off, String folder, String file) {
+        String path = "G:\\code\\2247\\5408\\" + folder + "\\" + file;
+        d[off] = 0;
+        put(d, off + 1, path);
+        d[off + 1 + path.length()] = 0;
     }
 
     /** A second reset table and init table (the given one) at off, with a code literal for it at literal, or none. */
@@ -897,6 +1038,12 @@ public final class UpdateCheckTest {
 
     static byte[] ascii(String s) {
         return s.getBytes(StandardCharsets.US_ASCII);
+    }
+
+    static String repeat(char c, int n) {
+        char[] a = new char[n];
+        Arrays.fill(a, c);
+        return new String(a);
     }
 
     static byte[] concat(byte[] a, byte[] b) {

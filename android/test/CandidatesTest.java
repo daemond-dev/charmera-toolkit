@@ -49,6 +49,9 @@ public final class CandidatesTest {
         expect("a refusal says the cause first and keeps the SHA-256 for its last line", refused(
                 () -> Candidates.stockDump(junk), "so the app will not use it") && refused(() -> Candidates.stockDump(junk),
                 "\nDetail: its SHA-256 is "));
+        // Whether a 2 MiB file could be a backup is for UpdateCheck.backupProblem to say: step 0 may refuse it too.
+        expect("a refused dump is not pointed to step 0", !refused(() -> Candidates.stockDump(junk), "step 0")
+                && !refused(() -> Candidates.stockDump(junk), "Choose this camera's backup"));
         expect("only the stock restore is offered", java.util.Arrays.equals(Candidates.Kind.offeredKinds(),
                 new Candidates.Kind[]{Candidates.Kind.RESTORE}));
         byte[] restore0 = invokeTransform(img, Candidates.Kind.RESTORE);
@@ -77,6 +80,9 @@ public final class CandidatesTest {
                     && mk.resetStart == 0xF5BFC && mk.sensorStart == 0xF5C6C && mk.sensorEnd == 0xF5CE8 && mk.sensorPairs == 61
                     && mk.referencedFrom == 0x7B91C && mk.busAddress == 0x78
                     && "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755".equals(mk.sensorSha256));
+            expect("its source folder is v006, named in all 27 of its source paths", "v006".equals(mk.sourceTree)
+                    && mk.sourceTrees.size() == 1 && mk.sourceTrees.get("v006") == 27 && mk.sourceTreeOffset == 0x3A4C7
+                    && mk.stampConflict.isEmpty());
             UpdateCheck.Result rr = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore, UpdateCheck.PUBLIC_BUILD, dump);
             expect("the restore file against the dump it came from passes, and the sensor line says what a public"
                     + " backup proves", rr.ok && rr.compared && level(rr, "software") == UpdateCheck.Level.PASS
@@ -99,6 +105,22 @@ public final class CandidatesTest {
             expect("without a backup the restore file's own checks pass, its vector table is the public build's, and"
                     + " it is not OK yet", plain.ok && !plain.compared && level(plain, "vector-table") == UpdateCheck.Level.PASS
                     && plain.verdict().startsWith("Not OK to put on the card yet:"));
+            expect("its build marks name the source folder, and what a folder shows", text(plain, "series").contains(
+                    "compiled Oct 14 2025, source folder v006, stamp 202505201029") && text(plain, "series").contains(
+                    "the same one does not show the same build, and neither says whether the file fits your camera"));
+            // The same changes to the real file as in tests/test_android.py, where image.py makes the same calls.
+            byte[] restamped = restore.clone();
+            put(restamped, 0x218C4, "202601010000");
+            UpdateCheck.Result sr = UpdateCheck.check(named(restamped), restamped);
+            expect("the restore file with another stamp inside is a build laid out like the public one, not that build"
+                    + " with changes", level(sr, "build") == UpdateCheck.Level.WARN && text(sr, "build").contains(
+                    "laid out like the public dump's build: its stamp is not that build's")
+                    && !text(sr, "build").contains("with changes"));
+            byte[] twice = dump.clone();
+            put(twice, 0xFFF8, "*.bin\0xx202601010101\0");   // a second stamp after a second *.bin
+            UpdateCheck.Marks tm = UpdateCheck.findMarks(twice);
+            expect("two different stamps after *.bin: no stamp", tm.stamp == null
+                    && tm.stampConflict.equals(Arrays.asList("202601010101", "202505201029")));
             byte[] broken = restore.clone();
             for (int i = 0x200; i < 0x240; i++) {
                 broken[i] ^= (byte) 0xFF;
@@ -109,12 +131,45 @@ public final class CandidatesTest {
                     && level(vr, "vector-table") == UpdateCheck.Level.FAIL);
         }
         String film = System.getenv("CHARMERA_FILM_MODS_RESTORE");
-        if (film != null && !film.isEmpty() && Files.isRegularFile(Paths.get(film))) {
-            byte[] f = Files.readAllBytes(Paths.get(film));
-            UpdateCheck.Result fr = UpdateCheck.check("JH_5408202611061300_" + String.format(Locale.ROOT, "%08X",
-                    UpdateCheck.byteSum(f)) + ".bin", f);
+        byte[] f = film == null || film.isEmpty() || !Files.isRegularFile(Paths.get(film)) ? null
+                : Files.readAllBytes(Paths.get(film));
+        if (f != null) {
+            UpdateCheck.Result fr = UpdateCheck.check(named(f), f);
             expect("the film-mods build's vector table is compared with its own build's, by its layout",
                     level(fr, "vector-table") == UpdateCheck.Level.PASS && fr.ok);
+        }
+        if (f != null && given != null && Candidates.isStockDump(given)) {
+            // A backup laid out like the other known build: a broken vector table is still caught, by the known
+            // build whose layout the file has, as it is without a backup.
+            byte[] dump = Candidates.stockDump(given);
+            byte[] filmChip = Arrays.copyOf(f, 0x200000);
+            Arrays.fill(filmChip, f.length, filmChip.length, (byte) 0xFF);
+            byte[] read = dump.clone();
+            read[0x170100] ^= 1;                    // a read of a camera flashed with the restore file, one setting saved
+            expect("the film-mods restore file padded to 2 MiB, and a near copy of the public dump, are taken as backups",
+                    UpdateCheck.backupProblem(filmChip, Candidates.PUBLIC_DUMP_SHA256S) == null
+                            && UpdateCheck.backupProblem(read, Candidates.PUBLIC_DUMP_SHA256S) == null);
+            byte[] broken = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);
+            byte[] brokenFilm = f.clone();
+            for (int i = 0x200; i < 0x240; i++) {
+                broken[i] ^= (byte) 0xFF;
+                brokenFilm[i] ^= (byte) 0xFF;
+            }
+            UpdateCheck.Result vr = UpdateCheck.check(named(broken), broken, UpdateCheck.PUBLIC_BUILD, filmChip);
+            expect("the restore file with its vector table destroyed fails against a film-mods backup",
+                    !vr.ok && level(vr, "vector-table") == UpdateCheck.Level.FAIL
+                            && vr.verdict().contains("Program start: the table the processor starts the program from"
+                            + " differs from the one in the public dump's build"));
+            vr = UpdateCheck.check(named(brokenFilm), brokenFilm, UpdateCheck.PUBLIC_BUILD, read);
+            expect("and the film-mods file with its vector table destroyed fails against a public-build backup",
+                    !vr.ok && level(vr, "vector-table") == UpdateCheck.Level.FAIL
+                            && vr.verdict().contains("differs from the one in the charmera-film-mods author's build"));
+            vr = UpdateCheck.check(named(f), f, UpdateCheck.PUBLIC_BUILD, read);
+            expect("the film-mods file against a public-build backup: the same table in another program is a warning"
+                    + " that says both", vr.ok && vr.compared && level(vr, "sensor-table") == UpdateCheck.Level.WARN
+                    && level(vr, "vector-table") == UpdateCheck.Level.PASS
+                    && vr.verdict().contains("the program around it differs from that firmware")
+                    && vr.verdict().contains("That firmware is the public dump's build, unchanged"));
         }
         System.out.printf(Locale.ROOT, "CandidatesTest: %d passed, %d failed%n", passes, failures);
         if (failures > 0) {
@@ -226,6 +281,21 @@ public final class CandidatesTest {
             }
         }
         return null;
+    }
+
+    /** The plain text of the first line with that check name, or "". */
+    static String text(UpdateCheck.Result r, String name) {
+        for (UpdateCheck.Line l : r.lines) {
+            if (l.name.equals(name)) {
+                return l.text;
+            }
+        }
+        return "";
+    }
+
+    /** An update file's name for d: a stamp no known build carries, and d's own sum. */
+    static String named(byte[] d) {
+        return String.format(Locale.ROOT, "JH_5408202611061300_%08X.bin", UpdateCheck.byteSum(d));
     }
 
     static boolean refused(Call c, String message) {

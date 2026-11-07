@@ -7,8 +7,10 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.CRC32;
@@ -77,6 +79,13 @@ public final class UpdateCheck {
      */
     static final int VECTORS = 0x200;
     static final int VECTORS_END = 0x240;
+    /**
+     * What every source path in the firmware holds just before the source-tree folder: "\2247\5408\<folder>\". The
+     * folder is a build mark: v006 in the public build, v008_test in the film-mods build (27 paths in each).
+     */
+    static final byte[] SOURCE_TREE_PREFIX = "\\2247\\5408\\".getBytes(StandardCharsets.US_ASCII);
+    /** The longest folder name taken after SOURCE_TREE_PREFIX. */
+    static final int MAX_FOLDER = 64;
 
     /**
      * What identifies a firmware build: fingerprints over its bytes, never the version stamp. The real ones are
@@ -99,12 +108,18 @@ public final class UpdateCheck {
         final String sensorSha256;
         /** sha256 of the ARM vector table, bytes 0x200..0x240. */
         final String vectorSha256;
+        /**
+         * The source-tree folder its source paths name (Marks.sourceTree), or null when not recorded. Another folder
+         * shows another build; the same one does not show the same build.
+         */
+        final String sourceTree;
         final int stampOffset;
         final int buildOffset;
         final int sensorOffset;
 
         public Build(String label, String stamp, String softwareSha256, String codeAreaSha256, String officialSha256,
-                     String sensorSha256, String vectorSha256, int stampOffset, int buildOffset, int sensorOffset) {
+                     String sensorSha256, String vectorSha256, String sourceTree, int stampOffset, int buildOffset,
+                     int sensorOffset) {
             this.label = label;
             this.stamp = stamp;
             this.softwareSha256 = softwareSha256;
@@ -112,6 +127,7 @@ public final class UpdateCheck {
             this.officialSha256 = officialSha256;
             this.sensorSha256 = sensorSha256;
             this.vectorSha256 = vectorSha256;
+            this.sourceTree = sourceTree;
             this.stampOffset = stampOffset;
             this.buildOffset = buildOffset;
             this.sensorOffset = sensorOffset;
@@ -132,7 +148,8 @@ public final class UpdateCheck {
 
     /**
      * Values from charmera_toolkit/image.py (PUBLIC_BUILD, hashed from the stock dump itself); keep them in step. The
-     * vector table's hash is the same in both known builds (tests/test_android.py checks it against both files).
+     * vector table's hash is the same in both known builds (tests/test_android.py checks it against both files). The
+     * source folder, v006, is named by all 27 source paths in the dump.
      */
     public static final Build PUBLIC_BUILD = new Build(
             "the public dump's build (the one both public dumps hold, and the one the stock restore file is)",
@@ -142,12 +159,14 @@ public final class UpdateCheck {
             "bffddd53d01a42725d63aa08dff5585433604a680a85520b23f3e176ae80f745",
             "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
             "cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",
+            "v006",
             0x218C4, 0x18964, 0xF5C6C);
 
     /**
      * The charmera-film-mods author's build, hashed from that project's public restore file (bytes 0..0x169000 of the
      * author's factory dump; charmera_toolkit/image.py FILM_MODS_BUILD). Same stamp, different bytes, the same sensor
-     * table. Only 0x169000 bytes are public, so there is no hash over 0..0x170000.
+     * table, another source folder (v008_test, in all 27 source paths). Only 0x169000 bytes are public, so there is
+     * no hash over 0..0x170000.
      */
     public static final Build FILM_MODS_BUILD = new Build(
             "the charmera-film-mods author's build (same stamp, different bytes, compiled Nov 19 2025)",
@@ -157,6 +176,7 @@ public final class UpdateCheck {
             "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f",
             "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
             "cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",
+            "v008_test",
             0x218D0, 0x1897C, 0xF5D34);
 
     /** Known builds other than the one a check is run against, named when a file is one of them unchanged. */
@@ -169,10 +189,12 @@ public final class UpdateCheck {
 
     /**
      * Where a file that puts a camera back comes from after a FAIL: the camera's own backup. The stock restore file the
-     * app makes holds the public build, which is that camera's own firmware only when its backup shows that build.
+     * app makes holds the public build, which is that camera's own firmware only when a backup read before the camera
+     * was ever flashed shows that build: a read taken after a flash with it shows the public build too.
      */
-    static final String RESTORE_INSTEAD = "The stock restore file is only for a camera whose backup shows the public build."
-            + " For any other camera, make the update file from its own backup with charmera pack on a computer.";
+    static final String RESTORE_INSTEAD = "The stock restore file is only for a camera whose backup, read before the"
+            + " camera was ever flashed, shows the public build. For any other camera, make the file from its own backup"
+            + " with charmera pack on a computer.";
     /** The same, plus the way to a working mod. */
     static final String INSTEAD = RESTORE_INSTEAD + " For a mod, make the file again with charmera pack on a computer.";
     /** What a build match does and does not prove. Every build line carries it. */
@@ -249,10 +271,26 @@ public final class UpdateCheck {
         public final int compiledOffset;
         /** Every init table the code refers to, the one above included; more than one hash is several programs. */
         public final List<SensorTable> referencedTables;
+        /**
+         * The different stamps that follow "*.bin", when there are several: which one the updater compares cannot be
+         * told, so stamp is null. Empty otherwise.
+         */
+        public final List<String> stampConflict;
+        /**
+         * The source-tree folder: the one named most often after "\2247\5408\" in the source paths ("v006"), or null.
+         * Another folder shows another build; the same one does not show the same build; neither says whether a file
+         * fits a camera.
+         */
+        public final String sourceTree;
+        /** Where the first source path that names sourceTree has "\2247\5408\", or -1. */
+        public final int sourceTreeOffset;
+        /** Every folder named after "\2247\5408\", with how many source paths name it, in the order first found. */
+        public final Map<String, Integer> sourceTrees;
 
         Marks(String stamp, int stampOffset, String buildString, int buildOffset, int resetStart, int sensorStart,
               int sensorEnd, int sensorPairs, String sensorSha256, int referencedFrom, int busAddress, String compiled,
-              int compiledOffset, List<SensorTable> referencedTables) {
+              int compiledOffset, List<SensorTable> referencedTables, List<String> stampConflict, String sourceTree,
+              int sourceTreeOffset, Map<String, Integer> sourceTrees) {
             this.stamp = stamp;
             this.stampOffset = stampOffset;
             this.buildString = buildString;
@@ -267,11 +305,40 @@ public final class UpdateCheck {
             this.compiled = compiled;
             this.compiledOffset = compiledOffset;
             this.referencedTables = Collections.unmodifiableList(referencedTables);
+            this.stampConflict = Collections.unmodifiableList(stampConflict);
+            this.sourceTree = sourceTree;
+            this.sourceTreeOffset = sourceTreeOffset;
+            this.sourceTrees = Collections.unmodifiableMap(sourceTrees);
         }
 
         /** The three marks every Charmera build carries. */
         public boolean complete() {
             return stamp != null && buildString != null && sensorStart >= 0;
+        }
+
+        /**
+         * Why there is no stamp when several different ones follow "*.bin", as a clause without a final full stop, or
+         * "" when that is not the reason.
+         */
+        String stampConflictNote() {
+            return stampConflict.isEmpty() ? "" : stampConflict.size() + " different stamps follow the \"*.bin\" the"
+                    + " updater looks for (" + join(stampConflict, ", ") + "), so which one the camera compares cannot be"
+                    + " told";
+        }
+
+        /** The source folder for a "Detail:" line: how many paths name it, where the first is, and any other folder. */
+        String sourceTreeDetail() {
+            if (sourceTree == null) {
+                return "no source folder found";
+            }
+            StringBuilder sb = new StringBuilder("source folder named in " + count(sourceTrees.get(sourceTree),
+                    "source path") + ", the first at " + hex(sourceTreeOffset));
+            for (Map.Entry<String, Integer> e : sourceTrees.entrySet()) {
+                if (!e.getKey().equals(sourceTree)) {
+                    sb.append(", ").append(e.getKey()).append(" in ").append(count(e.getValue(), "path"));
+                }
+            }
+            return sb.toString();
         }
 
         /** True when the code refers to more than one init table and they differ: which one runs cannot be told. */
@@ -322,7 +389,11 @@ public final class UpdateCheck {
         public final String cardName;
         public final String sha256;
         public final int size;
-        /** True when the file was compared with a dump of the camera (the owner's backup). */
+        /**
+         * True when the file's image-sensor table was compared with the one in a dump of the camera (the owner's
+         * backup): the file carries the build marks, and the file and the backup each hold one sensor program the
+         * app can find, not several.
+         */
         public final boolean compared;
         /** The SHA-256 of the reference the file was checked against (the backup), or null when none was given. */
         public final String referenceSha256;
@@ -439,23 +510,26 @@ public final class UpdateCheck {
 
     /**
      * The build marks, each found by what it looks like in the code area: the 12-digit stamp (ASCII digits then a NUL,
-     * after a non-digit, by preference the one that follows the "*.bin" the updater matches with), the build string
-     * "JH5408  <date>", and the sensor program: the reset table by its exact bytes, then the first (register, value)
-     * table after it that starts with a page select, switches page at least once more, holds 16 writes or more and
-     * ends with the ff ff marker. Where several spots fit, the first init table the code points at by address wins
-     * (a little-endian literal of RAM address = file offset - 0x200, at a 4-byte-aligned offset, as the code keeps
-     * them), else the first one found; every referenced one is kept, so several programs can be told apart. The same
-     * rule as charmera_toolkit/image.py find_sensor_tables.
+     * after a non-digit, by preference the one that follows the "*.bin" the updater matches with; when several follow
+     * it and they differ, which one the updater compares cannot be told, so there is none), the build string
+     * "JH5408  <date>", the compile date, the source-tree folder (the one named most often after "\2247\5408\" in the
+     * source paths, the first found on a tie), and the sensor program: the reset table by its exact bytes, then the
+     * first (register, value) table after it that starts with a page select, switches page at least once more, holds
+     * 16 writes or more and ends with the ff ff marker. Where several spots fit, the first init table the code points
+     * at by address wins (a little-endian literal of RAM address = file offset - 0x200, at a 4-byte-aligned offset, as
+     * the code keeps them), else the first one found; every referenced one is kept, so several programs can be told
+     * apart. The same rules as charmera_toolkit/image.py find_marks and find_sensor_tables: the stamp, the build
+     * string and the compile date are looked for from offset 0, the sensor program from 0x200, after the boot header.
      */
     public static Marks findMarks(byte[] data) {
         int end = Math.min(data.length, CODE_AREA_END);
-        String stamp = null;
-        int stampOffset = -1;
         int runs = 0;
         int firstRun = -1;
+        int firstNear = -1;
+        List<String> near = new ArrayList<>();
         byte[] updatePattern = "*.bin\0".getBytes(StandardCharsets.US_ASCII);
-        for (int i = VA_OFFSET; i + 13 <= end; i++) {
-            if (!digit(data[i]) || digit(data[i - 1])) {
+        for (int i = 0; i + 13 <= end; i++) {
+            if (!digit(data[i]) || i > 0 && digit(data[i - 1])) {
                 continue;
             }
             int j = i;
@@ -468,21 +542,25 @@ public final class UpdateCheck {
                     firstRun = i;
                 }
                 if (indexOf(data, updatePattern, i - 64, i) >= 0) {
-                    stamp = new String(data, i, 12, StandardCharsets.US_ASCII);
-                    stampOffset = i;
-                    break;
+                    String s = new String(data, i, 12, StandardCharsets.US_ASCII);
+                    if (firstNear < 0) {
+                        firstNear = i;
+                    }
+                    if (!near.contains(s)) {
+                        near.add(s);
+                    }
                 }
             }
             i = j;
         }
-        if (stamp == null && runs == 1) {
-            stamp = new String(data, firstRun, 12, StandardCharsets.US_ASCII);
-            stampOffset = firstRun;
-        }
+        List<String> conflict = near.size() > 1 ? near : new ArrayList<String>();
+        int picked = !conflict.isEmpty() ? -1 : firstNear >= 0 ? firstNear : runs == 1 ? firstRun : -1;
+        String stamp = picked < 0 ? null : new String(data, picked, 12, StandardCharsets.US_ASCII);
+        int stampOffset = picked;
         String buildString = null;
         int buildOffset = -1;
         byte[] jh = "JH5408".getBytes(StandardCharsets.US_ASCII);
-        for (int at = indexOf(data, jh, VA_OFFSET, end); at >= 0; at = indexOf(data, jh, at + 1, end)) {
+        for (int at = indexOf(data, jh, 0, end); at >= 0; at = indexOf(data, jh, at + 1, end)) {
             int p = at + jh.length;
             int spaces = 0;
             while (p < end && data[p] == ' ') {
@@ -548,15 +626,40 @@ public final class UpdateCheck {
         }
         String compiled = null;
         int compiledOffset = -1;
-        for (int i = VA_OFFSET; i + 12 <= end && compiled == null; i++) {
+        for (int i = 0; i + 12 <= end && compiled == null; i++) {
             if (isCompileDate(data, i)) {
                 compiled = new String(data, i, 11, StandardCharsets.US_ASCII);
                 compiledOffset = i;
             }
         }
+        // The source-tree folder: printable ASCII up to the next backslash, in each source path.
+        Map<String, Integer> trees = new LinkedHashMap<>();
+        Map<String, Integer> treeAt = new LinkedHashMap<>();
+        for (int at = indexOf(data, SOURCE_TREE_PREFIX, 0, end); at >= 0;
+             at = indexOf(data, SOURCE_TREE_PREFIX, at + 1, end)) {
+            int p = at + SOURCE_TREE_PREFIX.length;
+            int q = p;
+            while (q < end && q - p <= MAX_FOLDER && data[q] >= 0x20 && data[q] <= 0x7E && data[q] != '\\') {
+                q++;
+            }
+            if (q > p && q - p <= MAX_FOLDER && q < end && data[q] == '\\') {
+                String folder = new String(data, p, q - p, StandardCharsets.US_ASCII);
+                Integer seen = trees.get(folder);
+                trees.put(folder, seen == null ? 1 : seen + 1);
+                if (seen == null) {
+                    treeAt.put(folder, at);
+                }
+            }
+        }
+        String sourceTree = null;
+        for (Map.Entry<String, Integer> e : trees.entrySet()) {
+            if (sourceTree == null || e.getValue() > trees.get(sourceTree)) {
+                sourceTree = e.getKey();
+            }
+        }
         return new Marks(stamp, stampOffset, buildString, buildOffset, resetStart, sensorStart, sensorEnd, pairs,
                 sensorStart < 0 ? null : sha256Hex(data, sensorStart, sensorEnd), referencedFrom, bus, compiled,
-                compiledOffset, referenced);
+                compiledOffset, referenced, conflict, sourceTree, sourceTree == null ? -1 : treeAt.get(sourceTree), trees);
     }
 
     /** indexOf for a 4-byte word: only offsets that are a multiple of 4, where the code keeps its literals. */
@@ -727,25 +830,31 @@ public final class UpdateCheck {
                 magic ? "begins with SPII." : "the first 4 bytes are not SPII."));
 
         // 3. Which build it is, read from its content. The stamp is not an identity: two builds share it.
-        boolean compared = ref != null && ref.sensorStart >= 0 && !ref.severalPrograms();
+        boolean compared = false;
         if (!marks.complete()) {
             String found = "found: " + (marks.buildString == null ? "" : "build string at " + hex(marks.buildOffset) + "; ")
                     + (marks.stamp == null ? "" : "stamp " + marks.stamp + " at " + hex(marks.stampOffset) + "; ")
+                    + (marks.stampConflict.isEmpty() ? "" : "stamps after *.bin: " + join(marks.stampConflict, ", ") + "; ")
                     + (marks.sensorStart < 0 ? "" : "sensor table at " + hex(marks.sensorStart) + ".");
+            String conflict = marks.stampConflictNote();
             out.add(new Line(Level.FAIL, "series", "Build marks", marks.onlySensorMissing()
                     ? "the image sensor's set-up table was not found in a form the app knows, although the build string"
                     + " and the stamp are there. The file is damaged, or a build for another kind of sensor that the app"
                     + " cannot check. Do not use it from the app. " + RESTORE_INSTEAD
-                    : "not all the marks every Charmera firmware carries were found: " + marks.missing() + ". This is"
-                    + " not Charmera firmware, or a damaged copy of it. Do not use it. " + RESTORE_INSTEAD, found));
+                    : "not all the marks every Charmera firmware carries were found: " + marks.missing() + "."
+                    + (conflict.isEmpty() ? "" : " " + conflict + ".") + " This is not Charmera firmware, or a damaged"
+                    + " copy of it. Do not use it. " + RESTORE_INSTEAD, found));
         } else {
             out.add(new Line(Level.PASS, "series", "Build marks", "Charmera firmware: build " + marks.buildString.trim()
-                    + (marks.compiled == null ? "" : ", compiled " + marks.compiled) + ", stamp " + marks.stamp
-                    + ". Two different builds carry this stamp, so it does not tell them apart; their compile dates"
-                    + " differ.",
+                    + (marks.compiled == null ? "" : ", compiled " + marks.compiled)
+                    + (marks.sourceTree == null ? "" : ", source folder " + marks.sourceTree) + ", stamp " + marks.stamp
+                    + ". Two different builds carry this stamp, so it does not tell them apart; their compile dates and"
+                    + " source folders differ." + (marks.sourceTree == null ? "" : " A different source folder shows a"
+                    + " different build, the same one does not show the same build, and neither says whether the file"
+                    + " fits your camera."),
                     "build string at " + hex(marks.buildOffset) + ", stamp at " + hex(marks.stampOffset)
                             + (marks.compiled == null ? ", no compile date found" : ", compile date at "
-                            + hex(marks.compiledOffset)) + ", sensor table"
+                            + hex(marks.compiledOffset)) + ", " + marks.sourceTreeDetail() + ", sensor table"
                             + " at " + hex(marks.sensorStart) + ".."+ hex(marks.sensorEnd) + " (" + marks.sensorPairs
                             + " writes" + (marks.busAddress < 0 ? "" : ", bus address " + hex(marks.busAddress))
                             + (marks.referencedFrom < 0 ? ", no code reference found" : ", referenced from code at "
@@ -753,11 +862,15 @@ public final class UpdateCheck {
             Build unchanged = knownBuildOf(data, known);
             boolean exact = unchanged == build;
             boolean codeStock = n >= CODE_AREA_END && sha256Hex(data, 0, CODE_AREA_END).equals(build.codeAreaSha256);
-            // A changed copy keeps the marks where its build has them, and the sensor table that build has: a file
-            // laid out like a known build with another table is a build of its own (a donor's, for another sensor).
+            // A changed copy keeps the marks where its build has them, and that build's stamp, sensor table and source
+            // folder, none of which a toolkit mod changes (image.py's made_from asks for the stamp and the table): a
+            // file laid out like a known build with another of them is a build of its own (a donor's, for another
+            // sensor), and another source folder shows another build.
             Build layout = layoutOf(marks, known);
-            Build changed = codeStock ? build : layout != null && marks.sensorSha256.equals(layout.sensorSha256)
-                    ? layout : null;
+            Build madeFrom = codeStock ? build : layout != null && marks.stamp.equals(layout.stamp)
+                    && marks.sensorSha256.equals(layout.sensorSha256) && sameSourceTree(layout, marks) ? layout : null;
+            String kept = madeFrom == null ? "" : "the build marks lie where that build keeps them, and the stamp, the"
+                    + " sensor table" + (madeFrom.sourceTree == null ? "" : " and the source folder") + " are that build's.";
             if (exact) {
                 out.add(new Line(Level.INFO, "build", "Build", build.label + ", unchanged. " + NOT_THE_CAMERA,
                         "bytes 0 to 0x169000 hash to the known build's."));
@@ -765,19 +878,34 @@ public final class UpdateCheck {
                 out.add(new Line(Level.WARN, "build", "Build", unchanged.label + ", unchanged: not the public dump's. It"
                         + " belongs only in a camera that ran it. " + NOT_THE_CAMERA,
                         "bytes 0 to 0x169000 hash to that build's, SHA-256 " + unchanged.officialSha256 + "."));
-            } else if (changed == build) {
+            } else if (madeFrom == build) {
                 out.add(new Line(Level.INFO, "build", "Build", build.label + ", with changes (see Software below). "
-                        + NOT_THE_CAMERA, "the build marks and the sensor table lie where that build keeps them."));
-            } else if (changed != null) {
-                out.add(new Line(Level.WARN, "build", "Build", changed.label + ", with changes (see Software below):"
+                        + NOT_THE_CAMERA, kept));
+            } else if (madeFrom != null) {
+                out.add(new Line(Level.WARN, "build", "Build", madeFrom.label + ", with changes (see Software below):"
                         + " not the public dump's. It belongs only in a camera that ran that build. " + NOT_THE_CAMERA,
-                        "the build marks and the sensor table lie where that build keeps them."));
+                        kept));
             } else if (layout != null) {
+                List<String> other = new ArrayList<>();
+                List<String> detail = new ArrayList<>();
+                if (!marks.stamp.equals(layout.stamp)) {
+                    other.add("its stamp");
+                    detail.add("the stamp is " + marks.stamp + ", that build's " + layout.stamp);
+                }
+                if (!marks.sensorSha256.equals(layout.sensorSha256)) {
+                    other.add("its image-sensor table");
+                    detail.add("the sensor table's SHA-256 is " + marks.sensorSha256 + ", that build's "
+                            + layout.sensorSha256);
+                }
+                if (!sameSourceTree(layout, marks)) {
+                    other.add("its source folder");
+                    detail.add("the source folder is " + (marks.sourceTree == null ? "not found" : marks.sourceTree)
+                            + ", that build's " + layout.sourceTree);
+                }
                 out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know, laid out like "
-                        + layout.name() + ": its image-sensor table is not that build's. It belongs only in the camera"
-                        + " it was dumped from. " + NOT_THE_CAMERA, "the build marks lie where " + layout.name()
-                        + " keeps them; the sensor table's SHA-256 is " + marks.sensorSha256 + ", that build's "
-                        + layout.sensorSha256 + "."));
+                        + layout.name() + ": " + and(other) + (other.size() == 1 ? " is" : " are") + " not that build's."
+                        + " It belongs only in the camera it was dumped from. " + NOT_THE_CAMERA, "the build marks lie"
+                        + " where " + layout.name() + " keeps them; " + join(detail, "; ") + "."));
             } else {
                 out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know: not the public dump's."
                         + " It belongs only in the camera it was dumped from. " + NOT_THE_CAMERA,
@@ -786,7 +914,9 @@ public final class UpdateCheck {
 
             // The image sensor: the file's program for it against the firmware in the backup, when one is given. That
             // firmware is the camera's own only if the backup was read before any flash; a backup that is a known,
-            // public build may be a read taken after a flash with it, so a match with one is only a warning.
+            // public build may be a read taken after a flash with it, so a match with one is only a warning. Against a
+            // backup of a build no public image holds, the same table passes only when the program around it (bytes
+            // 0..0x120000, code and data) is the backup's too; otherwise it is a warning that says so.
             boolean knownTable = marks.sensorSha256.equals(build.sensorSha256);
             String fileTable = "the file's table: " + marks.sensorPairs + " writes at " + hex(marks.sensorStart)
                     + ", SHA-256 " + marks.sensorSha256 + (marks.referencedFrom < 0 ? ", no code reference found"
@@ -808,11 +938,18 @@ public final class UpdateCheck {
                         + " one to compare the file with. Do not use this file from the app.",
                         "several sensor programs in the backup: " + ref.programs() + "."));
             } else if (ref != null) {
+                // Each holds one sensor program the app can find: the file's is compared with the backup's.
+                compared = true;
                 String both = fileTable + "; the backup's: " + ref.sensorPairs + " writes at " + hex(ref.sensorStart)
                         + ", SHA-256 " + ref.sensorSha256 + (ref.referencedFrom < 0 ? ", no code reference found"
                         : ", referenced from code at " + hex(ref.referencedFrom)) + ".";
                 Build refBuild = knownBuildOf(reference, known);
+                // The table alone does not show how the sensor is driven: the code that writes it does too.
                 boolean codeSame = regionEquals(data, 0, reference, 0, CODE_AREA_END);
+                String otherProgram = "the same table as in the firmware in your backup, but the program around it"
+                        + " differs from that firmware (see Software below), and a different program can drive the same"
+                        + " sensor differently. So this does not show that the file drives the sensor the way that"
+                        + " firmware does.";
                 if (ref.referencedFrom >= 0 && marks.referencedFrom < 0) {
                     out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "no code in the file refers to"
                             + " its image-sensor table, while the firmware in your backup refers to its own. The file's"
@@ -826,18 +963,18 @@ public final class UpdateCheck {
                             + " camera's own firmware is already gone and the file is a working camera's, that donor"
                             + " route goes through the toolkit on a computer (docs/02-RECOVERY.md, section D).", both));
                 } else if (refBuild != null) {
-                    out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "the same as in the firmware in"
-                            + " your backup. That firmware is " + refBuild.name() + ", unchanged: a public build, which"
-                            + " a camera flashed with a file made from it holds too. So this shows a fit only if the"
-                            + " backup was read before the camera was ever flashed: a read taken after a flash shows"
-                            + " what the camera runs now, not what fits it.",
+                    out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", codeSame
+                            ? "the same as in the firmware in your backup. That firmware is " + refBuild.name()
+                            + ", unchanged: a public build, which a camera flashed with a file made from it holds too. So"
+                            + " this shows a fit only if the backup was read before the camera was ever flashed: a read"
+                            + " taken after a flash shows what the camera runs now, not what fits it."
+                            : otherProgram + " That firmware is " + refBuild.name() + ", unchanged: a public build,"
+                            + " which a camera flashed with a file made from it holds too, so it shows what fits this"
+                            + " camera only if the backup was read before the camera was ever flashed.",
                             both + " The backup's bytes 0 to 0x169000 hash to that build's, SHA-256 "
                                     + refBuild.officialSha256 + "."));
                 } else if (!codeSame) {
-                    out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "the same table as in the"
-                            + " firmware in your backup, but the program around it differs from that firmware (see"
-                            + " Software below), so this does not show that the file drives the sensor the way that"
-                            + " firmware does.", both));
+                    out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", otherProgram, both));
                 } else {
                     out.add(new Line(Level.PASS, "sensor-table", "Image sensor set-up", "the same as in the firmware in"
                             + " your backup, and so is the program around it: the file drives the image sensor the way"
@@ -977,42 +1114,47 @@ public final class UpdateCheck {
     }
 
     /**
-     * The start-up table: the ARM vector table at 0x200..0x240, where the processor begins after reset. Compared
-     * byte for byte with the backup's when the file is laid out like the firmware in it, else with the known build
-     * whose layout the file has. Another layout is another build, and there is nothing to compare it with.
+     * The start-up table: the ARM vector table at 0x200..0x240, where the processor begins after reset. In this order,
+     * as verify does it: the same as the backup's passes; a file laid out like the firmware in the backup with another
+     * table fails; any other file is compared with the known build whose layout it has (with or without a backup),
+     * and fails when its table is not that build's. Only a file laid out like no known build, nor like the firmware
+     * in the backup, is left uncompared, with a warning. No setting turns a failure here into a warning.
      */
     private static void vectorLine(byte[] data, Marks marks, byte[] reference, Marks ref, Build layout, List<Line> out) {
         String fail = " A camera flashed with it would most likely not start at all, and then the card updater cannot"
                 + " run again: only a chip programmer could bring it back. Do not use this file.";
-        String detail = "bytes 0x200 to 0x240 (the ARM vector table), SHA-256 " + sha256Hex(data, VECTORS, VECTORS_END);
-        if (reference != null) {
-            boolean like = ref.complete() && ref.stampOffset == marks.stampOffset && ref.buildOffset == marks.buildOffset
-                    && ref.sensorStart == marks.sensorStart;
-            if (!like) {
-                out.add(new Line(Level.WARN, "vector-table", "Program start", "the file is not laid out like the"
-                        + " firmware in your backup: it is another build. So the table the processor starts the program"
-                        + " from could not be compared with your backup's.", detail + "; the build marks lie at other"
-                        + " offsets than in the backup."));
-            } else if (regionEquals(data, VECTORS, reference, VECTORS, VECTORS_END - VECTORS)) {
-                out.add(new Line(Level.PASS, "vector-table", "Program start", "the table the processor starts the"
-                        + " program from is the same as in your backup.", detail + ", the same as the backup's."));
-            } else {
-                out.add(new Line(Level.FAIL, "vector-table", "Program start", "the table the processor starts the"
-                        + " program from differs from the one in your backup, although the file is laid out like that"
-                        + " firmware." + fail, detail + "; the backup's " + sha256Hex(reference, VECTORS, VECTORS_END)
-                        + "."));
-            }
-        } else if (layout == null || layout.vectorSha256 == null) {
-            out.add(new Line(Level.WARN, "vector-table", "Program start", "the file is laid out like no build the app"
-                    + " knows, so the table the processor starts the program from could not be compared with a known"
-                    + " one.", detail + "; the build marks lie at other offsets than in the known builds."));
-        } else if (layout.vectorSha256.equals(sha256Hex(data, VECTORS, VECTORS_END))) {
+        String vectors = sha256Hex(data, VECTORS, VECTORS_END);
+        String detail = "bytes 0x200 to 0x240 (the ARM vector table), SHA-256 " + vectors;
+        String backups = reference == null || reference.length < VECTORS_END ? ""
+                : "; the backup's " + sha256Hex(reference, VECTORS, VECTORS_END);
+        boolean like = ref != null && ref.complete() && ref.stampOffset == marks.stampOffset
+                && ref.buildOffset == marks.buildOffset && ref.sensorStart == marks.sensorStart;
+        if (reference != null && regionEquals(data, VECTORS, reference, VECTORS, VECTORS_END - VECTORS)) {
+            out.add(new Line(Level.PASS, "vector-table", "Program start", "the table the processor starts the"
+                    + " program from is the same as in your backup.", detail + ", the same as the backup's."));
+        } else if (like) {
+            out.add(new Line(Level.FAIL, "vector-table", "Program start", "the table the processor starts the"
+                    + " program from differs from the one in your backup, although the file is laid out like that"
+                    + " firmware." + fail, detail + backups + "."));
+        } else if (layout != null && layout.vectorSha256 != null && layout.vectorSha256.equals(vectors)) {
             out.add(new Line(Level.PASS, "vector-table", "Program start", "the table the processor starts the program"
-                    + " from is the same as in " + layout.name() + ", whose layout the file has.", detail + "."));
-        } else {
+                    + " from is the same as in " + layout.name() + ", whose layout the file has."
+                    + (reference == null ? "" : " The file is not laid out like the firmware in your backup, so it was"
+                    + " compared with that build's table."), detail + backups + "."));
+        } else if (layout != null && layout.vectorSha256 != null) {
             out.add(new Line(Level.FAIL, "vector-table", "Program start", "the table the processor starts the program"
                     + " from differs from the one in " + layout.name() + ", although the file is laid out like that"
-                    + " build." + fail, detail + "; that build's " + layout.vectorSha256 + "."));
+                    + " build" + (reference == null ? "." : ", and from the one in your backup.") + fail,
+                    detail + "; that build's " + layout.vectorSha256 + backups + "."));
+        } else {
+            out.add(new Line(Level.WARN, "vector-table", "Program start", reference == null
+                    ? "the file is laid out like no build the app knows, so the table the processor starts the program"
+                    + " from could not be compared with a known one."
+                    : "the file is not laid out like the firmware in your backup, nor like a build the app knows, and the"
+                    + " table the processor starts the program from is not your backup's. Another build may start from"
+                    + " another table, so whether this one is right could not be checked.",
+                    detail + backups + "; the build marks lie at other offsets than in the known builds"
+                            + (reference == null ? "" : " and in the backup") + "."));
         }
     }
 
@@ -1042,7 +1184,10 @@ public final class UpdateCheck {
         return null;
     }
 
-    /** The known build whose mark offsets the file has, or null: a copy of it, unless the sensor table says otherwise. */
+    /**
+     * The known build whose mark offsets the file has, or null: a copy of it, unless its stamp, its sensor table or
+     * its source folder says otherwise.
+     */
     static Build layoutOf(Marks marks, Build[] known) {
         for (Build b : known) {
             if (b.laidOut(marks)) {
@@ -1050,6 +1195,29 @@ public final class UpdateCheck {
             }
         }
         return null;
+    }
+
+    /** True when the file's source folder is the build's, or the build has none on record. */
+    static boolean sameSourceTree(Build b, Marks marks) {
+        return b.sourceTree == null || b.sourceTree.equals(marks.sourceTree);
+    }
+
+    /** "a", "a and b", "a, b and c". */
+    static String and(List<String> items) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            sb.append(i == 0 ? "" : i == items.size() - 1 ? " and " : ", ").append(items.get(i));
+        }
+        return sb.toString();
+    }
+
+    /** The items with sep between them (String.join came with API 26). */
+    static String join(List<String> items, String sep) {
+        StringBuilder sb = new StringBuilder();
+        for (String s : items) {
+            sb.append(sb.length() == 0 ? "" : sep).append(s);
+        }
+        return sb.toString();
     }
 
     /**
@@ -1099,6 +1267,8 @@ public final class UpdateCheck {
      * back) and that is not one of the public images. Null when it is, otherwise why not, as a plain clause in lower
      * case without a final full stop. Which camera a dump was read from, and whether before or after a flash, no
      * check of the file can tell; backupNotes says what it can.
+     *
+     * publicSha256 holds the public dumps' SHA-256, the public stock dump's first (Candidates.PUBLIC_DUMP_SHA256S).
      */
     public static String backupProblem(byte[] data, String[] publicSha256) {
         if (data == null) {
@@ -1109,11 +1279,15 @@ public final class UpdateCheck {
                     + (data.length == UPDATE_SIZE || data.length == OFFICIAL_SIZE ? ". This is an update file, not a dump of a chip" : "");
         }
         String sha = sha256Hex(data, 0, data.length);
-        for (String s : publicSha256) {
-            if (s.equalsIgnoreCase(sha)) {
-                return "it is byte for byte the public stock dump: a copy of someone else's camera, or a read of a camera"
-                        + " that was flashed with the public restore file and has changed no setting since. Either way it"
-                        + " is not firmware known to fit your camera, so the app has nothing to compare a file with";
+        for (int i = 0; i < publicSha256.length; i++) {
+            if (publicSha256[i].equalsIgnoreCase(sha)) {
+                return (i == 0 ? "it is byte for byte the public stock dump: a copy of someone else's camera, or a read of"
+                        + " a camera that was flashed with the public restore file and has changed no setting since"
+                        : "it is byte for byte one of the public dumps, not the stock one: a copy of someone else's"
+                        + " camera, or a read of a camera that was flashed with a file made from that dump and has"
+                        + " changed no setting since")
+                        + ". Either way it is not firmware known to fit your camera, so the app has nothing to compare a"
+                        + " file with";
             }
         }
         if (!(data[0] == 'S' && data[1] == 'P' && data[2] == 'I' && data[3] == 'I')) {
@@ -1126,8 +1300,9 @@ public final class UpdateCheck {
                     + " of sensor: keep it, and look at it with charmera inspect on a computer";
         }
         if (!marks.complete()) {
+            String conflict = marks.stampConflictNote();
             return "the marks every Charmera firmware carries were not all found (" + marks.missing() + "), so it is not a"
-                    + " complete dump of the chip";
+                    + " complete dump of the chip" + (conflict.isEmpty() ? "" : ". " + conflict);
         }
         List<Entry> entries = resourceDirectory(data);
         if (entries.isEmpty()) {

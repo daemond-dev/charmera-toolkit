@@ -101,7 +101,8 @@ public final class Candidates {
      * The 2 MiB stock dump from what the owner picked: the public dump itself, or the published stock restore file
      * (its first 0x1E0000 bytes, which this pads with the blank 0xFF tail). Throws otherwise, with a message that
      * says the cause and the next step in plain words: it starts in lower case so the screen can show it after a
-     * colon, and any SHA-256 is on a last line that starts with "Detail:".
+     * colon, and any SHA-256 is on a last line that starts with "Detail:". Whether another 2 MiB file could be this
+     * camera's backup is UpdateCheck.backupProblem's to say, not this message's.
      */
     public static byte[] stockDump(byte[] picked) {
         byte[] dump;
@@ -119,9 +120,8 @@ public final class Candidates {
         if (!sha.equals(STOCK_DUMP_SHA256)) {
             throw new IllegalArgumentException("the file is not the public stock dump, so the app will not use it. The"
                     + " app makes the stock restore file only from that exact file, charmera_stock_latest.bin,"
-                    + " unchanged. A backup of your own camera is chosen with \"Choose this camera's backup\" in step 0"
-                    + " instead, and charmera pack on a computer makes an update file from it.\nDetail: its SHA-256"
-                    + " is " + sha + "; the public stock dump's is " + STOCK_DUMP_SHA256 + ".");
+                    + " unchanged.\nDetail: its SHA-256 is " + sha + "; the public stock dump's is " + STOCK_DUMP_SHA256
+                    + ".");
         }
         return dump;
     }

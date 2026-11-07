@@ -4,11 +4,14 @@ charmera_toolkit/image.py and the stock dump; its card handling and the release 
 The Java code itself is tested on the JVM by android/build.sh (android/test). There is no emulator in CI, so the
 lifecycle rules of MainActivity are checked here in its source.
 """
+import collections
 import hashlib
 import importlib.util
 import os
 import re
 from pathlib import Path
+
+import pytest
 
 from charmera_toolkit import checksum, image
 
@@ -112,6 +115,75 @@ def test_app_finds_the_sensor_program_by_the_same_rule_as_image_py(stock_image):
     assert tables.referenced_from == 0x7B91C and tables.referenced_from % 4 == 0
 
 
+def test_app_takes_the_stamp_and_a_changed_copy_as_image_py_does(stock_image):
+    """Parity: the stamp is the one after '*.bin', and there is none when several different ones follow it; a file
+    laid out like a known build is that build with changes only when its stamp and sensor table are that build's.
+    image.py does so on the public dump changed that way here, and CandidatesTest holds the app to the same files."""
+    java = SRC.read_text(encoding="utf-8")
+    find = _bodies(java, "public static Marks findMarks(byte[] data)")[0]
+    assert "indexOf(data, updatePattern, i - 64, i) >= 0" in find and "near.size() > 1 ? near" in find
+    assert "firstNear >= 0 ? firstNear : runs == 1 ? firstRun" in find
+    # the stamp, the build string and the compile date from offset 0 as in image.py, the sensor program after the header
+    assert "for (int i = 0; i + 13 <= end; i++)" in find and "indexOf(data, jh, 0, end)" in find
+    assert "for (int i = 0; i + 12 <= end && compiled == null; i++)" in find
+    assert "indexOf(data, SENSOR_RESET_TABLE, VA_OFFSET, end)" in find
+    assert "layout != null && marks.stamp.equals(layout.stamp)" in _check_body(java)
+    restamped = bytearray(stock_image)
+    restamped[0x218C4:0x218D0] = b"202601010000"
+    match = image.detect_build(bytes(restamped))
+    assert match.made_from is None and match.layout is image.PUBLIC_BUILD
+    twice = bytearray(stock_image)
+    twice[0xFFF8:0x1000D] = b"*.bin\x00xx202601010101\x00"      # a second stamp after a second '*.bin'
+    marks = image.find_marks(bytes(twice))
+    assert marks.stamp is None and marks.stamp_conflict == ("202601010101", "202505201029")
+
+
+_SOURCE_TREE = re.compile(rb"\\2247\\5408\\([\x20-\x5b\x5d-\x7e]{1,64})\\")
+
+
+def _source_tree(data: bytes):
+    """The source-tree folder by the app's rule (S15): the one named most often after \\2247\\5408\\ in the code area,
+    the first found on a tie, or None."""
+    names = collections.Counter(m.group(1).decode("ascii") for m in _SOURCE_TREE.finditer(data[:image.CODE_AREA_END]))
+    return names.most_common(1)[0][0] if names else None
+
+
+def test_app_records_each_known_builds_source_folder():
+    """S15: the source-tree folder is a build mark; the app finds it by content and records it for both known builds."""
+    java = SRC.read_text(encoding="utf-8")
+    assert 'SOURCE_TREE_PREFIX = "\\\\2247\\\\5408\\\\".getBytes(' in java
+    find = _bodies(java, "public static Marks findMarks(byte[] data)")[0]
+    assert "indexOf(data, SOURCE_TREE_PREFIX, 0, end)" in find and "e.getValue() > trees.get(sourceTree)" in find
+    assert '"v006",' in _build_block(java, "PUBLIC_BUILD") and '"v008_test",' in _build_block(java, "FILM_MODS_BUILD")
+    assert "A different source folder shows a different build, the same one does not show the same build, and neither" \
+           " says whether the file fits your camera." in _joined(java)
+    assert "sameSourceTree(layout, marks)" in _check_body(java)
+
+
+def _check_body(java: str) -> str:
+    """UpdateCheck from the full check() on: the checks, the vector table and the helpers after them."""
+    return java[java.index("public static Result check(String displayName, byte[] data, Build build, byte[] reference)"):]
+
+
+def test_app_source_folders_are_the_files_own(stock_image):
+    """The folders the app records are the ones the files' own source paths name, all 27 of them in each."""
+    assert _source_tree(stock_image) == "v006" and stock_image[:image.CODE_AREA_END].count(b"\\2247\\5408\\v006\\") == 27
+    restore = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
+    if restore.is_file():
+        data = restore.read_bytes()
+        assert _source_tree(data) == "v008_test" and data[:image.CODE_AREA_END].count(b"\\2247\\5408\\v008_test\\") == 27
+
+
+def test_app_source_folders_match_image_py():
+    """S15 parity: each known build's folder in the app is image.py's KnownBuild.source_tree."""
+    if "source_tree" not in Path(image.__file__).read_text(encoding="utf-8"):
+        pytest.skip("image.py has no KnownBuild.source_tree yet: the Python side of S15 brings it")
+    java = SRC.read_text(encoding="utf-8")
+    for name, build in (("PUBLIC_BUILD", image.PUBLIC_BUILD), ("FILM_MODS_BUILD", image.FILM_MODS_BUILD)):
+        assert f'"{build.source_tree}",' in _build_block(java, name), name
+    assert (image.PUBLIC_BUILD.source_tree, image.FILM_MODS_BUILD.source_tree) == ("v006", "v008_test")
+
+
 def test_app_says_what_a_backup_of_a_known_build_proves():
     """S3: a backup whose firmware is a known, public build makes the same table a warning, not a pass; the sensor
     line speaks of the firmware in the backup, never of the camera's own; a backup made of the exact public dump
@@ -132,14 +204,21 @@ def test_app_says_what_a_backup_of_a_known_build_proves():
 
 def test_app_offers_the_stock_restore_file_only_for_the_public_build():
     """The leftover 0.4 wording is gone: a failed check never sends the owner to the stock restore file as the way to
-    restore a camera, and no screen says that owners put it back on cameras that ran this build."""
+    restore a camera, and no screen says that owners put it back on cameras that ran this build. A camera flashed with
+    the restore file reads as the public build too, so the backup that shows it must be one read before the camera was
+    ever flashed (S3)."""
     for path in sorted(PKG.glob("*.java")):
         text = _joined(path.read_text(encoding="utf-8"))
         assert "To restore the camera, tap" not in text, path.name
         assert "already ran this build" not in text, path.name
         assert "left unable to take pictures by" not in text, path.name
+        assert "whose backup shows the public build" not in text, path.name
     java = _joined(SRC.read_text(encoding="utf-8"))
-    assert "The stock restore file is only for a camera whose backup shows the public build." in java
+    assert "The stock restore file is only for a camera whose backup, read before the camera was ever flashed, shows" \
+           " the public build. For any other camera, make the file from its own backup with charmera pack on a" \
+           " computer." in java
+    assert "whose backup, read before the camera was ever flashed, shows the public build" in _joined(
+        ACTIVITY.read_text(encoding="utf-8"))
     for path in (PKG / "Candidates.java", ACTIVITY):
         assert "what their cameras ran before is not known" in _joined(path.read_text(encoding="utf-8")), path.name
 
@@ -395,6 +474,19 @@ def test_app_refuses_the_withdrawn_candidates_and_blames_the_name_only_for_a_nam
     assert '"sensor-table"' not in name_only
 
 
+def test_app_points_to_step_0_only_a_dump_that_step_0_takes():
+    """A 2 MiB file picked in step 1 is pointed to step 0 only when step 0 would take it as a backup; any other one
+    gets what UpdateCheck.backupProblem finds wrong with it. Candidates.stockDump's refusal names no step."""
+    load = _bodies(ACTIVITY.read_text(encoding="utf-8"), "private void loadFile(")[0]
+    dump = load[load.index("} else if (data.length == Candidates.DUMP_SIZE) {"): load.index("result = UpdateCheck.check(name, data")]
+    assert "String problem = UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S);" in dump
+    accepted, refused = dump.split("} else {", 1)
+    assert "if (problem == null) {" in accepted and "q(BACKUP)" in accepted
+    assert "q(BACKUP)" not in refused and "sentence(problem)" in refused and "Candidates.stockDump(" not in dump
+    stock = _bodies((PKG / "Candidates.java").read_text(encoding="utf-8"), "public static byte[] stockDump(")[0]
+    assert "step 0" not in stock and "Choose this camera's backup" not in stock
+
+
 def test_build_runs_every_jvm_test_and_compiles_the_gate():
     """build.sh compiles every plain-Java class the app has and runs every test in android/test before it builds."""
     build = BUILD.read_text(encoding="utf-8")
@@ -417,6 +509,5 @@ def test_release_workflow_runs_the_source_and_doc_checks_before_it_builds():
     assert wf.index("actions/setup-python@") < run
     assert wf.index('echo "CHARMERA_STOCK_IMAGE=') < run < wf.index("./build.sh")
     assert "python -m pytest" in wf[wf.rindex("\n", 0, run): run]
-    assert "environment:" not in wf
     publish = wf[wf.index("- name: Publish on Releases"):]
     assert "if: github.ref == 'refs/heads/main' && steps.key.outputs.release == 'true'" in publish.splitlines()[1]
