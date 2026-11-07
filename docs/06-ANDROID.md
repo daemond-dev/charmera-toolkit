@@ -20,8 +20,9 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
   --stock <backup>` does the same on a computer. Whether a firmware fits a camera cannot be told any other way, and
   only a dump read before the camera was ever flashed tells it: after a flash the dump holds the flashed firmware, and
   when it is one of the known builds the app shows a matching sensor set-up as a warning, not a pass
-  ([After a flash](01-FIRST-FLASH.md#after-a-flash)). The app cannot tell whose chip a dump came from: it refuses only
-  the two public stock dumps, so give it only a dump read from this camera with a clip.
+  ([After a flash](01-FIRST-FLASH.md#after-a-flash)). The app cannot tell whose chip a dump came from: it refuses the
+  two public stock dumps and any read named as unverified (`.unverified-read<n>.bin`), so give it only a dump read
+  from this camera with a clip, from two reads that agreed.
 - Original 2025 series only: matte body, yellow Kodak boot screen. Never a Millennium Edition (blue boot
   screen) or a CLOT edition ([Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). The body
   alone proves nothing: an original-series camera was left unable to take pictures by the public dump.
@@ -39,13 +40,13 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 [Charmera Card](../android/README.md) does the card part on the phone: it downloads the public stock dump, makes the
 published stock restore file from it (it can make nothing else), compares that file with your backup, writes it to
 the camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup. It
-writes nothing without a backup on record. That is version 0.5, which has not been published yet.
+writes nothing without a backup on record. That is version 0.5.
 Download [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
-on the phone (sign in to GitHub in the phone's browser first: the repository is private), but check which version
-you got. Until 0.5 is published from `main`, that link serves version 0.4, which has no backup step and does not
-refuse the withdrawn candidates C, A and B: do not flash with it. 0.5 is the release titled "Charmera Card for
-Android 0.5", and its screen opens with "Before you start" and "No backup of this camera, no flash", then a step "0.
-Back up this camera first". The rest of this page is the same job done by hand, and what the app cannot help with.
+on the phone, and check which version you got: 0.5 is the release titled "Charmera Card for Android 0.5", and its
+screen opens with "Before you start" and "No backup of this camera, no flash", then a step "0. Back up this camera
+first". Version 0.4, published before it, had no backup step and did not refuse the withdrawn candidates C, A and B;
+it was taken down on 2026-11-06, and if you still have it installed, do not flash with it. The rest of this page is
+the same job done by hand, and what the app cannot help with.
 
 Which way the card reaches the app depends on the Android version:
 
@@ -84,9 +85,8 @@ charmera pack --input <your backup>.bin --out out/restore/ --i-understand-this-f
 charmera verify out/restore/JH_5408<stamp>_<sum>.bin --stock <your backup>.bin
 ```
 
-The repository is private, so the `pip install git+https://...` line needs a GitHub token in the URL. Simpler:
-download the repository as a ZIP in the phone's browser while signed in to GitHub, then run
-`pip install ~/storage/downloads/charmera-toolkit-main.zip`.
+Without git, download the repository as a ZIP in the phone's browser and run
+`pip install ~/storage/downloads/charmera-toolkit-main.zip` instead.
 
 For a mod that changes the code or the resource pack (sound data, frames, the boot logo, `tweak`), add
 `--allow-modified` to the `verify` line: `verify` refuses any change to bytes 0..0x170000 unless it is told

@@ -991,8 +991,8 @@ class _Run:
         self.ffmpeg = ffmpeg
         self.out_dir: Path = args.out
         self.tokens: Set[str] = set() if args.keep_names else existing_tokens(args.out)
-        # Lower-cased file names that occur more than once among the sources (DCIM/100MEDIA/PICT0001.JPG and
-        # DCIM/101MEDIA/PICT0001.JPG): with --keep-names those get their folder name in front.
+        # Lower-cased file names that occur more than once among the sources (PICT0001.JPG in the copies of two
+        # cards, say): with --keep-names those get their folder name in front.
         self.duplicate_names: Set[str] = duplicate_names or set()
         self.photos = 0  # Charmera photos rebuilt
         self.copied = 0  # other JPEGs copied unchanged

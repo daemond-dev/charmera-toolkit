@@ -106,13 +106,17 @@ camera's settings and whether a card was in (VERIFIED in the public build), so t
 
 Any other header says less. `photo-id` calls a photo re-saved by another program only when its header carries a mark
 an editor leaves: an XMP block, an APP2, APP13 or APP14 segment, a progressive frame, or a rotated size (taller than
-wide). For any other header neither known build writes, such as one with a JFIF segment, an EXIF Make other than
-`Generalplus`, the still header's comment without its EXIF block, or tables the camera's encoder does not write,
-another program saved the photo again or another build wrote it, and nothing in the header tells which. The still
+wide). A header with a JFIF segment, an EXIF Make other than `Generalplus`, the still header's comment without its
+EXIF block, or tables the camera's encoder does not write may have been saved again by another program or written
+by another build, and nothing in it tells which. A header that differs from both templates in other ways gets
+"nothing here can tell what wrote it", and one without its quantisation or Huffman tables is cut short or comes from
+an encoder that leaves them out, with nothing to conclude. The still
 header does not show the same build either: two builds can share a header, and no header says anything about the
-image sensor. For a video, `photo-id` reads the AVI's chunk headers and its first frame's header. The frame header
-does not tell the known builds apart (INFERRED: both write their frames from the bare header, and no video of either
-was examined), but the text the AVI packer puts in the `JUNK` chunk can show other code: the public build writes
+image sensor. For a video, `photo-id` reads the AVI's chunk headers and its first frame's header. A frame header
+that is the bare template's (its segments, comment, frame, restart interval and Huffman tables; the quantisation
+tables follow a rate control) does not tell the known builds apart (INFERRED: both write their frames from the bare
+header, and no video of either was examined); any other frame header is not the one they write. The text the AVI
+packer puts in the `JUNK` chunk can show other code: the public build writes
 `GP$322 Generalplus AviPackerV3 20140916` there (VERIFIED by static analysis), the film-mods build carries the same
 text (VERIFIED by search), and any other text shows that other code wrote the file. That is how a would-be donor's
 photos are compared with this camera's own pre-flash photos without opening anything

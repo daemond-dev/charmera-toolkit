@@ -12,8 +12,9 @@ stamp, and the public dump left one original-series camera unable to take pictur
 before it was ever flashed is the one file known to fit it; any dump of the chip is the way back to what it held when
 it was read. Reading the chip needs a CH341A clip and a computer
 ([Recovery, section B](../docs/02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)); the app
-cannot do it, and it cannot tell whose chip a dump came from: it refuses only the two public stock dumps, so give it
-only a dump read from this camera with a clip.
+cannot do it, and it cannot tell whose chip a dump came from: it refuses the two public stock dumps and any read
+named as unverified (`.unverified-read<n>.bin`), so give it only a dump read from this camera with a clip, from two
+reads that agreed.
 
 It uses the network only to download the stock dump from its upstream repository on GitHub, at a fixed commit, and
 accepts the download only if its SHA-256 is that of the public dump. No firmware is shipped inside the app. It
@@ -26,9 +27,10 @@ into it while it was switched off, which the connection steps below now prevent)
 file. The writing, the flashes and the cleanup worked as the app describes them. Neither file fitted that camera, which
 is why 0.5 adds the backup step.
 
-The APK published at the [android-app release](https://github.com/daemond-dev/charmera-toolkit/releases/tag/android-app)
-is still 0.4, and stays so until 0.5 is published from `main`. 0.4 has no backup step and does not refuse C, A or B: do
-not flash with it. 0.5 has not yet been built in CI or run on a phone. Its plain-Java parts (the checker, the card
+Version 0.4, the one published at the [android-app release](https://github.com/daemond-dev/charmera-toolkit/releases/tag/android-app)
+before 0.5, had no backup step and did not refuse C, A or B; it was taken down on 2026-11-06, and if you still have
+it installed, do not flash with it. 0.5 had not been run on a phone when this was written. Its plain-Java parts (the
+checker, the card
 rules, the file builder and WriteGate, the rule the screen asks before every write and save) compile and pass their
 tests on a computer's JVM ([Build](#build)). The screen itself needs the Android SDK and is built only by the
 workflow.
@@ -58,13 +60,12 @@ workflow.
 
 ## Install
 
-Check the version first. Until 0.5 is published from `main`, the release below serves 0.4, which has no backup step and
-does not refuse the withdrawn candidates C, A and B: do not flash with it. 0.5 is the release titled "Charmera Card for
-Android 0.5", and its screen opens with "Before you start" and "No backup of this camera, no flash", then a step "0.
-Back up this camera first".
+Check the version first: 0.5 is the release titled "Charmera Card for Android 0.5", and its screen opens with "Before
+you start" and "No backup of this camera, no flash", then a step "0. Back up this camera first". Version 0.4 had no
+backup step and did not refuse the withdrawn candidates C, A and B; if you still have it installed, do not flash
+with it.
 
-The repository is private, so first sign in to GitHub in the phone's browser, with an account that can see the
-repository. Signed out, GitHub answers the download link with 404 (Not Found). Then download
+Download
 [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
 from the [android-app release](https://github.com/daemond-dev/charmera-toolkit/releases/tag/android-app), open it,
 and allow your browser or file manager to install apps when Android asks. Play Protect may warn that it does not
@@ -159,9 +160,8 @@ that flash is wanted.
   phone, or run `charmera card-fix` on a computer ([SD card problems](../docs/05-CARDS.md)).
 - **Other mods:** it makes only the stock restore file. A file from your own backup, frames, a boot logo or start-up
   tweaks need the toolkit on a computer, or in Termux ([Using an Android phone](../docs/06-ANDROID.md)); the app then
-  checks the file they produce, against your backup, and writes it. Because the repository is private, `pip install`
-  from its GitHub URL in Termux needs a GitHub personal access token; or download the source on the phone while
-  signed in to GitHub and run `pip install` on the unpacked folder.
+  checks the file they produce, against your backup, and writes it. In Termux, `pip install` takes the toolkit
+  straight from its GitHub URL.
 - **The donor route:** for a camera whose own firmware is gone and does not fit it, another camera's firmware is
   the only help, and the app never takes that route: it compares every file with the backup on record and refuses a
   sensor set-up that differs. A computer does it ([Recovery, section D](../docs/02-RECOVERY.md#the-donor-route)).

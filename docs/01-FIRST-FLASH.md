@@ -8,8 +8,8 @@ no return marked. Every step links to a longer document; read those before the s
 
 Only a phone? The [Charmera Card app](../android/README.md) does steps 4 to 7 on the phone, and makes the published stock
 restore file itself. It still needs the backup from step 1: without a dump of your own camera's chip it does not write
-to the card. That is version 0.5, not published yet: the APK at the app's download link is still 0.4, which has no
-backup step and does not refuse the withdrawn candidates, so do not flash with it ([how to tell the two
+to the card. That is version 0.5; 0.4, published before it, had no backup step and did not refuse the withdrawn
+candidates, so if you still have it installed, do not flash with it ([how to tell the two
 apart](../android/README.md#install)). Read steps 0 and 1 here first.
 
 Not flashing anything? If you only want the photo and video dates fixed, go to

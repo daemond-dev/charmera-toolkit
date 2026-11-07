@@ -42,13 +42,14 @@ Examples for every command are in the [Command reference](docs/07-USAGE.md).
 
 On a phone, the [Charmera Card app](android/README.md) does the card part with no computer: it makes the published
 stock restore file from the public stock dump, compares it with a dump of your own camera's chip, and puts it on the
-camera's card over the USB-C cable; without that dump it writes nothing. That is version 0.5, which has not been
-published yet: the APK behind the download link is still 0.4, which has no backup step and does not refuse the
-withdrawn candidates C, A and B, so do not flash with it. 0.5 is the release titled "Charmera Card for Android 0.5",
-and its screen opens with "Before you start" and "No backup of this camera, no flash", then a step "0. Back up this
-camera first" ([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk);
-the repository is private, so sign in to GitHub in the phone's browser first). The app cannot tell whose chip a dump
-came from: it refuses only the two public stock dumps, so give it only a dump read from this camera with a clip.
+camera's card over the USB-C cable; without that dump it writes nothing. That is version 0.5, the release titled
+"Charmera Card for Android 0.5": its screen opens with "Before you start" and "No backup of this camera, no flash",
+then a step "0. Back up this camera first"
+([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)).
+Version 0.4, published before it, had no backup step and did not refuse the withdrawn candidates C, A and B; it was
+taken down on 2026-11-06, and if you still have it installed, do not flash with it. The app cannot tell whose chip a
+dump came from: it refuses the two public stock dumps and any read named as unverified (`.unverified-read<n>.bin`),
+so give it only a dump read from this camera with a clip, from two reads that agreed.
 
 Ground rules, and what each command does about them:
 
