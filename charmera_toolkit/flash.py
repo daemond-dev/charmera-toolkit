@@ -8,11 +8,19 @@ careful layer over flashrom and never touches USB itself.
 Safety rules:
 
 - `probe` and `backup` only run flashrom without an operation or with `-r`. They cannot write.
+- `probe`, `backup` and `restore` print the checklist below (CHECKLIST) before flashrom goes near the chip.
+- `backup` keeps a read as <label>_<UTC time>.bin only when two or more reads are identical. A single read,
+  and reads that differ, keep the name <label>_<UTC time>.unverified-read<n>.bin, which nobody takes for a
+  backup.
 - `restore` refuses an image that is not exactly 2 MiB, does not start with the "SPII" magic, or carries no
   Charmera build marks (build string, 12-digit stamp, sensor table, each found by content; unless
-  --allow-unknown-build). It prints the SHA-256, a 64 KiB
-  block diff against a fresh backup of the chip when one is given, and the exact plan, and only runs
-  `flashrom -w` after the owner types RESTORE. Afterwards it reads the chip back and compares.
+  --allow-unknown-build). No backup of the chip on the clip, no write: restore reads the chip twice itself,
+  keeps that read in --out as backup does (with its SHA-256 and a manifest), and writes nothing when the two
+  reads differ. A backup file given from elsewhere could not prove that it came from this chip, now. It
+  prints a 64 KiB block diff of the image against that read, the image's sensor table against the chip's,
+  the SHA-256 and the exact plan, and only runs `flashrom -w` after the owner types RESTORE, and a second
+  word when the two sensor tables differ. flashrom writes a private copy of the checked bytes, hashed again
+  just before it runs, never the owner's file in place. Afterwards it reads the chip back and compares.
 - The tool never interrupts `flashrom -w` or the read-back after it: those run without a timeout.
   Probe and backup reads keep a generous timeout, since stopping them cannot damage anything.
 - Electrical warning that software cannot enforce: the "H" in PY25D16HB means a 2.3 to 3.6 V part
@@ -53,9 +61,30 @@ BUILD_MARKS = ("build_string", "stamp", "sensor_table")
 TAIL_START = 0x1E0000
 BLOCK_COUNT = FLASH_SIZE // BLOCK_SIZE  # 32 blocks of 64 KiB
 
+# Every read lands under <base>.unverified-read<n>.bin first, and only reads confirmed by an identical second
+# one become <base>.bin: a single read, reads that differ and a run cut short leave names nobody takes for a
+# backup.
+UNVERIFIED_READ = "unverified-read"
+
+# What software cannot check, printed before probe, backup and restore let flashrom near the chip. The first
+# clip-on is the riskiest electrical step of the whole route: 5 V on the flash, and on the processor that
+# shares its bus, can damage the camera before any backup of it exists (docs/02-RECOVERY.md, section B).
+CHECKLIST = (
+    "Before flashrom runs (nothing here can check this for you):",
+    "  - the programmer runs at 3.3 V: a blue CH341A jumpered to 3.3 V, a V1.7 CH341A switched to 3.3 V, a",
+    "    Pico running pico-serprog or a CH347. Never an unmodified black CH341A board: its data lines run at",
+    "    5 V, which can damage the flash chip and the processor that shares its bus.",
+    "  - the camera's battery lead is lifted from its pad and taped, so that the battery and the programmer",
+    "    do not both power the board.",
+    "  - the clip's pin 1 (red stripe or \"1\") sits on the chip's dot.",
+    "If any of these is not so, press Ctrl+C and unplug the programmer: stopping a read harms nothing.",
+)
+
 # SHA-256 of the two public stock dumps. They are identical in the code and resource area and differ only
 # in the settings store (0x170000) and two internally stored photos (0x180000, 0x1A5800) that belong to
-# those owners. The owner's own backup is always the preferred restore source.
+# those owners. The owner's own backup is always the preferred restore source. A camera flashed with the
+# public restore file reads exactly like the first of them until a setting changes, so a match can be this
+# camera's own read after that flash (public_read_note).
 PUBLIC_DUMPS: Dict[str, str] = {
     "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f": "benbadio/keychain-camera-plus",
     "720ed0b65c91b149b0916498732b0ecf40227736ef5e3c126c487a7b5253436c": "Khimira/Project-Sirius",
@@ -411,19 +440,20 @@ def block_diff(image: bytes, backup: bytes) -> List[BlockDiff]:
     return out
 
 
-def print_block_diff(image: bytes, backup: bytes) -> List[BlockDiff]:
-    diffs = block_diff(image, backup)
-    blocks_total = (max(len(image), len(backup)) + BLOCK_SIZE - 1) // BLOCK_SIZE
+def print_block_diff(image: bytes, chip: bytes) -> List[BlockDiff]:
+    """The image against the read restore made of the chip a moment ago: the blocks the write changes."""
+    diffs = block_diff(image, chip)
+    blocks_total = (max(len(image), len(chip)) + BLOCK_SIZE - 1) // BLOCK_SIZE
     if not diffs:
-        print(f"Block diff: the image is identical to the backup in all {blocks_total} blocks of 64 KiB.")
+        print(f"Block diff: the image is identical to the chip as read just now in all {blocks_total} blocks of 64 KiB.")
         return diffs
-    print(f"Block diff (64 KiB blocks), {len(diffs)} of {blocks_total} differ:")
+    print(f"Block diff against the chip as read just now (64 KiB blocks), {len(diffs)} of {blocks_total} differ:")
     for d in diffs:
         print(
             f"  block {d.index:2d}  0x{d.start:06X}-0x{d.end - 1:06X}  {d.differing_bytes:7,d} bytes differ"
             f"  ({d.region})"
         )
-    print(f"  {blocks_total - len(diffs)} blocks are identical between the image and the given backup.")
+    print(f"  {blocks_total - len(diffs)} blocks are identical between the image and the chip; the write leaves their content as it is.")
     return diffs
 
 
@@ -455,7 +485,44 @@ def _ask(prompt: str) -> str:
         return ""
 
 
+def print_checklist() -> None:
+    for line in CHECKLIST:
+        print(line)
+    sys.stdout.flush()
+
+
+def _note(lines: Sequence[str], first: str = "note: ") -> None:
+    """A note of several lines, the later ones indented under the first."""
+    print(first + lines[0])
+    for line in lines[1:]:
+        print(" " * len(first) + line)
+
+
+def public_read_note(source: str) -> List[str]:
+    """What a read of the chip that is byte-identical to a public dump is, and what it is not."""
+    return [
+        f"this read is byte-identical to the public dump from {source}. A camera flashed with the",
+        "public restore file, or with another file made from that dump, reads exactly like that until a",
+        "setting changes, so this may be this camera after such a flash. It is then the way back to that",
+        "state, not a reference for which image sensor the camera has. The app does not take it as a",
+        "backup: byte for byte it cannot be told from someone else's copy of that dump.",
+    ]
+
+
+def public_image_note(source: str) -> List[str]:
+    """What an image to be written that is byte-identical to a public dump is, and the risk it carries."""
+    return [
+        f"this image is byte-identical to the public dump from {source}. It is that dump, or the read",
+        "of a camera flashed with the public restore file (or another file made from that dump) that changed",
+        "no setting since, such as this camera after the stock restore flash, and then the way back to that",
+        "state. Either way it is not firmware known to fit this camera: a camera whose image sensor the public",
+        "build does not drive boots with it but freezes in photo and video mode (seen on hardware). Its",
+        "settings and its two internal photos are that dump's owner's.",
+    ]
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
+    print_checklist()
     try:
         flashrom = find_flashrom(args.flashrom)
         print(f"flashrom: {flashrom}")
@@ -504,69 +571,83 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_backup(args: argparse.Namespace) -> int:
-    out_dir = Path(args.out)
-    try:
-        out_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return _fail(f"cannot create {out_dir}: {exc}")
-    if args.reads < 1:
-        return _fail("--reads must be at least 1")
+@dataclass
+class KeptRead:
+    """A read of the chip kept the way backup keeps it. `problem` says why it cannot serve as one: a read
+    failed, the reads differ, or the read is not 2 MiB. The caller then stops, and nothing is written to the
+    chip."""
+    problem: Optional[str] = None
+    path: Optional[Path] = None
+    data: bytes = b""
+    info: dict = field(default_factory=dict)
+    sha_path: Optional[Path] = None
+    manifest_path: Optional[Path] = None
 
-    label = _safe_label(args.label)
+
+def read_and_keep(flashrom: str, version: str, programmer: str, chip: Optional[str], out_dir: Path, label: str,
+                  reads: int, command: str, extra: Optional[dict] = None) -> KeptRead:
+    """Read the chip `reads` times into out_dir and keep the result the way backup does; `command` (backup or
+    restore) is the command the messages name.
+
+    Each read is written as <base>.unverified-read<n>.bin. When two or more reads are identical the first
+    becomes <base>.bin and the others go; a single read keeps its name. The kept read gets a .sha256 and a
+    .manifest.json (`extra` adds to the manifest). Reads that differ are all kept under their names for
+    diagnosis, with nothing else.
+    """
+    label = _safe_label(label)
     started = datetime.now(timezone.utc)
     base = f"{label}_{started.strftime('%Y%m%d-%H%M%SZ')}"
-
-    reads: List[Path] = []
+    paths: List[Path] = []
+    datas: List[bytes] = []
+    print(f"Reading the chip {reads} time(s) through {programmer}, chip {chip!r}.")
     try:
-        flashrom = find_flashrom(args.flashrom)
-        version = flashrom_version(flashrom)
-        print(f"flashrom: {flashrom}")
-        print(f"version:  {version}")
-        print(f"Reading the chip {args.reads} time(s) through {args.programmer}, chip {args.chip!r}.")
-        for i in range(1, args.reads + 1):
-            path = out_dir / f"{base}.read{i}.bin"
-            res = read_chip(flashrom, args.programmer, args.chip, path)
+        for i in range(1, reads + 1):
+            path = out_dir / f"{base}.{UNVERIFIED_READ}{i}.bin"
+            res = read_chip(flashrom, programmer, chip, path)
             if not res.ok:
                 print("flashrom output:")
                 _print_indented(res.output or "(no output)")
-                return _fail(
+                return KeptRead(problem=(
                     f"flashrom read {i} failed (exit {res.returncode}). Nothing was written to the chip.\n"
                     "Check the clip contact and orientation, that the battery is disconnected, that the\n"
                     "programmer runs at 3.3 V, and that flashrom can open the USB device. Run `probe` first."
-                )
+                ))
             if not path.is_file():
-                return _fail(f"flashrom exited 0 but {path} does not exist")
+                return KeptRead(problem=f"flashrom exited 0 but {path} does not exist. Nothing was written to the chip.")
             data = path.read_bytes()
             print(f"read {i}: {len(data):,} bytes, sha256 {sha256_hex(data)}")
-            reads.append(path)
+            paths.append(path)
+            datas.append(data)
     except FlashromError as exc:
-        return _fail(str(exc))
+        return KeptRead(problem=str(exc) + "\nNothing was written to the chip.")
 
-    first = reads[0].read_bytes()
+    first = datas[0]
     mismatched = False
-    for path in reads[1:]:
-        other = path.read_bytes()
+    for path, other in zip(paths[1:], datas[1:]):
         if other == first:
             continue
         mismatched = True
         first_diff = next((k for k, (x, y) in enumerate(zip(first, other)) if x != y), min(len(first), len(other)))
         differing = sum(1 for x, y in zip(first, other) if x != y) + abs(len(first) - len(other))
-        print(f"{path.name} differs from {reads[0].name}: first difference at 0x{first_diff:X}, {differing:,} bytes")
+        print(f"{path.name} differs from {paths[0].name}: first difference at 0x{first_diff:X}, {differing:,} bytes")
     if mismatched:
-        print("The reads are kept for diagnosis:")
-        for path in reads:
+        print("The reads are kept for diagnosis, under names that say no read confirmed them:")
+        for path in paths:
             print(f"  {path}")
-        return _fail(
-            "the reads are not identical, so no backup was written. Unstable reads usually mean a poor\n"
+        stopped = "no backup was written" if command == "backup" else "nothing was written to the chip"
+        return KeptRead(problem=(
+            f"the reads are not identical, so {stopped}. Unstable reads usually mean a poor\n"
             "clip contact or a back-powered board (battery still connected). Reseat the clip, disconnect\n"
-            "the battery and run backup again; compare the kept reads to see which bytes move."
-        )
+            f"the battery and run {command} again; compare the kept reads to see which bytes move."
+        ))
 
-    final = out_dir / f"{base}.bin"
-    reads[0].replace(final)
-    for path in reads[1:]:
-        path.unlink()
+    if reads >= 2:
+        final = out_dir / f"{base}.bin"
+        paths[0].replace(final)
+        for path in paths[1:]:
+            path.unlink()
+    else:
+        final = paths[0]   # no second read confirmed it, so it keeps the name that says so
 
     info = analyze_image(first)
     warnings = image_warnings(info)
@@ -574,26 +655,28 @@ def cmd_backup(args: argparse.Namespace) -> int:
         print(f"warning: {w}")
     if warnings and (not info["magic_ok"] or not info["size_ok"]):
         print("The file is kept anyway: a blank or corrupt chip still deserves a backup of what is on it.")
-    if args.reads < 2:
+    if reads < 2:
         print("warning: a single read was not cross-checked against a second one; an unstable clip contact")
-        print("         would go unnoticed. Use --reads 2 or more for a backup you intend to restore from.")
+        print(f"         would go unnoticed. It is kept as {final.name},")
+        print("         which is not a backup: use --reads 2 or more for a backup you intend to restore from.")
     sha = info["sha256"]
     sha_path = out_dir / f"{base}.sha256"
     sha_path.write_text(f"{sha}  {final.name}\n", encoding="utf-8")
 
     manifest = {
         "toolkit_version": __version__,
+        "command": command,
         "timestamp_utc": started.replace(microsecond=0).isoformat(),
         "label": label,
         "file": final.name,
         "sha256_file": sha_path.name,
         "flashrom_path": flashrom,
         "flashrom_version": version,
-        "programmer": args.programmer,
-        "chip": args.chip if chip_args(args.chip) else CHIP_AUTO,
-        "reads": args.reads,
+        "programmer": programmer,
+        "chip": chip if chip_args(chip) else CHIP_AUTO,
+        "reads": reads,
         # True only when there was a second read to compare with; a single read proves nothing.
-        "reads_identical": True if args.reads >= 2 else None,
+        "reads_identical": True if reads >= 2 else None,
         "size": info["size"],
         "size_ok": info["size_ok"],
         "sha256": sha,
@@ -605,28 +688,60 @@ def cmd_backup(args: argparse.Namespace) -> int:
         "public_dump": info["public_dump"],
         "warnings": warnings,
     }
+    manifest.update(extra or {})
     manifest_path = out_dir / f"{base}.manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    kept = KeptRead(path=final, data=first, info=info, sha_path=sha_path, manifest_path=manifest_path)
 
     if not info["size_ok"]:
-        # The read is kept for diagnosis, but it is not a backup: restore refuses anything but 2 MiB.
+        # The read is kept for diagnosis, but it is not a backup: restore refuses anything but 2 MiB, and a chip
+        # that does not read as 2 MiB is not being read whole.
         print(f"kept:     {final}")
         print(f"          {sha_path}")
         print(f"          {manifest_path}")
-        return _fail(
+        consequence = ("and restore will refuse it" if command == "backup"
+                       else "and the chip is not being read whole, so nothing was written to it")
+        kept.problem = (
             f"the read is {info['size']:,} bytes, not {FLASH_SIZE:,}: this file is not a full-flash image\n"
-            "and restore will refuse it. `probe` should report a 2048 kB chip; a different size usually\n"
+            f"{consequence}. `probe` should report a 2048 kB chip; a different size usually\n"
             "means a bad clip contact, a back-powered board (battery still connected) or the wrong --chip.\n"
-            "Fix that and run backup again. The file above is kept only as a record of what was read."
+            f"Fix that and run {command} again. The file above is kept only as a record of what was read."
         )
+    return kept
 
-    print(f"backup:   {final}")
-    print(f"sha256:   {sha}")
-    print(f"checksum: {sha_path}")
-    print(f"manifest: {manifest_path}")
-    if info["public_dump"]:
-        print(f"note: this image is byte-identical to the public dump from {info['public_dump']}.")
-    print("Keep the three files together, and keep a second copy somewhere else.")
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    out_dir = Path(args.out)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return _fail(f"cannot create {out_dir}: {exc}")
+    if args.reads < 1:
+        return _fail("--reads must be at least 1")
+
+    print_checklist()
+    try:
+        flashrom = find_flashrom(args.flashrom)
+        version = flashrom_version(flashrom)
+    except FlashromError as exc:
+        return _fail(str(exc))
+    print(f"flashrom: {flashrom}")
+    print(f"version:  {version}")
+    kept = read_and_keep(flashrom, version, args.programmer, args.chip, out_dir, args.label, args.reads, "backup")
+    if kept.problem:
+        return _fail(kept.problem)
+
+    what = "backup:" if args.reads >= 2 else "read:"
+    print(f"{what:10s}{kept.path}")
+    print(f"sha256:   {kept.info['sha256']}")
+    print(f"checksum: {kept.sha_path}")
+    print(f"manifest: {kept.manifest_path}")
+    if kept.info["public_dump"]:
+        _note(public_read_note(kept.info["public_dump"]))
+    if args.reads >= 2:
+        print("Keep the three files together, and keep a second copy somewhere else.")
+    else:
+        print("Keep the three files together. One read is not a backup: run backup again with --reads 2 or more.")
     return 0
 
 
@@ -676,27 +791,15 @@ def cmd_restore(args: argparse.Namespace) -> int:
             print(f"mark:     {k.replace('_', ' ')} {v['value']!r} at {v['offset']}")
     print(f"tail:     {'all 0xFF' if info['tail_blank'] else 'NOT all 0xFF (every known dump is)'}")
     if info["public_dump"]:
-        print(
-            f"note:     this is the public dump from {info['public_dump']}. Its settings store and two\n"
-            "          internal photos belong to that owner. Your own backup is the preferred source;\n"
-            "          use a public dump only as a last resort."
-        )
+        _note(public_image_note(info["public_dump"]), "note:     ")
 
-    if args.backup:
-        backup_path = Path(args.backup)
-        try:
-            backup = backup_path.read_bytes()
-        except OSError as exc:
-            return _fail(f"cannot read backup {backup_path}: {exc}")
-        print(f"backup:   {backup_path}")
-        print(f"          {len(backup):,} bytes, sha256 {sha256_hex(backup)}")
-        if len(backup) != FLASH_SIZE:
-            print(f"warning: the backup is not {FLASH_SIZE:,} bytes; the diff below covers what exists.")
-        print_block_diff(image, backup)
-    else:
-        print("No --backup given, so there is nothing to compare against. Pass a fresh backup of the chip")
-        print("as it is now with --backup to see exactly which blocks the write will change.")
+    out_dir = Path(args.out)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return _fail(f"cannot create {out_dir}: {exc}")
 
+    print_checklist()
     try:
         flashrom = find_flashrom(args.flashrom)
         version = flashrom_version(flashrom)
@@ -705,22 +808,120 @@ def cmd_restore(args: argparse.Namespace) -> int:
     print(f"flashrom: {flashrom}")
     print(f"version:  {version}")
 
-    write_argv = [flashrom, "-p", args.programmer] + chip_args(args.chip) + ["-w", str(image_path)]
+    # No backup of the chip on the clip, no write. restore reads it itself, twice: a file given from elsewhere
+    # could not prove that it came from this chip as it is now.
+    print(f"Before anything is written, the chip is read twice and kept in {out_dir}, as backup keeps it.")
+    kept = read_and_keep(flashrom, version, args.programmer, args.chip, out_dir, args.label, 2, "restore",
+                         {"before_writing": {"image": image_path.name, "sha256": info["sha256"]}})
+    if kept.problem:
+        return _fail(kept.problem)
+    print(f"kept:     {kept.path}")
+    print(f"sha256:   {kept.info['sha256']}")
+    print(f"checksum: {kept.sha_path}")
+    print(f"manifest: {kept.manifest_path}")
+    print(f"chip:     {kept.info['build']} ({kept.info['build_label']})")
+    if kept.info["public_dump"]:
+        _note(public_read_note(kept.info["public_dump"]), "note:     ")
+
+    print_block_diff(image, kept.data)
+    if kept.data == image:
+        print("The chip already holds this image, byte for byte: nothing to write.")
+        return 0
+    sensor_differs = print_sensor_comparison(info["build_marks"]["sensor_table"], kept.info["build_marks"]["sensor_table"])
+
+    work = Path(tempfile.mkdtemp(prefix="charmera-restore-"))
+    copy_path = work / "image.bin"
+    try:
+        return _write_from_private_copy(args, flashrom, image_path, image, info["sha256"], kept.path, sensor_differs,
+                                        copy_path)
+    finally:
+        try:
+            copy_path.unlink()
+        except OSError:
+            pass
+        try:
+            work.rmdir()   # stays when a read-back that does not match the image is kept in it
+        except OSError:
+            pass
+
+
+def _table_text(table: Optional[dict]) -> str:
+    if table is None:
+        return "none of the kind the known builds use"
+    return f"{table['writes']} writes at {table['offset']}, sha256 {table['sha256'][:16]}..."
+
+
+def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[dict]) -> bool:
+    """The image's sensor table against the one on the chip now (build_marks_found's entries). True when the chip
+    has one and the image's is another or missing: restore then asks a second time before it writes."""
+    print(f"sensor:   image {_table_text(image_table)}")
+    print(f"          chip  {_table_text(chip_table)}")
+    indent = " " * 10
+    if chip_table is None:
+        _note(["The chip holds no sensor table of the kind the known builds use (it is blank or damaged, or",
+               "holds another kind of firmware), so nothing here can compare the image's with it."], indent)
+        return False
+    if image_table is not None and image_table["sha256"] == chip_table["sha256"]:
+        _note(["The same table: the image sets up the image sensor as the firmware on the chip does. That",
+               "firmware fits this camera only if it is the one the camera came with, not one flashed onto it since."],
+              indent)
+        return False
+    first = ("DIFFERENT: the image sets up the image sensor differently from the firmware on the chip."
+             if image_table is not None else
+             "DIFFERENT: the image has no sensor table of that kind, the firmware on the chip has one.")
+    _note([first,
+           "Nothing here can tell whether that firmware fits this camera: compare the marking on this camera's",
+           "sensor module with the one in the camera the image was read from, and even matching markings leave",
+           "other board differences possible. If it does not start, only a chip programmer can put back the",
+           "read kept above."], indent)
+    return True
+
+
+def _write_from_private_copy(args: argparse.Namespace, flashrom: str, image_path: Path, image: bytes, image_sha: str,
+                             kept_path: Path, sensor_differs: bool, copy_path: Path) -> int:
+    """Copy the checked bytes to copy_path in a private folder, show the plan, ask, check the copy again, have
+    flashrom write that copy and read the chip back into the same folder. The owner's file is never handed to
+    flashrom: what it holds after the check cannot reach the chip."""
+    try:
+        with open(copy_path, "xb") as f:
+            f.write(image)
+    except OSError as exc:
+        return _fail(f"cannot write a private copy of the image to {copy_path}: {exc}\nNothing was written to the chip.")
+
+    write_argv = [flashrom, "-p", args.programmer] + chip_args(args.chip) + ["-w", str(copy_path)]
     print("Plan:")
     print(f"  1. {_display(write_argv)}")
+    print("     The file it writes is a private copy of the bytes checked above. Its SHA-256 is checked again")
+    print(f"     just before flashrom runs, so nothing done to {image_path.name} from now on reaches the chip.")
     print("     flashrom erases, writes and verifies the whole 2 MiB chip. This tool sets no time limit on")
     print("     that step and never interrupts it; it waits for flashrom to finish, however long it takes.")
     print("  2. read the chip back once (also without a time limit) and compare its SHA-256 with the image.")
-    print("Before you continue: battery disconnected, programmer at 3.3 V, clip seated with pin 1 on the dot,")
-    print("and `probe` reports a 2048 kB chip. Do not unplug anything until this command finishes.")
+    print(f"The way back is the read kept above, {kept_path}: the chip as it is now.")
+    print("Do not move the clip or unplug anything until this command finishes.")
 
     answer = _ask("Type RESTORE to write the chip, anything else to stop: ")
     if answer.strip() != "RESTORE":
         print("Stopped. Nothing was written.")
         return 1
+    if sensor_differs:
+        print("The image sets up the image sensor differently from the firmware on the chip (the sensor lines")
+        print("above): nothing here can tell whether that firmware fits this camera.")
+        answer = _ask("Type DIFFERENT to write it all the same, anything else to stop: ")
+        if answer.strip() != "DIFFERENT":
+            print("Stopped. Nothing was written.")
+            return 1
+
+    # What flashrom gets is what was checked, or nothing.
+    try:
+        copied = copy_path.read_bytes()
+    except OSError as exc:
+        return _fail(f"cannot read the private copy {copy_path} again: {exc}\nNothing was written to the chip.")
+    if sha256_hex(copied) != image_sha:
+        return _fail(f"the private copy {copy_path} no longer has the SHA-256 checked above: something changed it\n"
+                     "after the check. Nothing was written to the chip. Run restore again.")
 
     try:
-        res = write_chip(flashrom, args.programmer, args.chip, image_path)
+        res = write_chip(flashrom, args.programmer, args.chip, copy_path)
     except FlashromError as exc:
         return _fail(str(exc) + "\nThe chip may be partly written. Keep the clip on and retry restore.")
     print("flashrom output:")
@@ -741,8 +942,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
             "flashrom reports VERIFIED. Only then disconnect."
         )
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix="charmera-readback-"))
-    readback_path = tmp_dir / "readback.bin"
+    readback_path = copy_path.with_name("readback.bin")
     try:
         # No timeout here either: the chip was just written and nothing should cut this short.
         res = read_chip(flashrom, args.programmer, args.chip, readback_path, timeout=None)
@@ -758,7 +958,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
     readback = readback_path.read_bytes()
     readback_sha = sha256_hex(readback)
     print(f"read-back: {len(readback):,} bytes, sha256 {readback_sha}")
-    if readback_sha != info["sha256"]:
+    if readback_sha != image_sha:
         diffs = block_diff(image, readback)
         print(f"{len(diffs)} block(s) differ between the image and the read-back:")
         for d in diffs[:16]:
@@ -772,7 +972,6 @@ def cmd_restore(args: argparse.Namespace) -> int:
         )
     try:
         readback_path.unlink()
-        tmp_dir.rmdir()
     except OSError:
         pass
     print("Restore verified: the chip now matches the image.")
@@ -807,8 +1006,8 @@ def register(subparsers) -> None:
     probe = subparsers.add_parser(
         "probe",
         help="detect the flash chip through flashrom (read-only)",
-        description="Show flashrom's version and ask it to detect the chip on the programmer. "
-        "Never reads or writes the chip contents.",
+        description="Print the checklist (3.3 V programmer, battery lead lifted, pin 1 on the dot), show flashrom's "
+        "version and ask it to detect the chip on the programmer. Never reads or writes the chip contents.",
     )
     _add_common(probe)
     probe.set_defaults(func=cmd_probe)
@@ -816,9 +1015,10 @@ def register(subparsers) -> None:
     backup = subparsers.add_parser(
         "backup",
         help="read the whole 2 MiB flash through flashrom, N times, and keep it only if the reads agree",
-        description="Read the chip --reads times (default 2), require the reads to be identical, check "
-        "size and magic, and write <label>_<UTC time>.bin with a .sha256 and a .manifest.json next to it. "
-        "A chip that fails the checks is still saved, with warnings. Never writes to the chip.",
+        description="Print the checklist, read the chip --reads times (default 2), require the reads to be identical, "
+        "check size and magic, and write <label>_<UTC time>.bin with a .sha256 and a .manifest.json next to it. "
+        "A single read, and reads that differ, keep the name <label>_<UTC time>.unverified-read<n>.bin: they are "
+        "not a backup. A chip that fails the checks is still saved, with warnings. Never writes to the chip.",
     )
     _add_common(backup)
     backup.add_argument("--out", required=True, metavar="DIR", help="directory for the backup files")
@@ -828,18 +1028,24 @@ def register(subparsers) -> None:
 
     restore = subparsers.add_parser(
         "restore",
-        help="write a full 2 MiB image to the chip through flashrom (asks for a typed RESTORE)",
-        description="Check the image (2 MiB, SPII magic, Charmera build marks found by content), show a 64 KiB "
-        "block diff against --backup, show the SHA-256 and the plan, wait for the word RESTORE, then run "
-        "flashrom -w (erase, write, verify) and read the chip back to compare.",
+        help="read the chip twice, then write a full 2 MiB image to it through flashrom (asks for a typed RESTORE)",
+        description="Check the image (2 MiB, SPII magic, Charmera build marks found by content), read the chip twice "
+        "and keep that read in --out as backup does (nothing is written when the reads differ), show a 64 KiB block "
+        "diff against it, the two sensor tables, the SHA-256 and the plan, wait for the word RESTORE (and DIFFERENT "
+        "when the sensor tables differ), then run flashrom -w (erase, write, verify) on a private copy of the "
+        "checked image and read the chip back to compare.",
     )
     _add_common(restore)
     restore.add_argument("--image", required=True, metavar="FILE", help="full 2 MiB image to write")
     restore.add_argument(
-        "--backup",
-        metavar="FILE",
-        help="a fresh backup of the chip as it is now, to show what the write will change",
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="directory for the read of the chip restore makes before it writes, kept with a .sha256 and a "
+        ".manifest.json as backup keeps them: the way back if the image does not suit the camera",
     )
+    restore.add_argument("--label", default="before-restore", metavar="NAME",
+                         help="file name prefix of that read (default before-restore)")
     restore.add_argument(
         "--allow-unknown-build",
         action="store_true",
