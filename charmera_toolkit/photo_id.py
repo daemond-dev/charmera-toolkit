@@ -15,22 +15,24 @@ templates are the same bytes in both (VERIFIED in the public dump, where they si
 The camera fills in only the frame size and sampling (SOF), the quantisation tables and, in the still template,
 three dates. The tables are the IJG ones (the JPEG standard's Annex K tables at VA 0x1088B8 and 0x108938, scaled by
 a quality): 85, 80 or 75 for a photo on a card (settings byte +0x0b), 45 without a card (VERIFIED). So a photo
-straight from a camera running either known build has the still header, and a still photo with the bare header was
-taken by a camera that ran another build at the time. A header with a mark of an editor or a re-encode (an XMP
-block, an APP2, APP13 or APP14 segment, a progressive frame, a size taller than wide) was saved again by another
-program and says nothing about the camera. An EXIF Make other than Generalplus, a JFIF segment, the still comment
-without its EXIF block or tables the encoder never writes show only that neither known build writes the header as
-it is: another program may have saved the photo again, or another build may have written it, and nothing in the
-header tells which. A header without its quantisation tables or its Huffman tables is cut short, or comes from an
-encoder that leaves them out. That one camera's photos look like a known build's does not show that it runs that
-build: two builds can share a template.
+straight from a camera running either known build has the still header, and a still photo with the bare header, as
+the camera saved it in DCIM, was taken by a camera that ran another build at the time. A header with a mark of an
+editor or a re-encode (an XMP block, an APP2, APP13 or APP14 segment, a progressive frame, a size taller than wide)
+was saved again by another program and says nothing about the camera. An EXIF Make other than Generalplus, a JFIF
+or other APP0 segment (the known builds write none, not even MJPEG's 'AVI1'), the still comment without its EXIF
+block or tables the encoder never writes show only that neither known build writes the header as it is: another
+program may have saved the photo again, or another build may have written it, and nothing in the header tells
+which. A header without its quantisation tables or its Huffman tables is cut short, or comes from an encoder that
+leaves them out. That one camera's photos look like a known build's does not show that it runs that build: two
+builds can share a template.
 
 Only the header is read: each segment on its own, from the SOI up to and including the SOS header, never the
 compressed image data after it and never more than the first 64 KiB. For an AVI, the chunk headers up to the first
-video frame are read, and that frame's JPEG header. Both builds write video frames from the bare template, so a
-frame header that is the template's does not tell them apart (INFERRED: no video of either build was examined here),
-and any other frame header is not the one they write; a JUNK chunk whose text is not the packer text both carry
-(AVI_PACKER) shows that other code wrote the file.
+video frame are read, and that frame's JPEG header. Both builds copy the whole bare template into each video frame
+and fill in its size and tables of one IJG quality for both, which the rate control moves from frame to frame
+(VERIFIED by static analysis). So a frame header that is the template as filled in does not tell them apart
+(INFERRED: no video of either build was examined here), and any other is not the one they write; a JUNK chunk whose
+text is not the packer text both carry (AVI_PACKER) shows that other code wrote the file.
 """
 from __future__ import annotations
 
@@ -50,6 +52,9 @@ BARE_COMMENT = b"GPEncoder"            # COM length field 0x0B
 # The segments of the two templates, in order (marker bytes after 0xFF).
 STILL_MARKERS = (0xD8, 0xC0, 0xFE, 0xDB, 0xDB, 0xDD, 0xC4, 0xC4, 0xC4, 0xC4, 0xE1, 0xDA)
 BARE_MARKERS = (0xD8, 0xC0, 0xFE, 0xDB, 0xDB, 0xDD, 0xC4, 0xC4, 0xC4, 0xC4, 0xDA)
+# The scan header both templates end with, and their two DQT segments as (payload length, Pq/Tq): 8-bit tables 0, 1.
+TEMPLATE_SOS = bytes.fromhex("03010002110311003f00")
+TEMPLATE_DQT = [(65, 0x00), (65, 0x01)]
 CAMERA_MAKE = "Generalplus"
 CAMERA_MODEL = "CBB3"
 CAMERA_SOFTWARE = "20150615"
@@ -95,8 +100,8 @@ STANDARD_DHT = (
 
 CONCLUSIONS = {
     "still": "the still-photo header both known builds write",
-    "bare": ("a bare header that neither known build writes for a still photo: the camera ran another build when it took "
-             "this photo"),
+    "bare": ("a bare header that neither known build writes for a still photo: if this is a photo as the camera saved it "
+             "in DCIM, the camera ran another build when it took it"),
     "resave": "re-saved by another program: says nothing about the camera",
     "resave-or-build": ("neither known build writes this header as it is; another program saved it again, or another build "
                         "wrote it; nothing here tells which"),
@@ -267,23 +272,19 @@ class Header:
         return tuple(s.marker for s in self.segments)
 
 
-def _standard_dht(h: Header) -> bool:
-    """Whether the header's Huffman tables are the standard four, in the order both templates hold them."""
-    return tuple(s.payload for s in h.segments if s.marker == 0xC4) == STANDARD_DHT
-
-
 def _other_tables(h: Header) -> List[str]:
     """How the quantisation and Huffman tables differ from those the camera's encoder writes; empty when they do not."""
     out = []
     if not h.qualities:
         out.append("quantisation tables no IJG quality reproduces")
-    if not _standard_dht(h):
+    if tuple(s.payload for s in h.segments if s.marker == 0xC4) != STANDARD_DHT:
         out.append("other Huffman tables than the standard four")
     return out
 
 
 def _camera_structure(h: Header) -> List[str]:
-    """How the frame and the restart interval differ from those both templates share; empty when they do not."""
+    """How the frame, the quantisation segments, the restart interval and the scan header differ from those both
+    templates share; empty when they do not."""
     out = []
     f = h.frame
     if f is None or f.marker != 0xC0:
@@ -292,14 +293,13 @@ def _camera_structure(h: Header) -> List[str]:
         out.append("not three components with the templates' table numbers")
     elif f.components[0][1] not in (0x21, 0x22) or f.components[1][1] != 0x11 or f.components[2][1] != 0x11:
         out.append(f"another sampling ({f.sampling})")
+    if [(len(s.payload), s.payload[0] if s.payload else None) for s in h.segments if s.marker == 0xDB] != TEMPLATE_DQT:
+        out.append("other quantisation segments than the templates' two (8-bit tables 0 and 1)")
     if [s.payload for s in h.segments if s.marker == 0xDD] != [b"\x00\x00"]:
         out.append("no DRI 0")
+    if [s.payload for s in h.segments if s.marker == 0xDA] != [TEMPLATE_SOS]:
+        out.append("another scan header (SOS) than the templates'")
     return out
-
-
-def _avi1(s: Segment) -> bool:
-    """The APP0 'AVI1' segment that writers of MJPEG video may put in each frame: it names no program."""
-    return s.marker == 0xE0 and s.payload[:4] == b"AVI1"
 
 
 def _an_editor(h: Header) -> List[str]:
@@ -323,11 +323,13 @@ def _an_editor(h: Header) -> List[str]:
 
 def _resaved_or_another_build(h: Header) -> List[str]:
     """What neither known build writes, but another program that saves a photo again could write as well as another
-    build: from these alone, nothing tells which of the two wrote the header."""
+    build: from these alone, nothing tells which of the two wrote the header. The known builds write no APP0 at all,
+    not even the 'AVI1' one that MJPEG writers put in video frames (VERIFIED: neither image holds the bytes)."""
     out = []
     for s in h.segments:
-        if s.marker == 0xE0 and not _avi1(s):
-            out.append("a JFIF APP0 segment" if s.payload[:5] == b"JFIF\x00" else "an APP0 segment")
+        if s.marker == 0xE0:
+            out.append("a JFIF APP0 segment" if s.payload[:5] == b"JFIF\x00"
+                       else "an 'AVI1' APP0 segment" if s.payload[:4] == b"AVI1" else "an APP0 segment")
     if h.exif is not None and h.exif.make and h.exif.make != CAMERA_MAKE:
         out.append(f"EXIF Make {h.exif.make!r}")
     if STILL_COMMENT in h.comments and h.exif is None:
@@ -494,12 +496,12 @@ def identify(path: Path) -> List[str]:
 
 
 def _identify_avi(read: Callable[[int, int], bytes]) -> List[str]:
-    """An AVI's header lines and its first frame's. Both known builds write video frames from the bare template, so the
-    frame header does not tell them apart; a JUNK text other than AVI_PACKER shows that other code wrote the file.
-    (INFERRED from the firmware: no video of either build was examined here.) A frame counts as the template's when
-    it has the template's segments (an 'AVI1' APP0 aside), its comment, its frame and restart interval and the four
-    standard Huffman tables, all of which the template fixes. Its quantisation tables are not compared with IJG
-    qualities: the frames' quality follows a rate control, so it changes from frame to frame."""
+    """An AVI's header lines and its first frame's. Both known builds copy the whole bare template into each video frame
+    and fill in its size and its tables, one IJG quality for both; the rate control moves that quality from frame to
+    frame, from 50 in steps of 5 between 15 and 60 by its thresholds (VERIFIED by static analysis, the range
+    INFERRED). So a frame header is theirs exactly when it is of the "bare" kind, and it then does not tell them
+    apart; a JUNK text other than AVI_PACKER shows that other code wrote the file. (INFERRED from the firmware: no
+    video of either build was examined here.)"""
     avi = read_avi(read)
     lines = ["header:      an AVI"
              + (f", {avi.width}x{avi.height}" if avi.width else "")
@@ -522,8 +524,7 @@ def _identify_avi(read: Callable[[int, int], bytes]) -> List[str]:
         return lines + ["conclusion:  nothing to conclude about the camera from this file"]
     if h.problem:
         return lines + [f"conclusion:  {CUT_SHORT}"]
-    if (tuple(s.marker for s in h.segments if not _avi1(s)) == BARE_MARKERS and h.comments == [BARE_COMMENT]
-            and not _camera_structure(h) and _standard_dht(h)):
+    if h.kind == "bare":
         return lines + [f"conclusion:  {VIDEO}"]
     if h.kind in ("resave", "resave-or-build"):
         return lines + [f"conclusion:  {CONCLUSIONS[h.kind]}"]
@@ -567,20 +568,22 @@ def register(subparsers) -> None:
         epilog=(
             "What the conclusions mean. 'The still-photo header both known builds write': the camera writes photos the "
             "way both known builds do; that does not show which build it runs, or that it runs either, since two builds "
-            "can share a header. 'A bare header that neither known build writes for a still photo': the camera ran "
-            "another build when it took the photo. 'Re-saved by another program': the header carries a mark of an "
+            "can share a header. 'A bare header that neither known build writes for a still photo': if the file is a "
+            "photo as the camera saved it in DCIM, the camera ran another build when it took it. 'Re-saved by another "
+            "program': the header carries a mark of an "
             "editor or a re-encode (an XMP block, an APP2, APP13 or APP14 segment, a progressive frame or a size taller "
             "than wide), so a phone, an editor or a messaging app wrote the file again, and its header says nothing "
             "about the camera. 'Neither known build writes this header as it is': an EXIF Make other than Generalplus, "
-            "a JFIF segment, the still comment without its EXIF block, or tables the camera's encoder never writes; "
+            "a JFIF or other APP0 segment, the still comment without its EXIF block, or tables the camera's encoder "
+            "never writes; "
             "another program may have saved the file again, or another build may have written it, and nothing here "
             "tells which. 'A header neither known build writes, and nothing in it names another program': it differs "
             "from both in other ways, and nothing here can tell what wrote it. A header without its quantisation "
             "tables or its Huffman tables is cut short, or comes from an encoder that leaves them out, and there is "
-            "nothing to conclude from it. For a video, a frame header that is the bare template's (its segments, "
-            "comment, frame, restart interval and Huffman tables; the quantisation tables follow a rate control) does "
-            "not tell the known builds apart (INFERRED), any other frame header is not the one they write, and a JUNK "
-            "text other than "
+            "nothing to conclude from it. For a video, a frame header that is the bare template as the encoder fills "
+            "it in (one IJG quality for both tables, which the rate control moves from frame to frame) does not tell "
+            "the known builds apart (INFERRED), any other frame header is not the one they write, and a JUNK text "
+            "other than "
             "'GP$322 Generalplus AviPackerV3 20140916', the packer text both carry, shows that other code wrote the "
             "file. Give photo-id the camera's own files, as copied from the card's DCIM folder: a frame taken out of "
             "a video without re-encoding has the bare header too. Nothing here says whether a firmware fits a camera."

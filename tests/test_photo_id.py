@@ -27,11 +27,13 @@ def seg(marker, payload):
     return bytes([0xFF, marker]) + struct.pack(">H", len(payload) + 2) + payload
 
 
-def dqt(quality):
-    """The two DQT segments the camera's encoder writes for an IJG quality (each table in zig-zag order)."""
+def dqt(quality, chroma=None):
+    """The two DQT segments the camera's encoder writes for an IJG quality (each table in zig-zag order). `chroma`
+    gives the second table a quality of its own, which the encoder never does."""
     out = b""
-    for tq, base in ((0, photo_id.IJG_LUMINANCE), (1, photo_id.IJG_CHROMINANCE)):
-        natural = photo_id.ijg_table(base, quality)
+    for tq, base, q in ((0, photo_id.IJG_LUMINANCE, quality),
+                        (1, photo_id.IJG_CHROMINANCE, quality if chroma is None else chroma)):
+        natural = photo_id.ijg_table(base, q)
         out += seg(0xDB, bytes([tq]) + bytes(natural[photo_id.ZIGZAG[k]] for k in range(64)))
     return out
 
@@ -101,8 +103,8 @@ def test_the_owners_photo_has_the_bare_header_neither_known_build_writes_for_a_p
     assert cli.main(["photo-id", str(FIXTURE)]) == 0
     out = capsys.readouterr().out
     assert "the bare template, no EXIF block, 0x270 bytes" in out and "IJG quality 80" in out and "1440x1080" in out
-    assert conclusion(out) == ("a bare header that neither known build writes for a still photo: the camera ran another "
-                               "build when it took this photo")
+    assert conclusion(out) == ("a bare header that neither known build writes for a still photo: if this is a photo as the "
+                               "camera saved it in DCIM, the camera ran another build when it took it")
 
 
 def test_the_owners_header_is_the_bare_template_with_its_size_and_quality(stock_image):
@@ -219,6 +221,21 @@ def test_a_header_neither_template_and_no_program_named_is_unknown(tmp_path):
     assert "header:      neither template, " in text and conclusion(text).startswith("a header neither known build writes")
 
 
+def test_the_templates_scan_header_and_quantisation_segments_are_part_of_them():
+    """Every template ends with the same scan header and holds two 8-bit DQT segments, tables 0 then 1: a header that
+    differs in either is not one the known builds write, whatever its length (the round-three fix review's cases)."""
+    cr_on_table_0 = SOS.replace(bytes([3, 0x11]), bytes([3, 0x00]))
+    h = header_of(still_header().replace(SOS, cr_on_table_0))
+    assert h.kind == "unknown" and "another scan header (SOS) than the templates'" in h.reasons
+    # both tables in one DQT segment, then an empty one: still 0x590 bytes and quality 80, but not the template
+    tables = dqt(80)
+    one_segment = seg(0xDB, tables[4:69] + tables[73:]) + seg(0xDB, b"")
+    h = header_of(still_header().replace(tables, one_segment))
+    assert h.length == photo_id.STILL_HEADER_LEN and h.qualities == [80] and h.kind == "unknown"
+    assert "other quantisation segments than the templates' two (8-bit tables 0 and 1)" in h.reasons
+    assert header_of(still_header()).kind == "still" and header_of(bare_header()).kind == "bare"
+
+
 def test_ijg_qualities_are_found_exactly():
     for q in range(1, 101):
         tables = {0: (0, photo_id.ijg_table(photo_id.IJG_LUMINANCE, q)), 1: (0, photo_id.ijg_table(photo_id.IJG_CHROMINANCE, q))}
@@ -286,10 +303,12 @@ def test_help_explains_what_the_conclusions_mean():
     text = " ".join(sub.format_help().split()).replace("- ", "-")     # argparse may wrap a line after a hyphen
     for words in ("only the header", "never more than the first 64 KiB", "Make Generalplus, Model CBB3 and Software 20150615",
                   "only for thumbnails, video frames and a Wi-Fi stream",
-                  "the camera ran another build when it took the photo", "says nothing about the camera",
+                  "if the file is a photo as the camera saved it in DCIM, the camera ran another build when it took it",
+                  "says nothing about the camera",
                   "an XMP block, an APP2, APP13 or APP14 segment, a progressive frame or a size taller than wide",
-                  "'Neither known build writes this header as it is': an EXIF Make other than Generalplus, a JFIF segment, "
-                  "the still comment without its EXIF block, or tables the camera's encoder never writes",
+                  "'Neither known build writes this header as it is': an EXIF Make other than Generalplus, a JFIF or "
+                  "other APP0 segment, the still comment without its EXIF block, or tables the camera's encoder never "
+                  "writes",
                   "another program may have saved the file again, or another build may have written it, and nothing here "
                   "tells which", "A header without its quantisation tables or its Huffman tables is cut short, or comes from "
                   "an encoder that leaves them out",
@@ -336,9 +355,10 @@ def test_the_frame_header_of_a_video_does_not_tell_the_known_builds_apart(tmp_pa
     assert conclusion(text) == video == photo_id.VIDEO
     frame_at = data.index(b"00dc") + 8
     assert max(o + n for o, n in reads) == frame_at + len(frame)     # nothing of the frame's image data is read
-    # an 'AVI1' APP0, which MJPEG writers may put in each frame, names no other program
+    # the known builds write no APP0 at all, not even the 'AVI1' one MJPEG writers put in each frame
     marked = b"\xff\xd8" + seg(0xE0, b"AVI1\x00" + b"\x00" * 9) + frame[2:]
-    assert conclusion(report(tmp_path, avi(marked), "MOVI0002.avi")) == video
+    text = report(tmp_path, avi(marked), "MOVI0002.avi")
+    assert "an 'AVI1' APP0 segment" in text and conclusion(text) == EITHER
     # frames with an editor's mark were written again by another program; a JFIF frame tells neither apart
     edited = b"\xff\xd8" + seg(0xED, b"Photoshop 3.0\x00") + frame[2:]
     assert conclusion(report(tmp_path, avi(edited), "MOVI0003.avi")) == RESAVED
@@ -357,12 +377,21 @@ def test_the_frame_header_of_a_video_does_not_tell_the_known_builds_apart(tmp_pa
     text = report(tmp_path, avi(no_dht), "MOVI0009.avi")
     assert "no DHT segment" in text and conclusion(text) == photo_id.NOT_VIDEO
     assert "not a camera" not in text
-    # the frames' quality follows a rate control, so quantisation tables no IJG quality reproduces are no sign of
-    # other code in a frame that is otherwise the template's
+    # the rate control moves one IJG quality for both tables, so tables no single IJG quality reproduces are not the
+    # known builds' (the round-three fix review: empty, mixed-quality, 16-bit and off-by-one tables)
     rated = bytearray(frame)
     rated[frame.index(b"\xff\xdb") + 15] += 1
     assert header_of(bytes(rated)).qualities == []
-    assert conclusion(report(tmp_path, avi(bytes(rated)), "MOVI0010.avi")) == video
+    assert conclusion(report(tmp_path, avi(bytes(rated)), "MOVI0010.avi")) == EITHER
+    mixed = frame.replace(dqt(50), dqt(45, chroma=50))
+    assert header_of(mixed).qualities == [] and conclusion(report(tmp_path, avi(mixed), "MOVI0011.avi")) == EITHER
+    empty = frame.replace(dqt(50), seg(0xDB, b"") + seg(0xDB, b""))
+    assert conclusion(report(tmp_path, avi(empty), "MOVI0012.avi")) == EITHER
+    wide = frame.replace(dqt(50), b"".join(
+        seg(0xDB, bytes([0x10 | tq]) + b"".join(struct.pack(">H", v) for v in tables[5 + 69 * tq:69 + 69 * tq]))
+        for tq, tables in ((0, dqt(50)), (1, dqt(50)))))
+    text = report(tmp_path, avi(wide), "MOVI0013.avi")
+    assert "other quantisation segments than the templates' two" in text and conclusion(text) == photo_id.NOT_VIDEO
 
 
 def test_a_junk_text_other_than_the_packers_shows_other_code_wrote_the_video(tmp_path):
