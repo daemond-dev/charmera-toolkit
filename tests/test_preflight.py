@@ -1,5 +1,5 @@
-"""Flash-path checks against the real stock dump: the documented candidates still reproduce and pass, and the
-damage a cut-off download or a broken mod leaves is refused before it can reach a card.
+"""Flash-path checks against the real stock dump: the withdrawn candidates still reproduce and are refused by their
+hash, and the damage a cut-off download or a broken mod leaves is refused before it can reach a card.
 
 Runs only when CHARMERA_STOCK_IMAGE points at an original-series dump. The candidate hashes are those of
 docs/03-FLASH-CANDIDATES.md and apply to the keychain-camera-plus dump; with another dump only the checks run.
@@ -68,17 +68,22 @@ def failures(path: Path, data: bytes, **kw):
     return [c for c in verify.verify_update(path, data, **kw) if not c.ok and c.severity == "fail"]
 
 
-def test_candidates_reproduce_and_pass(stock_image, stock_image_path, built, card, capsys):
+def test_candidates_reproduce_and_are_refused(stock_image, stock_image_path, built, card, capsys):
+    """C, A and B were withdrawn after the hardware test of 2026-11-06. The recipe still makes them, so a copy found
+    later can be recognised: verify and stage refuse them by their hash, as the app does."""
     for label, _method, _opts, _stamp, name, sha in CANDIDATES:
         path = built[label]
         data = path.read_bytes()
+        withdrawn = hashlib.sha256(data).hexdigest() in verify.WITHDRAWN
         if is_keychain(stock_image):
-            assert path.name == name and hashlib.sha256(data).hexdigest() == sha, label
-        assert failures(path, data, stock=stock_image, allow_modified=(label == "B")) == [], label
+            assert path.name == name and hashlib.sha256(data).hexdigest() == sha and withdrawn, label
+        names = [c.name for c in failures(path, data, stock=stock_image, allow_modified=(label == "B"))]
+        assert names == (["withdrawn"] if withdrawn else []), label
         by = {c.name: c for c in verify.verify_update(path, data, stock=stock_image, allow_modified=True)}
         assert by["sensor-table"].ok and by["resource-slots"].ok, label
-        assert stage_plan(path, card) == 0, label
-        assert "plan only: nothing written." in capsys.readouterr().out
+        assert stage_plan(path, card) == (1 if withdrawn else 0), label
+        out = capsys.readouterr().out
+        assert ("FAIL withdrawn" in out) if withdrawn else ("plan only: nothing written." in out), label
     assert sorted(p.name for p in card.iterdir()) == ["DCIM"]
 
 
@@ -88,7 +93,43 @@ def test_published_restore_file_passes(stock_image, tmp_path, card, capsys):
     path = tmp_path / RESTORE_NAME
     path.write_bytes(stock_image[: checksum.UPDATE_FILE_SIZE])
     assert failures(path, path.read_bytes(), stock=stock_image) == []
+    # against the public dump, which a read of a camera flashed with this very file looks like: a warning, not a pass
+    by = {c.name: c for c in verify.verify_update(path, path.read_bytes(), stock=stock_image)}
+    assert by["stock"].severity == "warn" and by["sensor-table"].severity == "warn"
+    assert "proves a fit only if --stock was read before the camera was ever flashed" in by["sensor-table"].detail
     assert stage_plan(path, card) == 0
+    out = capsys.readouterr().out
+    assert "WARN backup" in out and "PASS vector-table" in out and "WARN sensor-table" in out
+
+
+def test_a_restore_file_with_a_broken_vector_table_never_reaches_a_card(stock_image, tmp_path, card, capsys):
+    """The ARM vector table at 0x200 is where the camera starts: a file laid out like the public build must carry
+    that build's, whatever --allow-modified says (stage always passes it)."""
+    data = bytearray(stock_image[: checksum.UPDATE_FILE_SIZE])
+    data[0x200:0x240] = bytes(b ^ 0xFF for b in data[0x200:0x240])
+    data = bytes(data)
+    path = tmp_path / checksum.build_update_name(data, "202611061300").filename
+    path.write_bytes(data)
+    for kw in ({}, {"stock": stock_image}):
+        assert "vector-table" in [c.name for c in failures(path, data, allow_modified=True, **kw)], kw
+    assert stage_plan(path, card) == 1
+    out = capsys.readouterr().out
+    assert "FAIL vector-table" in out and "WARN software-region" in out and "Plan" not in out
+    assert sorted(p.name for p in card.iterdir()) == ["DCIM"]
+
+
+def test_a_sensor_table_the_code_no_longer_refers_to_is_caught(stock_image, tmp_path):
+    """Zeroing the code literal that points at the init table leaves the table in place: without --stock that is a
+    warning, against the dump it came from a refusal."""
+    sensor = image.find_sensor_tables(stock_image)
+    assert sensor.referenced_from == 0x7B91C and sensor.referenced_from % 4 == 0
+    data = bytearray(stock_image[: checksum.UPDATE_FILE_SIZE])
+    data[0x7B91C: 0x7B920] = b"\x00" * 4
+    data = bytes(data)
+    path = tmp_path / checksum.build_update_name(data, "202611061301").filename
+    by = {c.name: c for c in verify.verify_update(path, data, allow_modified=True)}
+    assert by["sensor-table"].severity == "warn" and "no code refers to it" in by["sensor-table"].detail
+    assert "sensor-table" in [c.name for c in failures(path, data, stock=stock_image, allow_modified=True, allow_unknown_build=True)]
 
 
 def test_pack_refuses_a_cut_off_stock_dump(stock_image, tmp_path, capsys):

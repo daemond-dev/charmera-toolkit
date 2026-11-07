@@ -16,14 +16,17 @@ import hashlib
 import re
 import struct
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import settings as settings_mod
-from .checksum import FLASH_SIZE, OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, byte_sum
+from .checksum import BLOCK_SIZE, FLASH_SIZE, OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, byte_sum
 
 # --- Fixed layout (file offsets) ----------------------------------------------------------------------
 HEADER_SIZE = 0x200          # VERIFIED: 'SPII' header, ARM vector table starts at 0x200
 VA_OFFSET = 0x200            # VERIFIED: file offset = runtime address + 0x200
+# VERIFIED: the eight ARM exception vectors, the handler addresses they load and the reset entry's first instruction
+# at 0x23C. A camera whose reset vector is broken does not start, so the card updater cannot run on it again.
+VECTOR_TABLE = (0x200, 0x240)
 CODE_END = 0x110000          # INFERRED: code and tables; the 64 KiB at 0x110000 is zero (heap placeholder)
 RESOURCE_BASE = 0x120000     # VERIFIED: 'GP+' resource pack
 RESOURCE_SECTOR = 0x200      # VERIFIED: directory entries address 512-byte sectors from RESOURCE_BASE
@@ -72,6 +75,14 @@ class KnownBuild:
     build_offset: Optional[int] = None
     sensor_table_offset: Optional[int] = None
     compiled: Optional[str] = None          # the compile date the build carries (it differs between the known builds)
+    vector_table_sha256: Optional[str] = None   # SHA-256 of bytes 0x200..0x240 (VECTOR_TABLE)
+
+    @property
+    def layout(self) -> Optional[Tuple[int, int, int]]:
+        """(stamp, build string, sensor table) offsets, when all three are published for the build."""
+        if self.stamp_offset is None or self.build_offset is None or self.sensor_table_offset is None:
+            return None
+        return self.stamp_offset, self.build_offset, self.sensor_table_offset
 
 
 PUBLIC_BUILD = KnownBuild(
@@ -90,6 +101,7 @@ PUBLIC_BUILD = KnownBuild(
     build_offset=0x18964,
     sensor_table_offset=0xF5C6C,
     compiled="Oct 14 2025",
+    vector_table_sha256="cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",
 )
 
 FILM_MODS_BUILD = KnownBuild(
@@ -108,6 +120,7 @@ FILM_MODS_BUILD = KnownBuild(
     build_offset=0x1897C,
     sensor_table_offset=0xF5D34,
     compiled="Nov 19 2025",
+    vector_table_sha256="cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",   # the same bytes as the public build's
 )
 
 KNOWN_BUILDS = {b.key: b for b in (PUBLIC_BUILD, FILM_MODS_BUILD)}
@@ -121,6 +134,15 @@ PUBLIC_DUMPS: Dict[str, str] = {
         "benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin (the public dump's build)",
     "720ed0b65c91b149b0916498732b0ecf40227736ef5e3c126c487a7b5253436c":
         "Khimira/Project-Sirius Original_Firmware.bin (the public dump's build)",
+}
+
+# The two photos the camera behind the keychain-camera-plus dump stored in its own memory (at 0x180000 and 0x1A5800),
+# by the SHA-256 of each JPEG from FF D8 to FF D9. Every 0x1E0000-byte file made from that dump, the stock restore
+# file among them, carries them, so a camera flashed with one holds them afterwards. VERIFIED from the dump; the
+# Project-Sirius dump's photos differ and are not hashed here.
+PUBLIC_DUMP_PHOTOS: Dict[str, str] = {
+    "ec268b506e54743c2f148bde5190313ab4277b629b4965bffc08775bc882dd79": "benbadio/keychain-camera-plus",
+    "f5105d39cf35d5a0549fbe2e5420bfe9bc6f0fdfce2edd36a976f2f31059ee0e": "benbadio/keychain-camera-plus",
 }
 
 # --- Header -------------------------------------------------------------------------------------------
@@ -154,7 +176,9 @@ def parse_header(image: bytes) -> SpiiHeader:
 #
 # Nothing here reads a fixed offset. The marks move between builds (the stamp is at 0x218C4 in the public
 # dump and 0x218D0 in the film-mods build; the sensor table at 0xF5C6C and 0xF5D34), so each one is found by
-# what it looks like, and the sensor table is cross-checked against the code that points at it.
+# what it looks like. Every sensor program in the code area is collected, with the code literal that holds its
+# init table's address when there is one: verify refuses a file whose code refers to more than one program, and
+# warns about a table no code refers to.
 
 # The sensor's reset table: page select (register 0xFD = 0), register 0x20 = 0, end marker. VERIFIED in the
 # public dump at 0xF5BFC, confirmed at +0xC8 in the film-mods build by its author.
@@ -190,11 +214,39 @@ class BuildMarks:
     compiled: Optional[bytes] = None
     compiled_offset: Optional[int] = None
     sensor: Optional[SensorTables] = None
+    sensor_programs: Tuple[SensorTables, ...] = ()   # every reset and init table pair found, in file order
+    stamp_conflict: Tuple[str, ...] = ()             # the different stamps that follow '*.bin', when they disagree
 
     @property
     def complete(self) -> bool:
         """The three marks every Charmera build is expected to carry."""
         return self.stamp is not None and self.build_string is not None and self.sensor is not None
+
+    @property
+    def several_sensor_programs(self) -> List[SensorTables]:
+        """The sensor programs the code refers to, when they are more than one with different init tables; else
+        empty. Which of them sets up the sensor cannot be told from the file."""
+        referenced = [t for t in self.sensor_programs if t.referenced_from is not None]
+        return referenced if len({t.sha256 for t in referenced}) > 1 else []
+
+    @property
+    def layout(self) -> Optional[Tuple[int, int, int]]:
+        """(stamp, build string, sensor table) offsets, when all three marks were found."""
+        if not self.complete:
+            return None
+        return self.stamp_offset, self.build_offset, self.sensor.init[0]
+
+    def missing(self, need_sensor_table: bool = True) -> List[str]:
+        """The marks that were not found, in plain words."""
+        out = []
+        if self.build_string is None:
+            out.append("build string")
+        if self.stamp is None:
+            out.append("12-digit stamp" + (f" (several different ones follow '*.bin': {', '.join(self.stamp_conflict)})"
+                                           if self.stamp_conflict else ""))
+        if need_sensor_table and self.sensor is None:
+            out.append("sensor table")
+        return out
 
 
 def _register_table_end(image: bytes, start: int, limit: int = 2048) -> Optional[int]:
@@ -209,28 +261,33 @@ def _register_table_end(image: bytes, start: int, limit: int = 2048) -> Optional
 
 
 def _literal_offset(image: bytes, ram_address: int, end: int) -> Optional[int]:
-    """File offset of a little-endian word holding ram_address in the code area, or None."""
+    """File offset of a little-endian word holding ram_address in the code area, or None. Only 4-byte-aligned
+    words count: the code loads an address from a literal pool, whose words are aligned, and the same four bytes
+    found elsewhere are a coincidence."""
     needle = struct.pack("<I", ram_address)
     i = image.find(needle, HEADER_SIZE, end)
+    while i >= 0 and i % 4:
+        i = image.find(needle, i + 1, end)
     return None if i < 0 else i
 
 
-def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
-    """Locate the sensor reset table and the init table the firmware writes to the image sensor at boot.
+def sensor_programs(image: bytes) -> List[SensorTables]:
+    """Every sensor reset table in the code area with the init table that follows it, in file order.
 
     The reset table is found by its exact bytes. The init table is the first (register, value) table after
     it that starts with a page select, holds at least 16 writes, switches page at least once more and ends
-    with the ff ff marker. Both must lie in the code area. When more than one spot fits, the one whose init
-    table the code refers to by address (a literal of RAM address = file offset - 0x200) wins.
+    with the ff ff marker. Both must lie in the code area. Each one carries the code literal that holds its
+    init table's RAM address (file offset - 0x200), or None when no aligned word does.
     """
     end = min(len(image), CODE_AREA_END)
-    candidates = []
+    found_all = []
     i = image.find(SENSOR_RESET_TABLE, HEADER_SIZE, end)
     while 0 <= i < end:
         reset = (i, i + len(SENSOR_RESET_TABLE))
         p = reset[1]
         found = None
-        while p < min(end, reset[1] + 0x400):
+        # p + 2 <= ...: a file may end right after a page register, and the pair needs both of its bytes
+        while p + 2 <= min(end, reset[1] + 0x400):
             if image[p] == SENSOR_PAGE_REGISTER and image[p + 1] == 0:
                 e = _register_table_end(image, p)
                 if e is not None and e <= end:
@@ -245,31 +302,49 @@ def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
             ref = _literal_offset(image, s - VA_OFFSET, end)
             bus_at = (reset[1] + 3) & ~3
             bus = struct.unpack_from("<I", image, bus_at)[0] if bus_at + 4 <= len(image) else None
-            candidates.append(SensorTables(reset, (s, e), pairs, hashlib.sha256(image[s:e]).hexdigest(),
-                                           bus if bus is not None and 0 < bus < 0x100 else None, ref))
+            found_all.append(SensorTables(reset, (s, e), pairs, hashlib.sha256(image[s:e]).hexdigest(),
+                                          bus if bus is not None and 0 < bus < 0x100 else None, ref))
         i = image.find(SENSOR_RESET_TABLE, i + 1, end)
-    if not candidates:
-        return None
-    referenced = [c for c in candidates if c.referenced_from is not None]
-    return (referenced or candidates)[0]
+    return found_all
+
+
+def _pick_sensor_program(programs: List[SensorTables]) -> Optional[SensorTables]:
+    """The one the code refers to by address wins; the first in the file when none is referred to."""
+    referenced = [c for c in programs if c.referenced_from is not None]
+    return (referenced or programs)[0] if programs else None
+
+
+def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
+    """Locate the sensor reset table and the init table the firmware writes to the image sensor at boot.
+
+    When more than one spot fits (sensor_programs), the one whose init table the code refers to by address wins.
+    Whether the code refers to several programs with different tables is BuildMarks.several_sensor_programs.
+    """
+    return _pick_sensor_program(sensor_programs(image))
 
 
 def find_marks(image: bytes) -> BuildMarks:
-    """The build marks, each found by its content in the code area. Any of them may be missing."""
+    """The build marks, each found by its content in the code area. Any of them may be missing.
+
+    The stamp is the one that follows the '*.bin' the updater matches with; when several follow one and they
+    differ, which one the updater compares cannot be told, so there is no stamp (stamp_conflict names them)."""
     code = bytes(image[:min(len(image), CODE_AREA_END)])
     stamp = stamp_off = None
     stamps = list(_STAMP_RE.finditer(code))
     near = [m for m in stamps if _UPDATE_PATTERN in code[max(0, m.start(1) - 64): m.start(1)]]
-    pick = near[0] if near else (stamps[0] if len(stamps) == 1 else None)
+    values = list(dict.fromkeys(m.group(1).decode("ascii") for m in near))
+    conflict: Tuple[str, ...] = tuple(values) if len(values) > 1 else ()
+    pick = None if conflict else (near[0] if near else (stamps[0] if len(stamps) == 1 else None))
     if pick:
         stamp, stamp_off = pick.group(1).decode("ascii"), pick.start(1)
     b = _BUILD_STRING_RE.search(code)
     c = _COMPILED_RE.search(code)
+    programs = sensor_programs(image)
     return BuildMarks(
         stamp=stamp, stamp_offset=stamp_off,
         build_string=b.group(0) if b else None, build_offset=b.start() if b else None,
         compiled=c.group(0) if c else None, compiled_offset=c.start() if c else None,
-        sensor=find_sensor_tables(image),
+        sensor=_pick_sensor_program(programs), sensor_programs=tuple(programs), stamp_conflict=conflict,
     )
 
 
@@ -279,9 +354,13 @@ def find_marks(image: bytes) -> BuildMarks:
 @dataclass
 class BuildMatch:
     marks: BuildMarks
-    build: Optional[KnownBuild]        # the known build this image is, or was made from
+    # The known build this image is, or whose marks (stamp, build string, sensor table offsets and the stamp itself)
+    # a changed copy keeps. The mod commands go by it, since they need that build's layout; whether the image was
+    # made from that build is made_from.
+    build: Optional[KnownBuild]
     modified: bool                     # True when it is that build with changes (a mod, or another camera's state)
     checks: Dict[str, bool] = field(default_factory=dict)
+    layout: Optional[KnownBuild] = None   # the known build whose mark offsets the image has, whatever its stamp and table
 
     @property
     def charmera(self) -> bool:
@@ -295,10 +374,24 @@ class BuildMatch:
         return "charmera-unknown-build" if self.charmera else "not-charmera"
 
     @property
+    def made_from(self) -> Optional[KnownBuild]:
+        """The known build this image is or was made from: an exact fingerprint, or that build's marks with the same
+        sensor table. A copy whose sensor table differs is another build laid out like it (no toolkit mod changes
+        the table), not that build with changes."""
+        if self.build is None:
+            return None
+        if self.modified and (self.marks.sensor is None or self.marks.sensor.sha256 != self.build.sensor_table_sha256):
+            return None
+        return self.build
+
+    @property
     def label(self) -> str:
-        if self.build is not None:
-            return self.build.label + (" with changes" if self.modified else "")
+        known = self.made_from
+        if known is not None:
+            return known.label + (" with changes" if self.modified else "")
         if self.charmera:
+            if self.layout is not None:
+                return f"Charmera firmware of a build this toolkit does not know, laid out like {self.layout.label}"
             return "Charmera firmware of a build this toolkit does not know (no public image has this fingerprint)"
         return "not a known Charmera build (build marks missing)"
 
@@ -338,8 +431,9 @@ def detect_build(image: bytes) -> BuildMatch:
 
     An exact fingerprint over bytes 0..0x169000 names a known build. Failing that, the marks' offsets name
     the known build a modified image was made from (a mod keeps the stamp, the build string and the sensor
-    table where they were). Images with marks at other offsets are Charmera firmware of an unknown build;
-    images without marks are not Charmera firmware. The stamp alone never identifies a build.
+    table where they were, and the table itself: BuildMatch.made_from). Images with marks at other offsets are
+    Charmera firmware of an unknown build; images without marks are not Charmera firmware. The stamp alone
+    never identifies a build.
     """
     marks = find_marks(image)
     exact = match_known_build(image)
@@ -353,6 +447,8 @@ def detect_build(image: bytes) -> BuildMatch:
             if known and all(known) and marks.stamp == b.stamp:
                 build, modified = b, True
                 break
+    layout = exact if exact is not None else next(
+        (b for b in KNOWN_BUILDS.values() if marks.layout is not None and b.layout == marks.layout), None)
     checks = {
         "build_string": marks.build_string is not None,
         "stamp": marks.stamp is not None,
@@ -364,7 +460,7 @@ def detect_build(image: bytes) -> BuildMatch:
         "software_sha256": len(image) >= SOFTWARE_END and software_sha256(image) == PUBLIC_BUILD.software_sha256,
         "fingerprint": exact is not None,
     }
-    return BuildMatch(marks, build, modified, checks)
+    return BuildMatch(marks, build, modified, checks, layout)
 
 
 def chip_read_problem(image: bytes, need_sensor_table: bool = True) -> Optional[str]:
@@ -381,10 +477,7 @@ def chip_read_problem(image: bytes, need_sensor_table: bool = True) -> Optional[
                 + ("; this is an update file, not a read of a chip" if len(image) in (UPDATE_FILE_SIZE, OFFICIAL_UPDATE_SIZE) else ""))
     if image[:4] != SPII_MAGIC:
         return "it does not start with SPII as Charmera firmware does, so it is not a readable copy of the chip"
-    marks = find_marks(image)
-    missing = [what for what, found in (("build string", marks.build_string), ("12-digit stamp", marks.stamp)) if found is None]
-    if need_sensor_table and marks.sensor is None:
-        missing.append("sensor table")
+    missing = find_marks(image).missing(need_sensor_table)
     if missing:
         return "the build marks every Charmera firmware carries were not all found (" + ", ".join(missing) + " missing)"
     return None
@@ -393,6 +486,12 @@ def chip_read_problem(image: bytes, need_sensor_table: bool = True) -> Optional[
 def public_dump_name(image: bytes) -> Optional[str]:
     """Which public dump an image is, byte for byte, or None."""
     return PUBLIC_DUMPS.get(hashlib.sha256(image).hexdigest())
+
+
+def vector_table_sha256(image: bytes) -> Optional[str]:
+    """SHA-256 of the ARM vector table (bytes 0x200..0x240), or None when the image ends before it."""
+    lo, hi = VECTOR_TABLE
+    return hashlib.sha256(image[lo:hi]).hexdigest() if len(image) >= hi else None
 
 
 def updater_extra_erase(file_len: int) -> int:
@@ -405,7 +504,10 @@ def updater_extra_erase(file_len: int) -> int:
 
 def describe_erase_target(off: int) -> str:
     if off >= FLASH_SIZE:
-        return "beyond the 2 MiB chip (the address wraps to block 1 and bricks the camera: confirmed by the film-mods author on hardware)"
+        block = (off - FLASH_SIZE) // BLOCK_SIZE
+        what = "the boot header and the vector table" if block == 0 else "code"
+        return (f"beyond the 2 MiB chip: the address wraps to block {block} ({what}) and bricks the camera (a 2 MiB file, "
+                "whose final erase wraps to block 1, did so on hardware: confirmed by the film-mods author)")
     if SETTINGS_BASE <= off < 0x180000:
         return ("the settings bank and the photo directory: at the next start the camera applies factory defaults and writes an "
                 "empty photo list, so the photos stored in its own memory stay but are no longer listed")
@@ -620,6 +722,27 @@ def stored_photos(image: bytes) -> List[tuple]:
     return out
 
 
+def public_dump_photos(image: bytes) -> List[tuple]:
+    """(slot offset, whose camera) for each stored photo that is one of PUBLIC_DUMP_PHOTOS, by its hash."""
+    out = []
+    for off, n in stored_photos(image):
+        owner = PUBLIC_DUMP_PHOTOS.get(hashlib.sha256(image[off: off + n]).hexdigest())
+        if owner:
+            out.append((off, owner))
+    return out
+
+
+def photos_whose(image: bytes) -> str:
+    """Whose the stored photos in an image are, as far as the image can tell, as a clause."""
+    public = public_dump_photos(image)
+    if public:
+        owner = public[0][1]
+        return (f"the photos of the camera the {owner} dump was read from: every 0x1E0000-byte file made from that dump "
+                "carries them, so a camera flashed with one holds them too")
+    return ("the photos stored in the camera this was read from: its own only if no 0x1E0000-byte file carrying "
+            "photos was flashed onto it before that read")
+
+
 # --- Summary -------------------------------------------------------------------------------------------
 
 
@@ -671,6 +794,7 @@ def summarize(image: bytes) -> dict:
         "current_settings": current,
         "photo_index": photo_index(image) if len(image) > PHOTO_INDEX + 0x40 else [],
         "stored_photos": stored_photos(image),
+        "photos_whose": photos_whose(image),
         "tail_blank": tail_blank(image),
     }
     return info

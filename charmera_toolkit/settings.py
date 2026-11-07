@@ -17,6 +17,7 @@ Layout (verified in both public dumps and in the firmware's loader, writer, sett
 """
 from __future__ import annotations
 
+import struct
 import zlib
 from dataclasses import dataclass
 from typing import List, Optional
@@ -158,6 +159,20 @@ def photo_directory_consistent(image: bytes) -> bool:
     except ValueError:
         return True
     return image[PHOTO_DIRECTORY : PHOTO_DIRECTORY + 8] != b"\xff" * 8
+
+
+def photo_directory_lists(image: bytes) -> int:
+    """How many of the two 8-byte directory entries at 0x17F000 (u16 number, u16 used, u32 length) mark a photo as
+    present: used neither 0 nor 0xFFFF and length neither 0 nor 0xFFFFFFFF. An erased directory counts as none, as
+    does a file that ends before it. The same rule as the app's UpdateCheck.photoDirectoryEntries."""
+    if len(image) < PHOTO_DIRECTORY + 16 or is_erased_sector(image, PHOTO_DIRECTORY):
+        return 0
+    n = 0
+    for i in range(2):
+        _number, used, length = struct.unpack_from("<HHI", image, PHOTO_DIRECTORY + 8 * i)
+        if used not in (0, 0xFFFF) and length not in (0, 0xFFFFFFFF):
+            n += 1
+    return n
 
 
 def diff_records(a: SettingsRecord, b: SettingsRecord) -> List[int]:
