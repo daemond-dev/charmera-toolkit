@@ -841,3 +841,149 @@ def test_verify_names_the_build_and_says_what_a_match_proves(tmp_path, synthetic
     assert m.charmera and m.build is None and m.identity == "charmera-unknown-build"
     by = {c.name: c for c in verify.verify_update(_named(tmp_path, moved, "202611041201"), moved, allow_modified=True)}
     assert by["build"].severity == "warn" and "does not know" in by["build"].detail
+
+
+def test_the_compile_date_is_read_and_shown(tmp_path, synthetic_build):
+    payload = pack.prepare_payload(synthetic_image([make_record()]))
+    marks = image.find_marks(payload)
+    assert marks.compiled == b"Oct 14 2025" and marks.compiled_offset == 0xF3978
+    by = {c.name: c for c in verify.verify_update(_named(tmp_path, payload), payload, allow_modified=True)}
+    assert "compiled Oct 14 2025 at 0xf3978" in by["series"].detail and "compile dates differ" in by["series"].detail
+    assert image.PUBLIC_BUILD.compiled == "Oct 14 2025" and image.FILM_MODS_BUILD.compiled == "Nov 19 2025"
+
+
+def test_pack_official_size_refuses_data_it_would_drop(synthetic_build):
+    img = bytearray(synthetic_image([make_record()]))
+    img[0x16E000: 0x16E004] = b"JHCM"       # a factory self-test sector that is not blank
+    with pytest.raises(ValueError, match="would drop it"):
+        pack.prepare_payload(bytes(img), official_size=True)
+    assert len(pack.prepare_payload(bytes(img))) == checksum.UPDATE_FILE_SIZE    # the community size keeps it
+
+
+# --- the donor route ------------------------------------------------------------------------------------------
+#
+# A camera whose own firmware is gone and does not fit it can take another, working camera's firmware: --donor is
+# that camera's read, --stock this camera's own read as it is now. The synthetic donor is the synthetic image with
+# another sensor table, as a camera fitted with another sensor would need.
+
+DONOR_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 5 + 1) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                           + [(0xFD, 0x01), (0x11, 0x40)] for b in pair) + b"\xff\xff"
+assert len(DONOR_SENSOR_TABLE) == SENSOR_END - SENSOR_START
+
+
+def _donor(base, table=DONOR_SENSOR_TABLE):
+    img = bytearray(base)
+    img[SENSOR_START: SENSOR_END] = table
+    return bytes(img)
+
+
+def _donor_case(tmp_path):
+    """This camera's read, a donor's read, and an official-size file made from the donor."""
+    backup = synthetic_image([make_record()])
+    donor = _donor(backup)
+    payload = pack.prepare_payload(donor, official_size=True)
+    return backup, donor, payload, _named(tmp_path, payload, "202611061300")
+
+
+def _failed(checks):
+    return [c.name for c in checks if not c.ok and c.severity == "fail"]
+
+
+def test_a_donor_file_is_refused_against_the_cameras_backup_without_the_donor_route(tmp_path, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    by = {c.name: c for c in verify.verify_update(p, payload, stock=backup, allow_modified=True)}
+    assert by["sensor-table"].severity == "fail" and "DIFFERS from --stock" in by["sensor-table"].detail
+
+
+def test_the_donor_route_needs_the_cameras_own_backup(tmp_path, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    checks = verify.verify_update(p, payload, donor=donor)
+    assert "donor" in _failed(checks)
+    assert "no backup of your own camera, no flash" in next(c for c in checks if c.name == "donor").detail
+
+
+def test_the_donor_route_takes_the_donors_firmware_and_says_the_fit_is_unknown(tmp_path, capsys, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    checks = verify.verify_update(p, payload, stock=backup, donor=donor)
+    assert _failed(checks) == []
+    by = {c.name: c for c in checks}
+    assert by["from-donor"].ok and "unchanged" in by["from-donor"].detail
+    assert by["sensor-table"].severity == "warn" and "Nothing here can tell" in by["sensor-table"].detail
+    assert by["way-back"].severity == "warn" and "chip programmer" in by["way-back"].detail
+    assert by["software-region"].severity == "info" and "0xf0000" in by["software-region"].detail
+    backup_path, donor_path = tmp_path / "backup.bin", tmp_path / "donor.bin"
+    backup_path.write_bytes(backup)
+    donor_path.write_bytes(donor)
+    args = type("A", (), {"file": str(p), "stock": str(backup_path), "donor": str(donor_path), "allow_modified": False,
+                          "allow_unknown_build": False, "allow_odd_size": False})
+    assert verify.handler(args) == 0
+    out = capsys.readouterr().out
+    assert "WARN sensor-table" in out and "Whether it fits this camera is not known" in out
+
+
+def test_the_donor_route_refuses_what_is_not_the_donors_firmware(tmp_path, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    changed = bytearray(payload)
+    changed[0x30000] ^= 1
+    changed = bytes(changed)
+    assert "from-donor" in _failed(verify.verify_update(_named(tmp_path, changed, "202611061301"), changed, stock=backup, donor=donor))
+    # a donor that is this camera's own firmware, or that is not a read of a chip
+    assert "donor" in _failed(verify.verify_update(p, payload, stock=backup, donor=backup))
+    checks = verify.verify_update(p, payload, stock=backup, donor=payload)
+    assert "donor" in _failed(checks) and "update file" in next(c for c in checks if c.name == "donor").detail
+    # and --stock must be a read of a chip
+    assert "backup" in _failed(verify.verify_update(p, payload, stock=payload, donor=donor))
+
+
+def test_the_donor_route_takes_a_donor_with_another_kind_of_sensor_table(tmp_path, synthetic_build):
+    """A camera with another kind of sensor may keep its table in another form: the route still works, and says so."""
+    backup = synthetic_image([make_record()])
+    donor = bytearray(_donor(backup))
+    donor[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = bytes.fromhex("fe0080ffffff")   # not the known builds' reset table
+    donor = bytes(donor)
+    assert image.find_sensor_tables(donor) is None and not image.detect_build(donor).charmera
+    payload = pack.prepare_payload(donor, official_size=True)
+    p = _named(tmp_path, payload, "202611061302")
+    assert "series" in _failed(verify.verify_update(p, payload, stock=backup, allow_modified=True))
+    checks = verify.verify_update(p, payload, stock=backup, donor=donor)
+    assert _failed(checks) == []
+    assert "no sensor table of the kind" in next(c for c in checks if c.name == "sensor-table").detail
+
+
+def test_stock_image_donor_route(stock_image, tmp_path):
+    """The real dump as this camera's read, and the real dump with one sensor register changed as a donor's."""
+    sensor = image.find_sensor_tables(stock_image)
+    donor = bytearray(stock_image)
+    donor[sensor.init[0] + 5] ^= 0x01            # the value of the third write
+    donor = bytes(donor)
+    assert image.find_sensor_tables(donor).sha256 != sensor.sha256
+    payload = pack.prepare_payload(donor, official_size=True)
+    p = _named(tmp_path, payload, "202611061303")
+    by = {c.name: c for c in verify.verify_update(p, payload, stock=stock_image, allow_modified=True)}
+    assert by["sensor-table"].severity == "fail"
+    checks = verify.verify_update(p, payload, stock=stock_image, donor=donor)
+    assert _failed(checks) == []
+    by = {c.name: c for c in checks}
+    assert "byte-identical to benbadio/keychain-camera-plus" in by["way-back"].detail
+
+
+def test_stock_image_as_stock_is_named_a_public_dump(stock_image, tmp_path):
+    """A read of this camera after the stock restore flash can be byte-identical to the public dump: say what that means."""
+    restore = pack.prepare_payload(stock_image)
+    by = {c.name: c for c in verify.verify_update(_named(tmp_path, restore, "202611061304"), restore, stock=stock_image)}
+    assert by["stock"].severity == "warn" and "byte-identical" in by["stock"].detail and "not what fits it" in by["stock"].detail
+
+
+FILM_MODS_RESTORE = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
+
+
+@pytest.mark.skipif(not FILM_MODS_RESTORE.is_file(), reason="set CHARMERA_FILM_MODS_RESTORE to the film-mods Charmera_Restore file")
+def test_film_mods_restore_file_is_named_by_its_fingerprint(tmp_path):
+    data = FILM_MODS_RESTORE.read_bytes()
+    m = image.detect_build(data)
+    assert m.exact and m.build.key == "film-mods" and m.build.status == "VERIFIED"
+    assert m.marks.compiled == b"Nov 19 2025" and m.marks.stamp_offset == 0x218D0 and m.marks.build_offset == 0x1897C
+    assert m.marks.sensor.sha256 == image.PUBLIC_BUILD.sensor_table_sha256
+    # its stamp is the one both builds run, so a camera running either ignores it, and verify says so
+    by = {c.name: c for c in verify.verify_update(tmp_path / FILM_MODS_RESTORE.name, data)}
+    assert not by["stamp"].ok and "the charmera-film-mods author's build" in by["build"].detail

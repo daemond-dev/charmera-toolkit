@@ -41,11 +41,14 @@ SPII_MAGIC = b"SPII"
 #
 # What identifies a firmware build, and what does not. The 12-digit stamp the updater compares against
 # (`202505201029`) is carried by at least two different builds: the public dump and the build on the
-# charmera-film-mods author's camera (confirmed by that author from their own dump, 2026-11-06). The strings
-# `JH5408  20250520` and `Oct 14 2025`, the yellow boot screen and the "original series" body do not tell
-# them apart either. Only a fingerprint over the software itself does, and even that says which public
-# image a file was made from, not whether it fits the camera it goes into: the two known builds drive the
-# same sensor with the same 61-write table, and a camera fitted with another sensor needs a build nobody has.
+# charmera-film-mods author's camera (its code and resources are public as that project's restore file).
+# The build string `JH5408  20250520`, the yellow boot screen and the "original series" body do not tell
+# them apart. The compile date does: `Oct 14 2025` in the public dump, `Nov 19 2025` in the film-mods
+# build, so the factory rebuilt the firmware under one stamp. A different compile date shows a different
+# build; the same date would not show the same build. A fingerprint over the software names a build exactly,
+# and even that says which image a file was made from, not whether it fits the camera it goes into: the two
+# known builds drive the same sensor with the same 61-write table, and a camera fitted with another sensor
+# needs a build nobody has shared.
 
 CODE_AREA_END = 0x120000          # boot header, code, read-only and initialised data, and the padding below the pack
 
@@ -55,9 +58,9 @@ class KnownBuild:
     key: str
     label: str
     source: str
-    status: str                    # VERIFIED: hashed here from the dump. REPORTED: fingerprint published by its owner.
+    status: str                    # VERIFIED: hashed here from a public file. REPORTED: fingerprint published by its owner.
     stamp: str                     # the 12-digit stamp compiled into it (the same in both known builds)
-    official_sha1: str             # SHA-1 of bytes 0..0x169000 (the span official updates write)
+    official_sha1: str             # SHA-1 of bytes 0..0x169000 (the span the official-size files write)
     official_byte_sum: int         # the camera's own checksum over the same span
     sensor_table_sha256: str       # SHA-256 of the 124-byte sensor init table (identical in both known builds)
     software_sha256: Optional[str] = None   # SHA-256 of bytes 0..0x170000, when the dump is public
@@ -68,6 +71,7 @@ class KnownBuild:
     stamp_offset: Optional[int] = None
     build_offset: Optional[int] = None
     sensor_table_offset: Optional[int] = None
+    compiled: Optional[str] = None          # the compile date the build carries (it differs between the known builds)
 
 
 PUBLIC_BUILD = KnownBuild(
@@ -85,19 +89,25 @@ PUBLIC_BUILD = KnownBuild(
     stamp_offset=0x218C4,
     build_offset=0x18964,
     sensor_table_offset=0xF5C6C,
+    compiled="Oct 14 2025",
 )
 
 FILM_MODS_BUILD = KnownBuild(
     key="film-mods",
-    label="the charmera-film-mods author's build (same stamp 202505201029, different bytes; fingerprint reported by its owner)",
-    source="Hyperlite-Media/charmera-film-mods: the author's factory dump, not public; fingerprint from issue #1 (2026-11-06)",
-    status="REPORTED",
+    label="the charmera-film-mods author's build (same stamp 202505201029, different bytes, compiled Nov 19 2025)",
+    source=("Hyperlite-Media/charmera-film-mods release Charmera_Restore, JH_5408202505201029_0852C329.bin: bytes 0..0x169000 of "
+            "the author's factory dump, with the SHA-1 and byte sum the author reported in issue #1 (2026-11-06)"),
+    status="VERIFIED",
     stamp="202505201029",
     official_sha1="91499bd3bff3acde053cb8c8255a73cdeb6e3d33",
     official_byte_sum=0x0852C329,
     sensor_table_sha256="aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
+    code_sha256="8f9d8c7eb883765bb93d5c76469110cc500d1b15d5cbbd20f58fdddcef6359a8",
+    official_sha256="5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f",
     stamp_offset=0x218D0,
+    build_offset=0x1897C,
     sensor_table_offset=0xF5D34,
+    compiled="Nov 19 2025",
 )
 
 KNOWN_BUILDS = {b.key: b for b in (PUBLIC_BUILD, FILM_MODS_BUILD)}
@@ -355,6 +365,34 @@ def detect_build(image: bytes) -> BuildMatch:
         "fingerprint": exact is not None,
     }
     return BuildMatch(marks, build, modified, checks)
+
+
+def chip_read_problem(image: bytes, need_sensor_table: bool = True) -> Optional[str]:
+    """Why an image is not a complete read of a Charmera's flash chip, as a clause, or None when it is one.
+
+    A read is exactly 2 MiB, starts with SPII and carries the build string and the stamp, and, unless
+    need_sensor_table is False, a sensor table of the kind the known builds use. A camera fitted with another
+    sensor may run firmware that keeps its table in another form, which is why a donor's read is taken without
+    one. Being byte-identical to a public dump is not a problem by itself: a camera flashed with the public
+    restore file whose settings never changed since reads exactly like it.
+    """
+    if len(image) != FLASH_SIZE:
+        return (f"it is {len(image):,} bytes, and a read of the chip is exactly {FLASH_SIZE:,}"
+                + ("; this is an update file, not a read of a chip" if len(image) in (UPDATE_FILE_SIZE, OFFICIAL_UPDATE_SIZE) else ""))
+    if image[:4] != SPII_MAGIC:
+        return "it does not start with SPII as Charmera firmware does, so it is not a readable copy of the chip"
+    marks = find_marks(image)
+    missing = [what for what, found in (("build string", marks.build_string), ("12-digit stamp", marks.stamp)) if found is None]
+    if need_sensor_table and marks.sensor is None:
+        missing.append("sensor table")
+    if missing:
+        return "the build marks every Charmera firmware carries were not all found (" + ", ".join(missing) + " missing)"
+    return None
+
+
+def public_dump_name(image: bytes) -> Optional[str]:
+    """Which public dump an image is, byte for byte, or None."""
+    return PUBLIC_DUMPS.get(hashlib.sha256(image).hexdigest())
 
 
 def updater_extra_erase(file_len: int) -> int:

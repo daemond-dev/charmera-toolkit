@@ -528,3 +528,48 @@ def test_undecodable_confirmation_is_not_confirmed(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", bad_input)
     assert stage._confirm("/media/card") is False
     assert "Not confirmed" in capsys.readouterr().out
+
+
+# --- the donor route ---------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def donor_case(tmp_path, synthetic_build):
+    """This camera's read, a donor's read with another sensor table, and an official-size file made from the donor."""
+    backup = synthetic_image([make_record()])
+    donor = bytearray(backup)
+    donor[SENSOR_START + 5] ^= 0x01
+    donor = bytes(donor)
+    payload = pack.prepare_payload(donor, official_size=True)
+    out = tmp_path / "out"
+    out.mkdir()
+    src = out / checksum.build_update_name(payload, STAMP).filename
+    src.write_bytes(payload)
+    backup_path, donor_path = tmp_path / "backup.bin", tmp_path / "donor.bin"
+    backup_path.write_bytes(backup)
+    donor_path.write_bytes(donor)
+    return src, backup_path, donor_path
+
+
+def test_stage_refuses_a_donor_file_without_the_donor_route(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    assert run(str(src), "--card", str(card), OVERRIDE, "--stock", str(backup_path)) == 1
+    assert "FAIL sensor-table" in capsys.readouterr().out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_donor_route_needs_the_backup(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    assert run(str(src), "--card", str(card), OVERRIDE, "--donor", str(donor_path)) == 2
+    out = capsys.readouterr().out
+    assert "--donor needs --stock" in out and "Nothing written" in out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_donor_route_writes_and_says_the_fit_is_unknown(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    assert run(str(src), "--card", str(card), OVERRIDE, "--stock", str(backup_path), "--donor", str(donor_path)) == 0
+    out = capsys.readouterr().out
+    assert "WARN sensor-table" in out and "WARN way-back" in out and "PASS from-donor" in out
+    assert "Donor route:" in out and "only a chip programmer can put --stock back" in out
+    assert (card / src.name).read_bytes() == src.read_bytes() and confirmed == [str(card)]

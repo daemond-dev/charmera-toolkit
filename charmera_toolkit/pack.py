@@ -7,11 +7,13 @@ programs the file byte for byte, and erases one more 64 KiB block at (length rou
 Two sizes are built here. The community size, 0x1E0000 bytes (30 blocks), writes the code, the resources,
 the settings bank and the stored photos of the image it was made from, and the final erase lands on the
 blank block at 0x1F0000; the last two blocks of flash are blank on every known camera, so trimming a 2 MiB
-dump to it loses nothing. The official size, 0x169000 bytes (--official-size; where Reto's own updates
-and the film-mods files end), writes the code and the resources only: nothing of another camera's
-settings or photos goes in, and the final erase lands on the settings block at 0x170000, so the camera
-starts with factory defaults and an empty photo list; the stored photo data at 0x180000 and the blocks
-above 0x1E0000 are not touched. Never feed the camera a full 2 MiB file (see verify).
+dump to it loses nothing. The official size, 0x169000 bytes (--official-size; where the film-mods files
+end, and where official updates end according to the film-mods author: no official update file has been
+examined here), writes the code and the resources only: nothing of another camera's settings or photos
+goes in, and the final erase lands on the settings block at 0x170000, so the camera starts with factory
+defaults and an empty photo list; the stored photo data at 0x180000 and the blocks above 0x1E0000 are not
+touched. Such a file drops whatever lies between 0x169000 and 0x170000, so it is refused when anything does
+(blank in every known build). Never feed the camera a full 2 MiB file (see verify).
 
 Without the gate flag this command only prints what it would write.
 """
@@ -90,8 +92,10 @@ def prepare_payload(image: bytes, blank_settings: bool = False, blank_photos: bo
     if official_size:
         end = find_resources_end(bytes(payload))
         if end > OFFICIAL_UPDATE_SIZE:
-            raise ValueError(f"the resource pack reaches {end:#x}, past the official update size {OFFICIAL_UPDATE_SIZE:#x}; "
-                             "an official-size file would cut it. Build the 0x1E0000-byte file instead.")
+            raise ValueError(f"the image holds data up to {end:#x}, past the official update size {OFFICIAL_UPDATE_SIZE:#x} (the "
+                             "resource pack, or something between it and the settings bank such as the factory self-test sector at "
+                             "0x16E000, blank in every known build); an official-size file would drop it. Build the 0x1E0000-byte file "
+                             "instead.")
         return bytes(payload[:OFFICIAL_UPDATE_SIZE])
     return bytes(payload)
 
@@ -176,7 +180,9 @@ def handler(args) -> int:
         print("       dump taken from the camera it will go back into.")
         return 2
     if build.build is None and build.charmera:
-        print("note: Charmera firmware of a build this toolkit does not know. It belongs only in the camera it was dumped from.")
+        print("note: Charmera firmware of a build this toolkit does not know. It belongs only in the camera it was dumped from,")
+        print("      or, by the donor route, in a camera whose own firmware is gone: verify and stage then take --stock <that")
+        print("      camera's own read> --donor <this dump> (docs/02-RECOVERY.md, section D).")
     stamp = args.stamp or now_stamp()
     try:
         name = build_update_name(payload, stamp)
@@ -238,7 +244,7 @@ def register(subparsers) -> None:
     p.add_argument("--input", required=True,
                    help="2 MiB dump, 0x1E0000 update file, 0x169000 official-size update file, or software-only image of exactly 0x170000 bytes (any other shorter file is refused as truncated)")
     p.add_argument("--official-size", action="store_true",
-                   help="build a 0x169000-byte file (code and resources only, as official updates are): nothing of the camera's own area is written; "
+                   help="build a 0x169000-byte file (code and resources only, as the film-mods files are): nothing of the camera's own area is written; "
                         "the updater's final erase then resets the settings and empties the photo list, and leaves the stored photo data and the blocks above 0x1E0000 alone")
     p.add_argument("--out", default="out",
                    help="output directory on the computer; refused if it holds a DCIM folder (a card: use stage) or another JH_*.bin")
