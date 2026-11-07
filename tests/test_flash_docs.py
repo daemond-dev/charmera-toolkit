@@ -2,13 +2,22 @@
 photos, --allow-modified for mods, eject before removing, the Android 11 slot limit and the USB-C cleanup. Every doc
 holds to the backup rule: the hard stop is stated where a flash starts, every stage example gives --stock, the public
 dump is never anyone's --stock outside the candidates' recipe, and no doc calls the series or the stamp a proof.
+Every probe, backup, restore and photo-id command line in the docs runs with the options the tool registers, restore
+keeps its read in --out, and the docs name backup's files as backup writes them.
 
 DOCS_DIR selects the docs folder (default: the repository's docs/); the two READMEs are read from its parent."""
+import argparse
+import contextlib
+import io
 import os
 import re
+import shlex
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import pytest
+
+from charmera_toolkit import cli, flash
 
 DOCS = Path(os.environ.get("DOCS_DIR", Path(__file__).resolve().parent.parent / "docs"))
 README = DOCS.parent / "README.md"
@@ -270,3 +279,92 @@ def test_android_card_fix_command():
     t = text("06-ANDROID.md")
     assert "an MBR type Android does not expect" not in t
     assert "card-fix /dev/sdX --clear-dirty" in t
+
+
+# A command line in a doc: `charmera <command> ...` or `python -m charmera_toolkit <command> ...`, in a code block or
+# inline, up to a closing backtick or a shell comment.
+def command_lines(commands: str):
+    pattern = re.compile(r"\b(?:charmera|charmera_toolkit)\s+(?P<command>" + commands + r")(?![\w-])(?P<args>[^`#\n]*)")
+    for path in every_doc():
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for m in pattern.finditer(line):
+                lex = shlex.shlex(m.group("args"), posix=True)
+                lex.whitespace_split = True
+                lex.escape = ""          # a Windows path keeps its backslashes
+                argv = list(lex)
+                if argv:                 # the command named in a sentence, with nothing after it, is no command line
+                    yield f"{rel(path)}:{number}", m.group("command"), argv
+
+
+def parse(parser: argparse.ArgumentParser, argv: List[str]) -> Tuple[Optional[argparse.Namespace], Optional[str]]:
+    """(the parsed arguments, None), or (None, argparse's own message) when the line would not run."""
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            return parser.parse_args(argv), None
+    except SystemExit:
+        lines = err.getvalue().strip().splitlines()
+        return None, lines[-1] if lines else "argparse refused it"
+
+
+def flash_parser() -> argparse.ArgumentParser:
+    """probe, backup and restore with exactly the options charmera_toolkit.flash registers."""
+    parser = argparse.ArgumentParser(prog="charmera")
+    flash.register(parser.add_subparsers(dest="command"))
+    return parser
+
+
+def test_every_documented_restore_parses_and_keeps_its_read():
+    """restore reads the chip twice and keeps that read in --out before it writes; --backup is gone. Every restore
+    command line in the docs parses with flash's own options and gives --out, and none gives --backup."""
+    parser = flash_parser()
+    problems, where_found = [], set()
+    for where, _command, argv in command_lines("restore"):
+        where_found.add(where.split(":")[0])
+        args, error = parse(parser, ["restore"] + argv)
+        if error:
+            problems.append(f"{where}: {error}")
+        elif "--out" not in argv or not args.out:
+            problems.append(f"{where}: no --out")
+        if any(a == "--backup" or a.startswith("--backup=") for a in argv):
+            problems.append(f"{where}: --backup")
+    assert not problems, "\n".join(problems)
+    assert {"docs/02-RECOVERY.md", "docs/07-USAGE.md"} <= where_found, where_found
+
+
+def test_every_documented_probe_and_backup_parses():
+    parser = flash_parser()
+    problems = []
+    for where, command, argv in command_lines("probe|backup"):
+        _args, error = parse(parser, [command] + argv)
+        if error:
+            problems.append(f"{where}: {error}")
+    assert not problems, "\n".join(problems)
+
+
+def test_the_docs_name_backups_reads_as_backup_keeps_them():
+    """A read becomes <label>_<UTC time>.bin only when two or more reads agree; reads that differ, and a single read,
+    keep the name <label>_<UTC time>.unverified-read<n>.bin and are not a backup."""
+    old = re.compile(r"(?<![\w-])read(?:\d|<n>)\.bin")
+    found = [f"{rel(p)}: {m.group(0)}" for p in every_doc() for m in old.finditer(p.read_text(encoding="utf-8"))]
+    assert not found, "\n".join(found)
+    t = text("02-RECOVERY.md")
+    assert "<label>_<UTC time>.unverified-read<n>.bin" in t and "<label>_<UTC time>.bin" in t
+    assert re.search(r"single read \(`--reads 1`\) keeps its `\.unverified-read1\.bin` name", t)
+
+
+def test_every_documented_photo_id_line_parses():
+    """photo-id, in Recovery's donor route and in the command reference, runs with the options the command registers.
+    Skipped where photo-id is not registered (the docs describe it before the code that adds it is merged)."""
+    parser = cli.build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    if "photo-id" not in sub.choices:
+        pytest.skip("photo-id is not registered in this tree")
+    problems, where_found = [], set()
+    for where, _command, argv in command_lines("photo-id"):
+        where_found.add(where.split(":")[0])
+        _args, error = parse(parser, ["photo-id"] + argv)
+        if error:
+            problems.append(f"{where}: {error}")
+    assert not problems, "\n".join(problems)
+    assert {"docs/02-RECOVERY.md", "docs/07-USAGE.md"} <= where_found, where_found

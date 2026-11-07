@@ -29,9 +29,9 @@ is why 0.5 adds the backup step.
 The APK published at the [android-app release](https://github.com/daemond-dev/charmera-toolkit/releases/tag/android-app)
 is still 0.4, and stays so until 0.5 is published from `main`. 0.4 has no backup step and does not refuse C, A or B: do
 not flash with it. 0.5 has not yet been built in CI or run on a phone. Its plain-Java parts (the checker, the card
-rules and the file builder) compile and pass their tests on a computer's JVM: at commit 7a12da2, with the public stock
-dump and the film-mods restore file set, UpdateCheckTest 85, CardStateTest 22 and CandidatesTest 25 passed. The
-screen itself, which holds the backup gate, needs the Android SDK and is built only by the workflow.
+rules, the file builder and WriteGate, the rule the screen asks before every write and save) compile and pass their
+tests on a computer's JVM ([Build](#build)). The screen itself needs the Android SDK and is built only by the
+workflow.
 
 ## Before you flash
 
@@ -79,10 +79,13 @@ The app's screen is the same six steps.
    the phone and tap **Choose this camera's backup**. The app takes it only if it is a complete dump that carries the
    firmware's build marks and is not byte for byte one of the two public stock dumps: such a file is a copy of someone
    else's camera, or a read of a camera flashed with the public restore file that has changed no setting since, and
-   either way not firmware known to fit yours. It cannot tell whose chip any other dump came from, so choose only one
-   read from this camera with a clip. It shows the file's name and SHA-256, compares the update file with it in step
-   1, and writes to the card only while this backup is on record. A recreated screen (dark mode, font size) reads the
-   file again; after the app is closed, choose it again.
+   either way not firmware known to fit yours. It also refuses a dump whose sounds, pictures and menus are missing or
+   damaged, as a read that lost contact part way is, and a dump with the build string and the stamp but no
+   image-sensor set-up table of the kind it knows, which it asks you to keep and look at with `charmera inspect` on a
+   computer. It cannot tell whose chip any other dump came from, so choose only one read from this camera with a clip.
+   It shows the file's name and SHA-256, compares the update file with it in step 1, and writes to the card only
+   while this backup is on record. A recreated screen (dark mode, font size) reads the file again; after the app is
+   closed, choose it again.
 1. **Get the update file.** Tap **Download the stock restore file**. The app downloads the stock dump, checks it,
    and makes the published stock restore file from it (its first 0x1E0000 bytes), using it only if its SHA-256 is
    the published file's (`b10a2f1c…`). That file is a copy of one working camera's memory, with that camera's
@@ -90,13 +93,15 @@ The app's screen is the same six steps.
    known, and it did not fit every original-series camera. The checks shown under the button compare it with your
    backup: the image-sensor set-up must be the same, and the software line says whether the file is the same software
    as your backup, byte for byte, or differs (a difference is a warning, never a pass, but the start of the program,
-   the ARM vector table at 0x200, must be your backup's in a file laid out like it). When your backup is itself one
-   of the known builds, as a camera flashed with the public restore file reads, a matching set-up is a warning too:
-   it proves a fit only if the backup was read before the camera was ever flashed. Without a backup, the sensor line
-   is a warning that cannot be cleared and the write stays off. Offline, or made a file on a computer? **Use a file on
-   the phone** takes the stock dump, a `JH_5408…bin` file of either size the app accepts (0x1E0000 or 0x169000
-   bytes), or a copy already on the card. If the file chosen is candidate C, A or B, the app refuses it: the file is
-   dropped, and the write and the copy stay off ([why](../docs/03-FLASH-CANDIDATES.md)).
+   the ARM vector table at 0x200, must be your backup's in a file laid out like it, and otherwise that of the known
+   build whose layout the file has). When your backup is itself one of the known builds, as a camera flashed with
+   the public restore file reads, a matching set-up is a warning too: it proves a fit only if the backup was read
+   before the camera was ever flashed. With a backup of a build nobody has published, the same set-up is a pass only
+   when the program around it is your backup's too, and a warning that says so otherwise. Without a backup, the
+   sensor line is a warning that cannot be cleared and the write stays off. Offline, or made a file on a computer?
+   **Use a file on the phone** takes the stock dump, a `JH_5408…bin` file of either size the app accepts (0x1E0000 or
+   0x169000 bytes), or a copy already on the card. If the file chosen is candidate C, A or B, the app refuses it: the
+   file is dropped, and the write and the copy stay off ([why](../docs/03-FLASH-CANDIDATES.md)).
 2. **Connect the camera.** Plugging the cable into a switched-off camera switches it on, and if its card holds an
    update file the camera flashes that file again. So the app always has you connect the camera this way: switch
    it off if it is on, take the card out, switch the camera on with its power key, wait 10 seconds, put the card
@@ -167,13 +172,14 @@ that flash is wanted.
 
 `./build.sh [versionName] [versionCode]` with `SDK` pointing at an Android SDK that has `platforms;android-35`
 and `build-tools;35.0.0`, a JDK 17 or newer, and `zip`. The version name defaults to the one in `VERSION`. It runs
-the checker's, the card rules' and the file builder's tests on the plain JVM first (`test/UpdateCheckTest.java`,
-`test/CardStateTest.java` and `test/CandidatesTest.java`). Set `CHARMERA_STOCK_IMAGE` to the public stock dump to
-have CandidatesTest make the restore file and the three withdrawn candidates and compare them with the published and
-reviewed files, and to check that the checker finds the dump's build marks by content; set
-`CHARMERA_FILM_MODS_RESTORE` to the film-mods project's public restore file to have UpdateCheckTest check that the
-checker names that build; set `CHARMERA_UPDATE_FILES` to real update files to check those too. At commit 7a12da2 the
-three report 85, 22 and 25 passed with the first two set, and 84, 22 and 17 with neither. Then it builds and signs
+the tests of the checker, the card rules, the file builder and the write gate on the plain JVM first
+(`test/UpdateCheckTest.java`, `test/CardStateTest.java`, `test/CandidatesTest.java` and `test/WriteGateTest.java`).
+Set `CHARMERA_STOCK_IMAGE` to the public stock dump to have CandidatesTest make the restore file and the three
+withdrawn candidates and compare them with the published and reviewed files, and to check that the checker finds the
+dump's build marks by content; set `CHARMERA_FILM_MODS_RESTORE` to the film-mods project's public restore file to have
+UpdateCheckTest check that the checker names that build, and CandidatesTest that it compares that file's vector table
+with its own build's; set `CHARMERA_UPDATE_FILES` to real update files to check those too. Each test prints how many
+of its checks passed and failed, and stops the build when one fails. Then it builds and signs
 `out/charmera-card-<version>.apk`. No Gradle. The workflow downloads the public dump and the film-mods restore file
 from upstream for every build, checks their SHA-256, and runs those checks before it publishes; it does not set
 `CHARMERA_UPDATE_FILES`.

@@ -42,10 +42,11 @@ What identifies a build, and what does not. The version stamp `202505201029` is 
 public dump and the build on the charmera-film-mods author's camera, which has different bytes (its author confirmed
 it from their own dump on 2026-11-06, and that project's public restore file holds it). The two share the build
 string `JH5408  20250520` too. Their compile dates differ: `Oct 14 2025` in the public dump, `Nov 19 2025` in the
-film-mods build, so the factory rebuilt the firmware under one stamp. A different compile date shows that two builds
-differ, never that a file fits a camera, and the same date would not show that two builds are the same. The
-film-mods author's boot screen and body are not known; the yellow boot screen and the "original series" body did not
-tell the public build from what the 2026-11-06 camera needed. So:
+film-mods build, and so do the source-tree folders in their source paths, `v006` and `v008_test` (below), so the
+factory rebuilt the firmware under one stamp. A different compile date shows that two builds differ, never that a
+file fits a camera, and the same date would not show that two builds are the same. The film-mods author's boot screen
+and body are not known; the yellow boot screen and the "original series" body did not tell the public build from what
+the 2026-11-06 camera needed. So:
 
 - The toolkit names a build by a fingerprint over its bytes: SHA-256 of 0..0x169000 (the span a 0x169000-byte file
   writes) for the public dump, `bffddd53…`; SHA-1 `d1f21227…` and byte sum `0852B369` over the same span, which is
@@ -60,23 +61,41 @@ tell the public build from what the 2026-11-06 camera needed. So:
   writes and ends with `ff ff`. The code literal that holds the init table's RAM address (file offset minus 0x200) is
   searched for at 4-byte-aligned offsets only: in the public dump it is at 0x7B91C, in the film-mods build at 0x7B5A8.
   A table the code refers to is preferred. More than one referenced init table with different contents is a FAIL
-  ("several sensor programs"). Without `--stock`, a table the code does not refer to is a WARN; with `--stock`, outside
-  the donor route, a file whose table is not referred to fails when the one in `--stock` is. The app follows the same
-  rule.
-- The ARM vector table at 0x200..0x240 is where the camera starts. In a file laid out like its reference (the stamp,
-  the build string and the sensor table at the same offsets) it must be byte-identical to the reference's: `--stock`
-  or the app's backup when given, otherwise the known build the file is laid out like, by a SHA-256 of those bytes
-  kept for each known build (the two known builds carry the same 64 bytes, SHA-256 `cf38b73d…`, VERIFIED). A
-  difference is a FAIL that `stage` cannot be told to accept, since a camera with a broken reset vector may not start
-  far enough to run the card updater again. When no layout matches, a WARN says the table could not be compared.
+  ("several sensor programs") in the file and in the reference (`--stock`, or the app's backup), on every route, the
+  donor route included; no flag clears it. Without `--stock`, a table the code does not refer to is a WARN; with
+  `--stock`, outside the donor route, a file whose table is not referred to fails when the one in `--stock` is. The
+  app follows the same rule.
+- The source-tree folder is a build mark too. The firmware keeps the paths of some of its source files, such as
+  `G:\code\2247\5408\v006\host\tcpip\lwip-1.4.0\src\netif\etharp.c` in the public dump and
+  `G:\code\2247\5408\v008_test\host\init.c` in the film-mods build. The folder after `\2247\5408\` is `v006` in the
+  public build and `v008_test` in the film-mods build, 27 times in each (VERIFIED). The toolkit finds it by content,
+  as the folder name that most often follows `\2247\5408\` in bytes 0..0x120000, records it for each known build, and
+  reports it with the other marks: `verify`'s `series` line, `inspect`, `pack` and the app's build-marks line. What it
+  proves: a different folder shows a different build. The same folder does not show the same build, and neither says
+  whether a file fits a camera.
+- The ARM vector table at 0x200..0x240 is where the camera starts. It is checked on every route, the donor route
+  included, in this order, by `verify` and by the app alike. The same 64 bytes as the reference's (`--stock`, or the
+  app's backup) are a PASS. A file laid out like the reference (the stamp, the build string and the sensor table at
+  the same offsets) with other bytes there is a FAIL. Otherwise the file is compared with the known build whose
+  layout it has, by a SHA-256 of those bytes kept for each known build (the two known builds carry the same 64 bytes,
+  SHA-256 `cf38b73d…`, VERIFIED), and a mismatch is a FAIL; without a reference this is the only comparison. Only
+  when no known layout matches either does a WARN say the table could not be compared. No flag overrides a FAIL here,
+  since a camera with a broken reset vector may not start far enough to run the card updater again.
 - A build match says which public image a file was made from. It does not say whether the file fits the camera it
   goes into: both known builds carry the same 61-write sensor table, byte for byte, and drive one sensor without
   reading which is fitted, and the public dump left an original-series camera unable to take pictures. The one check
   that does say something about a camera is `verify --stock <a dump of that camera>`, which compares the file's
   sensor table and software with the camera's own, and only when that dump was read before the camera was ever
-  flashed. When `--stock`, or the app's backup, is itself one of the known builds (as the read of a camera flashed
-  with the public restore file is), a matching sensor table is a WARN, not a PASS; a match with a build nobody has
-  published stays a PASS.
+  flashed. When the reference (`--stock`, or the app's backup) carries a known build's fingerprint over 0..0x169000,
+  as the read of a camera flashed with the public restore file does, a matching sensor table is a WARN, not a PASS:
+  it shows a fit only if that read was made before the camera was ever flashed. With a reference of a build nobody
+  has published, a matching table is a PASS only when bytes 0..0x120000 (the code and its data) match the
+  reference's too; when only the table matches, a WARN says that the program around the table differs, since a
+  different program can drive the same sensor differently. A table that differs from the reference's, or a reference
+  with no sensor table of the kind the known builds use, is a FAIL outside the donor route that no flag clears,
+  `--allow-unknown-build` included; the donor route is the one deliberate way past it. `--allow-unknown-build`
+  covers only a file without the build marks and, without `--stock`, a table that is not the known builds'. `verify`
+  and the app follow the same rule.
 
 ## Update file (`JH_5408<stamp>_<sum>.bin`)
 

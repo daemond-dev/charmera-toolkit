@@ -37,6 +37,7 @@ Examples for every command are in the [Command reference](docs/07-USAGE.md).
 | `stage` | the card | Re-verify an update file against your backup, copy it to the card root and read it back. |
 | `card-check` / `card-fix` | nothing / the card | Diagnose and fix the exFAT dirty-bit problem that stops phones reading the card. |
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
+| `photo-id` | nothing | Say which kind of firmware wrote a photo, from its header alone: a different header shows a different build. |
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
 
 On a phone, the [Charmera Card app](android/README.md) does the card part with no computer: it makes the published
@@ -55,18 +56,19 @@ Ground rules, and what each command does about them:
   stamp or the body. A dump of the camera's own chip read before it was ever flashed is the one file known to fit it;
   any read of the chip is the way back to what it held when it was read, but a read taken after a flash shows what the
   camera runs now, not what fits it. `verify --stock <that dump>` is the one check that compares a file with your
-  camera, and `--stock` must be a complete read of a chip (2 MiB, with the build marks). The app refuses to write
-  without a backup on record. `stage` does not refuse: without `--stock` it shows a WARN line saying that no backup of
-  this camera was given, so nothing compares the file with its own firmware and a file that does not fit cannot be
-  undone, says the same in its plan, and still writes a file that passes (the owner's decision of 2026-11-06). Give
-  it `--stock` every time.
+  camera, and `--stock` must be a complete read of a chip (exactly 2 MiB, starting with `SPII`, with the build string
+  and the stamp). The app refuses to write without a backup on record. `stage` does not refuse: without `--stock` it
+  shows a WARN line saying that no backup of this camera was given, so nothing compares the file with its own firmware
+  and a file that does not fit cannot be undone, says the same in its plan, and still writes a file that passes (the
+  owner's decision of 2026-11-06). Give it `--stock` every time.
 - Read-only by default. Nothing is written to a card, a chip or a camera without a typed confirmation: `stage`, the
   one command that puts a file on a card, and `card-fix` ask you to type the target back, and `restore` waits for the
-  word RESTORE. `restore` also reads the chip twice before it writes, keeps that read as a backup, and has flashrom
-  write a private copy of the bytes it checked. `pack` and the mod commands write files on the computer only: `pack`
-  refuses an `--out` that is a drive root, a mount point or on removable media, or that holds a DCIM folder or another
-  `JH_*.bin`; `sounds`, `settings set`, `tweak`, `frames` and `resources` refuse an `--out` named like an update file
-  (`JH_*.bin`, in any letter case) or in a folder that holds a DCIM folder or a `JH_*.bin`.
+  word RESTORE. `restore` also reads the chip twice before it writes, keeps that read in its `--out` folder as a
+  backup, and has flashrom write a private copy of the bytes it checked. `pack` refuses an `--out` that is a drive
+  root, a mount point or on removable media, or that holds a DCIM folder or another `JH_*.bin`. The mod commands
+  (`sounds`, `settings set`, `tweak`, `frames` and `resources`) refuse an `--out` named like an update file
+  (`JH_*.bin`, in any letter case, also with trailing dots or spaces) and an `--out` in a folder that holds a DCIM
+  folder or a `JH_*.bin`.
 - Anything that produces a flashable or modified image needs an explicit flag and prints its plan first.
 - `pack` refuses an input without the Charmera build marks. `verify` names a build by a fingerprint over its bytes
   (never by the version stamp, which two different builds share) and says what a match does and does not prove. It
@@ -126,7 +128,8 @@ files can be given, and CI's tests workflow downloads both from upstream at fixe
   not that it fits.
 - `CHARMERA_FILM_MODS_RESTORE`: the film-mods project's public restore file (release Charmera_Restore,
   `JH_5408202505201029_0852C329.bin`, SHA-256 `5b352e46…`), for the tests that name that build (`test_core`,
-  `test_android` and the app's `UpdateCheckTest`). CI goes on without it, with a warning, when it cannot be fetched.
+  `test_android` and the app's `UpdateCheckTest` and `CandidatesTest`). CI goes on without it, with a warning, when it
+  cannot be fetched.
 
 No test uses the second public dump (Project-Sirius). The app's tests run on the JVM and read `CHARMERA_UPDATE_FILES`
 as well, which CI does not set ([the app's Build section](android/README.md#build)).

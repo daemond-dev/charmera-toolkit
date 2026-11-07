@@ -180,8 +180,8 @@ them, or extract into an empty folder. It never replaces the input file.
 
 `replace` never writes to the input file and refuses an existing `--out` without `--overwrite`. Its output is a full
 image that must not go on a card as it is, so it also refuses an `--out` named like an update file (`JH_*.bin`, in any
-letter case) and an `--out` in a folder that holds a DCIM folder or a `JH_*.bin`. It writes
-each of the four encoded files into its slot followed by 0xFF padding to the budget, so every byte outside
+letter case, also with trailing dots or spaces) and an `--out` in a folder that holds a DCIM folder or a `JH_*.bin`.
+It writes each of the four encoded files into its slot followed by 0xFF padding to the budget, so every byte outside
 those four slots is unchanged. The software region therefore differs from your backup, which `verify`
 reports as a FAIL unless you pass `--allow-modified`: with it, the same line is a WARN for the intended mod
 (it still names the regions that changed) and every other check runs as usual. Without the flag, verify

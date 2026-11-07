@@ -19,45 +19,55 @@ charmera card-check \\.\PhysicalDrive2  # Windows (run as administrator)
 charmera exif-fix --source E:\ --out C:\Photos\charmera
 charmera resources list my_backup.bin                                # all 43 resource entries, kinds and lengths
 charmera resources extract my_backup.bin --out resources/            # each entry trimmed to its real length
+charmera photo-id this-camera/PICT0001.jpg donor/PICT0001.jpg        # which kind of firmware wrote these photos
 ```
 
 `inspect` tells you what a file is: dump or update file, which build it carries (named by a fingerprint over its
 bytes, never by the version stamp, which two different builds share), where its build marks and its image-sensor
-set-up table were found, whether its software region is byte-identical to the public dump's, what the resource pack
-and sound slots contain, which settings record is current (and whether UI sounds are on), and whether it holds another
-owner's photos.
+set-up table were found, with the compile date and the source-tree folder, whether its software region is
+byte-identical to the public dump's, what the resource pack and sound slots contain, which settings record is current
+(and whether UI sounds are on), and whether it holds another owner's photos.
 
 `verify` is the gate before a card. It checks the filename checksum, the stamp, the size rule, the magic, the build
 marks, the sensor table, the ARM vector table and the software region, and says what each result proves; it refuses
 the withdrawn candidates C, A and B by their SHA-256. Always give `--stock <a dump of the camera the file goes into>`:
-the sensor table and the software region are compared with it, and the stamp in the file's name must differ from the
-one in it (`stamp-camera`); that comparison is the only check that says anything about your camera. `--stock` must
-be a complete read of a chip (exactly 2 MiB, starting with `SPII`, with the build string and the stamp), or `verify`
-fails; one that is byte for byte a public dump is a WARN, since it may be this camera's own read after a flash with
-the public restore file. Only a dump read before the camera was ever flashed shows what fits it: when `--stock` is one
-of the known builds, a matching sensor table is a WARN, not a PASS. A FAIL line means do not use the file.
+the sensor table, the ARM vector table and the software region are compared with it, and the stamp in the file's name
+must differ from the one in it (`stamp-camera`); that comparison is the only check that says anything about your
+camera. `--stock` must be a complete read of a chip (exactly 2 MiB, starting with `SPII`, with the build string and
+the stamp), or `verify` fails; one that is byte for byte a public dump is a WARN, since it may be this camera's own
+read after a flash with the public restore file. Only a dump read before the camera was ever flashed shows what fits
+it: when `--stock` carries a known build's fingerprint, a matching sensor table is a WARN, not a PASS. When `--stock`
+is a build nobody has published, a matching table is a PASS only when bytes 0..0x120000 (the code and its data) are
+`--stock`'s too; when only the table matches, a WARN says that the program around it differs, since a different
+program can drive the same sensor differently. A FAIL line means do not use the file.
 
 `--allow-modified` accepts a software region that differs from the reference: any mod of the code or the resources
 needs it, and the line is then a WARN, never a PASS. Settings-only files pass without it. `stage` always uses it.
 `--allow-unknown-build` lets through a file whose build marks are not all found, or, without `--stock`, a sensor table
 that is not the known builds'; the line it lets through is a WARN, the software comparison with `--stock` still runs,
-and a WARN says when no sensor comparison was possible. `--allow-odd-size` lets through a size other than the two in
-use, 0x1E0000 and 0x169000 bytes, as a WARN, and the `final-erase` line names the block the updater would then erase
-(a 2 MiB file still fails: its final erase wraps to block 1). `stage` never gives either flag.
+and a WARN says when no sensor comparison was possible. It does not let through a sensor table that differs from
+`--stock`'s, or a `--stock` with no sensor table of the kind the known builds use (below). `--allow-odd-size` lets
+through a size other than the two in use, 0x1E0000 and 0x169000 bytes, as a WARN, and the `final-erase` line names the
+block the updater would then erase (a 2 MiB file still fails: its final erase wraps to block 1). `stage` never gives
+either flag.
 
 What no flag accepts:
 
-- A sensor table that differs from `--stock`'s (`sensor-table`): no toolkit mod changes that table, and a firmware
-  that drives a sensor the camera does not have leaves it unable to take pictures. The one way past it is the donor
-  route, `--donor <a read of another, working camera's chip>`, for a camera whose own firmware is gone and does not
-  fit it; it needs `--stock`, takes only the donor's firmware unchanged, and says that the fit to this camera is
-  unknown ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
-- More than one sensor program in a file, and, with `--stock`, a file whose sensor table the code does not refer to
-  while the one in `--stock` is referred to. Without `--stock`, a table the code does not refer to is a WARN
-  ([Image layout](11-FORMAT.md#build-identity)).
+- Outside the donor route, a sensor table that differs from `--stock`'s, or a `--stock` with no sensor table of the
+  kind the known builds use (`sensor-table`); `--allow-unknown-build` does not clear either. No toolkit mod changes
+  that table, and a firmware that drives a sensor the camera does not have leaves it unable to take pictures. The one
+  way past it is the donor route, `--donor <a read of another, working camera's chip>`, for a camera whose own
+  firmware is gone and does not fit it; it needs `--stock`, takes only the donor's firmware unchanged, and says that
+  the fit to this camera is unknown ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
+- More than one sensor program that the code refers to, with different contents, in the file or in `--stock`, on
+  every route (`several sensor programs`): which one sets up the sensor cannot be told. Outside the donor route, with
+  `--stock`, also a file whose sensor table the code does not refer to while the one in `--stock` is referred to.
+  Without `--stock`, a table the code does not refer to is a WARN ([Image layout](11-FORMAT.md#build-identity)).
 - An ARM vector table (bytes 0x200..0x240, where the camera starts) that differs from the reference's in a file laid
-  out like it: a camera flashed with a broken one may not start far enough to run the card updater again. For a file
-  laid out otherwise, a WARN says the table could not be compared.
+  out like it, or, in a file laid out otherwise, from that of the known build whose layout it has, on every route,
+  the donor route included: a camera flashed with a broken one may not start far enough to run the card updater
+  again. Only a file laid out like neither the reference nor a known build, whose table is not the reference's, gets
+  a WARN that says the table could not be compared.
 - A damaged resource entry (`resource-slots`): every entry's slot must lie inside the resource area and the file,
   must not be erased, and must hold the kind its name says (a WAV with fmt and data chunks that fits its slot, a JPEG
   with an FF D9 end marker inside its slot, a GPZP stream that inflates, matches its CRC and length trailer and uses
@@ -67,6 +77,19 @@ What no flag accepts:
 
 `diff` compares each resource entry over the larger of its two slots, so an entry erased or cut off in one file is
 named (`ERASED in B`, `MISSING from B`) instead of being skipped.
+
+`photo-id` says which kind of firmware wrote a photo, from the photo alone: it reads each file only up to the start of
+the image data (the SOS segment) and reports the kind of header, the size, the colour sampling, the JPEG quality on
+the IJG scale, the comment (COM) and the EXIF Make, Model and Software, then a conclusion for each file. Both known
+builds write a still photo with a 1,424-byte header that holds an EXIF block (Make `Generalplus`, Model `CBB3`,
+Software `20150615`) and the comment `GPEncoder` padded with spaces (VERIFIED in the public dump; the film-mods build
+holds the same header template and the code that fills it, VERIFIED by comparing the bytes). A photo the 2026-11-06
+camera took on its original firmware has a bare 624-byte header instead, with no EXIF block and the comment
+`GPEncoder` alone: still photos with that header come from neither known build. A different header proves a
+different build; the same header does not show the same build and proves nothing about the image sensor. The size
+and the quality follow the camera's settings and whether a card was in (VERIFIED in the public build), so they say
+nothing on their own. That is how a would-be donor's photos are compared with this camera's own pre-flash photos
+without opening anything ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 
 ## Commands that write files on your computer
 
@@ -118,9 +141,9 @@ per-strip table when the result does not fit the slot's byte budget; see [Photo 
 The gate flags exist so that nothing flashable appears by accident. A modified image goes through `pack` and then `verify`
 before it is allowed near a card. The mod commands (`sounds`, `settings set`, `tweak`, `frames`, `resources`) write a
 full image of their input's size, which must never go on a card as it is, so they refuse an `--out` whose name looks
-like an update file (`JH_*.bin`, in any letter case) and an `--out` in a folder that holds a DCIM folder or a
-`JH_*.bin`. `inspect` says the same of a file named like an update file whose size is not 0x1E0000 or 0x169000
-bytes: it must not go on a card.
+like an update file (`JH_*.bin`, in any letter case, also with trailing dots or spaces, which Windows drops) and an
+`--out` in a folder that holds a DCIM folder or a `JH_*.bin`. `inspect` says the same of a file named like an update
+file whose size is not 0x1E0000 or 0x169000 bytes: it must not go on a card.
 
 `resources replace` swaps a JPEG resource, such as the boot logo, only for a baseline JPEG with the same size,
 component count and subsampling as the original that fits the slot; see [Resource pack and boot logo](09-RESOURCES.md). A custom boot logo has
@@ -132,7 +155,7 @@ not been tried on a camera.
 charmera stage out/restore/JH_5408<stamp>_<sum>.bin --card E: --stock my_backup.bin                         # Windows
 charmera stage out/restore/JH_5408<stamp>_<sum>.bin --card /run/media/deck/<label> --stock my_backup.bin    # Steam Deck
 charmera stage out/restore/JH_5408<stamp>_<sum>.bin --card E: --stock my_backup.bin --plan-only             # all checks, writes nothing
-charmera restore --image my_backup.bin --backup <backup of the chip as it is now>.bin    # the chip, through a CH341A clip
+charmera restore --image my_backup.bin --out backups/                                                       # the chip, through a CH341A clip
 ```
 
 `stage` runs `verify` again, refuses a card that already holds another update file, copies the file to the card
@@ -142,10 +165,13 @@ still writes a file that passes (the owner's decision of 2026-11-06). See [Putti
 
 `probe` and `backup` ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly))
 only read the chip, and print a checklist before they run: a 3.3 V programmer (never an unmodified black CH341A), the
-battery lead lifted, pin 1 of the clip on the chip's dot. `restore` reads the chip twice before it writes and refuses
-when the reads differ, keeps that read as a backup with its `.sha256` and manifest, shows the image's sensor table
-next to the read's and asks a second time when they differ, and has flashrom write a private copy of the bytes it
-checked, never your file in place.
+battery lead lifted, pin 1 of the clip on the chip's dot. `restore` prints the same checklist and reads the chip twice
+before it writes, and writes nothing when the reads differ. It keeps that read in the folder given as `--out`, which
+it requires, as `<label>_<UTC time>.bin` with a `.sha256` and a `.manifest.json` (`--label` defaults to
+`before-restore`), shows the 64 KiB blocks in which the image differs from it, and writes nothing when the chip already
+holds the image. It shows the image's sensor table next to the chip's and asks for a second word, `DIFFERENT`, when
+they differ or the chip holds none of the kind the known builds use, and has flashrom write a private copy of the
+bytes it checked, never your file in place ([Recovery, section B](02-RECOVERY.md#restore)).
 
 `card-fix` and `stage` print what they are about to do and wait for you to type the target back; `restore` waits for the word RESTORE. See [SD card problems](05-CARDS.md) and
 [Recovery](02-RECOVERY.md).

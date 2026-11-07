@@ -12,7 +12,7 @@ The Generalplus firmware writes an EXIF block that standard tools reject, and a 
 video. These defects were documented and fixed by two community projects, jphastings/charmera (Go) and
 RickCaleg/charmera-importer (C#); `charmera_toolkit/exif.py` is a port of their logic.
 
-In every JPEG:
+In every JPEG the known builds write:
 
 - `DateTime`, `DateTimeOriginal` and `DateTimeDigitized` are written as `2026:03:03:12:16:29`, a colon
   where EXIF wants a space. Readers reject the value, so the capture time is lost and photo libraries
@@ -25,14 +25,24 @@ In every JPEG:
   photos under "Generalplus CBB3".
 - Some files carry no usable date at all.
 
-In every AVI (Motion-JPEG video plus PCM audio in a RIFF container):
+A photo the 2026-11-06 camera took on its original firmware, before it was flashed, has no EXIF block at
+all (VERIFIED from its header): nothing in it is wrong, and nothing in it gives a date. `exif-fix` gives
+such a photo a fresh EXIF block dated from the file's modification time, and its line says `no EXIF in
+source`. `photo-id` in the [Command reference](07-USAGE.md) says which kind of header a photo has.
 
-- The recording date inside the file is always 2010-06-29, stored as text in the standard AVI date
-  chunks: `IDIT` in the header list (`hdrl`, C `asctime` form, `Tue Jun 29 12:00:00 2010`) and `ICRD` in
-  the `INFO` list (ISO form, `2010-06-29`). ffmpeg and ffprobe report it as `creation_time`, so every
-  Charmera video sorts into 2010.
+In every AVI the public build writes (Motion-JPEG video plus PCM audio in a RIFF container):
+
+- The recording date inside the file is always 2010-06-29. The public build writes an `INFO` list whose
+  `ICRD` (creation date) chunk holds the fixed text `2010-06-29`, next to `ISRC`, `IART` and `ICOP` chunks
+  that hold `Generplus` (sic), and it writes no `IDIT` chunk anywhere (VERIFIED in the public dump by static
+  analysis: the code that builds the list, the strings, and no `IDIT` tag built byte by byte either). The
+  film-mods build carries the same strings and no `IDIT` string (VERIFIED by search; its code was not
+  traced). Software that takes a video's date from `ICRD` sorts every such video into 2010.
+- The `IDIT` chunk (in the header list `hdrl`, C `asctime` form, `Tue Jun 29 12:00:00 2010`) comes from
+  the community tools `exif-fix` was ported from, which expect it in Charmera videos and rewrite it when it
+  is there. This project has not seen the Charmera write one; `exif-fix` handles it too, if a file has it.
 - The real recording time is the file's modification time, which the camera writes correctly to the
-  card.
+  card (REPORTED by the community tools; not traced in the firmware).
 
 ## The fix
 
@@ -53,9 +63,10 @@ Photos. The old EXIF block is never edited in place, because its offsets cannot 
    and is not invented). `Orientation` is copied when it is 1 to 8; any other value becomes 1 and the
    report says so (`orientation 1 (source had 9)`). `YCbCrPositioning` is copied from the source (the
    camera writes 2, co-sited); 1 when absent or invalid.
-5. The new segment replaces the old APP1, or goes right after the JFIF APP0 when there was none. A file
-   that carries more than one Exif APP1 loses them all and gets the one rebuilt block, at the position of
-   the first. Every other byte of the file, including the compressed image data, is copied unchanged.
+5. The new segment replaces the old APP1; when there was none, it goes right after the JFIF APP0, or right
+   after the start marker in a file without one, as in a photo with no EXIF block. A file that carries
+   more than one Exif APP1 loses them all and gets the one rebuilt block, at the position of the first.
+   Every other byte of the file, including the compressed image data, is copied unchanged.
 
 `Make`/`Model` become `Kodak`/`Charmera`; `--keep-make` keeps the camera's `Generalplus`/`CBB3`.
 
@@ -69,11 +80,14 @@ every other tag this tool does not write, and label another camera's picture Kod
 Charmera photos whose fingerprints were stripped by some earlier tool.
 
 Videos. The default, `--video fix-date`, copies the AVI and rewrites the date chunks in the copy, in
-place: same text form (asctime, EXIF or ISO, trailing newline kept), same byte length, NUL-padded, so
-no other byte of the file moves and the RIFF structure stays valid. Only a chunk holding exactly
-2010-06-29 is rewritten; a genuine date is left alone and reported. A chunk too small for the new text
-(which cannot happen with the forms above, since they are fixed width) is left alone and reported rather
-than truncated into something unreadable.
+place. It looks for `IDIT` and `ICRD` chunks wherever they sit in the file's lists (it does not read the
+frame data, `movi`), and rewrites each one that holds the date 2010-06-29 with the file's modification
+time: same text form (asctime, EXIF or ISO, trailing newline kept), same byte length, NUL-padded, so no
+other byte of the file moves and the RIFF structure stays valid. In a video of the public build that is
+the one `ICRD` chunk. A genuine date is left alone and reported, and a file with neither chunk is copied
+unchanged with a line that says so. A chunk too small for the new text (which cannot happen with the
+forms above, since they are fixed width) is left alone and reported rather than truncated into something
+unreadable.
 
 `--video transcode` runs ffmpeg instead: `-c:v libx264 -crf 26 -preset medium -c:a aac -b:a 128k
 -ar 44100 -metadata creation_time=<mtime>` into an MP4, the same settings the Go tool uses. Without
@@ -130,7 +144,7 @@ Example:
 $ charmera exif-fix --source /media/me/CHARMERA --out ~/Pictures/charmera
 PICT0001.JPG -> IMG_20260303_121629_4f1c9a0b7e2d3c55.jpg: 1440x1080, orientation 1, date 2026:03:03 12:16:29 from exif, extra colon repaired, make/model Kodak/Charmera (was Generalplus/CBB3)
 IMG_0007.JPG -> IMG_20260303_121655_0c7d2e91b4a6f3e8.jpg: 4032x3024, not a Charmera photo, copied unchanged
-PICT0002.AVI -> VID_20260303_121702_a90b3e77c1d2f004.avi: 1440x1080, date 2026:03:03 12:17:02 from mtime replaces 2010-06-29 in IDIT, ICRD
+MOVI0002.AVI -> VID_20260303_121702_a90b3e77c1d2f004.avi: 1440x1080, date 2026:03:03 12:17:02 from mtime replaces 2010-06-29 in ICRD
 Done: 1 photos fixed, 1 photos copied unchanged (not Charmera), 1 videos date-fixed, 0 skipped (already imported into /home/me/Pictures/charmera), 0 failed
 ```
 
@@ -146,16 +160,17 @@ end of the block and an InteropIFD pointer past it, right before SOS, no APP0) a
 rebuilt APP1 lands at the same offset and the pixels decode identically. Set `CHARMERA_STOCK_IMAGE` to
 the path of a public stock dump to run the same checks on the two photos stored inside it (at
 `0x180000` and `0x1A5800`); that test is skipped when the variable is unset. When ffmpeg is on PATH the
-suite also generates a real MJPEG/PCM AVI, injects the camera's date chunks the way the C# importer lays
-them out, and confirms with ffprobe that `creation_time` changes from 2010-06-29 to the file time while
-the file still decodes.
+suite also generates a real MJPEG/PCM AVI, injects an `IDIT` and an `ICRD` chunk the way the C# importer
+lays them out (the two forms the rewrite handles), and confirms with ffprobe that `creation_time` changes
+from 2010-06-29 to the file time while the file still decodes.
 
 ## Limitations
 
-- The AVI chunk layout (IDIT in `hdrl` as asctime, ICRD in `INFO` as an ISO date) is what the C#
-  importer's code and tests expect of real Charmera files; it was not re-verified here against a video
-  from an actual camera. The rewrite handles every form that code accepts, and leaves anything else
-  untouched, so an unexpected layout results in an unchanged copy and a line saying so.
+- What the public build writes into a video, `ICRD` in `INFO` as an ISO date and no `IDIT`, comes from
+  its code, not from a video an actual camera recorded; none has been examined here. The C# importer's
+  code and tests expect `IDIT` in `hdrl` as asctime as well. The rewrite handles every form that code
+  accepts, and leaves anything else untouched, so an unexpected layout results in an unchanged copy and a
+  line saying so.
 - `--video transcode` passes the file's modification time to ffmpeg as a local time without a zone, like
   the camera's clock. ffmpeg converts it from the computer's local time to UTC and stores it with a `Z`
   suffix (`2026-08-07T09:45:12.000000Z` for a file recorded at 18:45:12 in Tokyo). Players then show the

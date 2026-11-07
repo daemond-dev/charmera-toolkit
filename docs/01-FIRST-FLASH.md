@@ -83,7 +83,9 @@ firmware: the donor route in [Recovery, section D](02-RECOVERY.md#the-donor-rout
 Do not flash. The public dump is a copy of one camera; it is not known to fit yours, and a flash with it cannot be
 undone without your own backup. A camera that already lost its original firmware this way can still be flashed
 through the card, but only a dump from a working camera with the same sensor can fix it (the donor route above), and
-reading its current chip first is still what the rule asks.
+reading its current chip first is still what the rule asks. Choosing a donor can start without a clip: `photo-id`
+compares a would-be donor's photos with the ones this camera took before its flash, without opening either camera
+([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 
 ## 2. Pick the file
 
@@ -121,30 +123,37 @@ charmera diff <your backup> out/JH_5408<stamp>_<sum>.bin
 
 Always give `--stock <your backup>`: it is the one comparison that says something about your camera, and it says
 what fits only for a backup read before the camera was ever flashed. It must be a complete read of a chip, exactly
-2 MiB with the build marks, as `backup` writes it; anything else (an update file, a cut-off read) is a FAIL. A
-`--stock` that is byte for byte a public dump is a WARN: it may be this camera's own read after a flash with the
-public restore file, and then it shows what the camera runs, not what fits it.
+2 MiB, starting with `SPII`, with the build string and the stamp, as `backup` writes it; anything else (an update
+file, a cut-off read) is a FAIL. A `--stock` that is byte for byte a public dump is a WARN: it may be this camera's
+own read after a flash with the public restore file, and then it shows what the camera runs, not what fits it.
 
 `verify` fails closed. A FAIL line means the file does not go on a card. The `sensor-table` line compares the file's
-image-sensor set-up table with your backup's, found by content in both; a difference is a FAIL that no flag clears,
-because that difference is what leaves a camera unable to take pictures (the one deliberate way past it is the donor
-route, [Recovery, section D](02-RECOVERY.md#the-donor-route)). A match is a PASS when your backup is a build nobody
-has published, and a WARN when it is one of the known builds ([After a flash](#after-a-flash)). The `build` line names
-the known build a file was made from, or says the build is unknown, and adds what a build match proves: which public
-image the file came from, not whether it fits your camera. The stamp in the file's name must differ from the one in
-your backup (`stamp-camera`), or the camera would ignore the file.
+image-sensor set-up table with your backup's, found by content in both. A table that differs from your backup's is a
+FAIL that no flag clears, `--allow-unknown-build` included, because that difference is what leaves a camera unable to
+take pictures, and so is a backup with no sensor table of the kind the known builds use, which leaves nothing to
+compare the file with; the one deliberate way past both is the donor route
+([Recovery, section D](02-RECOVERY.md#the-donor-route)). `--allow-unknown-build` covers only a file without the build
+marks and, without `--stock`, a table that is not the known builds'. A match is a WARN when your backup is one of the
+known builds ([After a flash](#after-a-flash)). When your backup is a build nobody has published, a match is a PASS
+only when the program around the table (bytes 0..0x120000, the code and its data) is your backup's too, and a WARN
+that says the program differs otherwise: a different program can drive the same sensor differently. The `build` line
+names the known build a file was made from, or says the build is unknown, and adds what a build match proves: which
+public image the file came from, not whether it fits your camera. The stamp in the file's name must differ from the
+one in your backup (`stamp-camera`), or the camera would ignore the file.
 
 `verify` refuses any change to bytes 0..0x170000 (the code and the resource pack) unless you tell it the change is
 intended, which is what `--allow-modified` does; the `software-region` line is then a WARN, never a PASS. No flag
 accepts a change to the ARM vector table at 0x200..0x240, where the camera starts: a file laid out like your backup
 must carry it byte for byte, because with a broken one the camera may not start far enough to run the card updater
-again (for a file laid out otherwise, `verify` says it could not compare it). Settings-only files and files from
-`settings` or `sounds mute --method settings` leave that region as it is and pass without the flag. Anything built
-with `sounds mute --method pcm` or `both`, `sounds replace`, `frames`, `resources` or `tweak` needs it. With the flag,
-the `software-region` line lists the 64 KiB blocks that differ from your `--stock` file; they must be only the ones
-your mod was meant to change (for a PCM mute: 0x120000, 0x150000 and 0x160000). `diff` shows every region that
-differs from your backup, so you can confirm the change is the one you intended and nothing else moved. What the
-regions are and which rules `verify` enforces: [Image layout](11-FORMAT.md), especially
+again. A file laid out otherwise is compared with the known build whose layout it has, and a mismatch there is a
+FAIL too; only a file laid out like no known build, whose table is not your backup's, gets a WARN that says the table
+could not be compared. Settings-only files and files from `settings` or `sounds mute --method settings` leave the
+software region as it is and pass without `--allow-modified`. Anything built with `sounds mute --method pcm` or
+`both`, `sounds replace`, `frames`, `resources` or `tweak` needs it. With the flag, the `software-region` line lists
+the 64 KiB blocks that differ from your `--stock` file; they must be only the ones your mod was meant to change (for a
+PCM mute: 0x120000, 0x150000 and 0x160000). `diff` shows every region that differs from your backup, so you can
+confirm the change is the one you intended and nothing else moved. What the regions are and which rules `verify`
+enforces: [Image layout](11-FORMAT.md), especially
 [the update file rules](11-FORMAT.md#update-file-jh_5408stamp_sumbin).
 
 ## 4. Put it on the card
