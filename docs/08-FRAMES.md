@@ -171,17 +171,19 @@ charmera frames replace my_backup.bin --slot 1 --png frame.png --out framed.bin
     # prints the plan: see-through fraction, nudged pairs, every strip's size against its budget
 charmera frames replace my_backup.bin --slot 1 --png frame.png --thumb thumb.png --out framed.bin --i-understand-this-is-a-mod
 charmera pack --input framed.bin --out out/frames/ --i-understand-this-file-flashes-a-camera
-charmera verify out/JH_5408..._........bin --stock my_backup.bin --allow-modified
+charmera verify out/frames/JH_5408<stamp>_<sum>.bin --stock my_backup.bin --allow-modified
 ```
 
 `extract` refuses to write into a folder that already holds any of the files it would write (a second
 extract would otherwise replace the PNGs you edited there) and names them; pass `--overwrite` to replace
 them, or extract into an empty folder. It never replaces the input file.
 
-`replace` never writes to the input file and refuses an existing `--out` without `--overwrite`. It writes
+`replace` never writes to the input file and refuses an existing `--out` without `--overwrite`. Its output is a full
+image that must not go on a card as it is, so it also refuses an `--out` named like an update file (`JH_*.bin`, in any
+letter case) and an `--out` in a folder that holds a DCIM folder or a `JH_*.bin`. It writes
 each of the four encoded files into its slot followed by 0xFF padding to the budget, so every byte outside
 those four slots is unchanged. The software region therefore differs from your backup, which `verify`
-reports as a FAIL unless you pass `--allow-modified`: with it, the same line passes as the intended mod
+reports as a FAIL unless you pass `--allow-modified`: with it, the same line is a WARN for the intended mod
 (it still names the regions that changed) and every other check runs as usual. Without the flag, verify
 ends with "do not put this file on a card". Start from `extract`: the stock frame PNGs show what the camera
 draws, and editing one keeps you inside its budgets.

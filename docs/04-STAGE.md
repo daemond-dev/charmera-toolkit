@@ -7,7 +7,7 @@ SD card and proves the copy is good, so that the first time the camera sees the 
 anything could go wrong, and not before.
 
 ```
-charmera stage UPDATE.bin --card <mount point or drive letter> [--stock my_backup.bin] [--donor donor.bin] [--plan-only] [--i-know-what-i-am-doing]
+charmera stage UPDATE.bin --card <mount point or drive letter> --stock my_backup.bin [--donor donor.bin] [--plan-only] [--i-know-what-i-am-doing]
 ```
 
 ## Why a command for a file copy
@@ -30,14 +30,24 @@ guarantee.
 
 ## What it does, in order
 
-1. **verify.** Runs the same checks as `charmera verify FILE --allow-modified` and prints them with the same
-   tags (PASS, FAIL, WARN, INFO). A modified software region is allowed, because that is what a mod is; missing
-   build marks, a sensor table that differs from `--stock` (or, without `--stock`, from the known builds'), an odd
-   size, a wrong checksum, the shared stamp, a 2 MiB file are FAIL. Any FAIL refuses with exit 1. WARN lines are
-   shown and do not block. Always give `--stock my_backup.bin`, a dump of the camera this card goes into: it is what
-   the sensor table is compared with, and it makes the software-region line list the 64 KiB blocks that differ from
-   your own dump. No backup, no flash. Without `--stock`, `stage` prints that rule and still writes a file that passes
-   (the owner's decision of 2026-11-06); with `--donor` it does not write at all.
+1. **verify.** Runs the same checks as `charmera verify FILE --stock ... --allow-modified` and prints them with the
+   same tags (PASS, FAIL, WARN, INFO). A modified software region is allowed, because that is what a mod is, and is
+   shown as a WARN, never a PASS. These are FAIL, and no flag of `stage` changes that: missing build marks; a sensor
+   table that differs from `--stock`'s (or, without `--stock`, from the known builds'), outside the donor route below;
+   several sensor programs, or a table the code does not refer to while the one in `--stock` is referred to; an ARM
+   vector table (0x200..0x240) that differs from the one in `--stock` (without `--stock`, in the known build) when the
+   file is laid out like it; any size but 0x1E0000 and 0x169000 bytes (`stage` never passes
+   `--allow-odd-size`), a 2 MiB file included; a wrong checksum; the shared stamp, or with `--stock` the stamp found in
+   it (`stamp-camera`); a `--stock` that is not a complete read of a chip; and the withdrawn candidates C, A and B. Any
+   FAIL refuses with exit 1. WARN lines are shown and do not block. Always give `--stock my_backup.bin`, a dump of the
+   camera this card goes into: it is what the sensor table is compared with, and it makes the software-region line
+   list the 64 KiB blocks that differ from your own dump. Only a dump read before the camera was ever flashed shows
+   what fits it; when the dump is itself a known build, a matching sensor table is a WARN
+   ([The first flash, After a flash](01-FIRST-FLASH.md#after-a-flash)). No backup, no flash. Without `--stock`,
+   `stage` shows a WARN line among its checks (no backup of this camera was given, so nothing compares the file with
+   its own firmware, and a file that does not fit cannot be undone), says the same in the plan, and still writes a
+   file that passes: the owner decided on 2026-11-06 that it should warn, not refuse. With `--donor` and no `--stock`
+   it does not write at all.
    `--donor donor.bin` is the donor route for a camera whose own firmware is gone and does not fit it
    ([Recovery, section D](02-RECOVERY.md#the-donor-route)): it needs `--stock`, the file must be the donor's firmware
    unchanged, and its sensor table may then differ from `--stock`'s. The output says that nothing checks whether the
@@ -76,8 +86,10 @@ Before you start: only an original 2025 series body (matte, yellow Kodak boot sc
 CLOT edition, [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). Charge the battery fully, then unplug the
 cable. Programming takes 15 to 20 seconds and a power loss in that window leaves a camera that only a chip
 programmer can bring back ([Recovery](02-RECOVERY.md)). Whether the updater runs on USB power without a battery
-is not known. Any update file replaces the photos the camera stores in its own memory; the
-[flash candidates](03-FLASH-CANDIDATES.md) and any file packed with `--blank-photos` erase them.
+is not known. A 0x1E0000-byte file replaces the photos the camera stores in its own memory with the ones in the
+file; the [flash candidates](03-FLASH-CANDIDATES.md) and any file packed with `--blank-photos` erase them. A
+0x169000-byte file leaves the photo data in place, but the camera empties its photo list, so it no longer shows them
+and the next photo it stores overwrites them.
 
 1. Camera off. Put the card in. Then, and only then, power on: the updater arms only during the first five
    seconds after power-on and does not notice a card inserted later.
@@ -91,21 +103,39 @@ is not known. Any update file replaces the photos the camera stores in its own m
    you take it out of the reader. Leave the file there and the camera flashes it again at every power-on.
    `stage` on the same card refuses until the old file is gone.
 
+The camera's own USB-C cable can be the card reader: connected, the camera shows its card as a USB drive (seen on a
+phone; this project has not tried it on a computer). Plugging the cable into a switched-off camera switches it on and
+runs the updater from the card, so a camera whose card holds an update file flashes it again. Connect it the way the
+app does, for staging and for deleting the file alike: switch the camera off if it is on, take the card out, switch
+the camera on with its power key, wait 10 seconds (the updater looks only in the first five seconds after power-on),
+put the card back in, then plug in the cable. Eject the drive before you unplug the cable, and unplug the cable before
+step 1.
+
 If the camera ignores the file (no "Upgrade" screen, normal boot), the updater did not see it. The causes:
 the card went in after power-on (the updater looks only in the first five seconds); the file is in a folder
 instead of the card root; the name was changed on the way, so it no longer starts with `JH_5408` and the
 12-digit stamp (`stage` writes the exact name, a copy made by hand may not); or another `JH_5408*.bin` in the
 root was found first. Switch the camera off, take the card out, look at the card root on a computer, and run
 `stage` again: it refuses a card that holds another update file. The stamp is not the cause for a file
-`verify` passed. No toolkit command changes the stamp compiled into the firmware, so a camera on stock firmware
-or flashed with a toolkit-built file still runs `202505201029`, and `verify` refuses that stamp in a name.
+`verify` passed, unless the camera runs a build whose stamp is not known. No toolkit command changes the stamp
+compiled into the firmware, so a camera running either known build, or flashed with a toolkit-built file, still runs
+`202505201029`, and `verify` refuses that stamp in a name; with `--stock`, it also refuses the stamp found in your
+backup (`stamp-camera`), which covers a camera that runs another build.
 
 ## What the refusals mean
 
 | Message | Meaning | What to do |
 |---|---|---|
-| `FAIL ...` then `RESULT: verify failed` | The file itself is wrong: name checksum, stamp, size, build. | Rebuild it with `pack`; never rename an update file by hand. |
-| `FAIL sensor-table` | The image-sensor set-up table differs from your `--stock` dump's (or, without `--stock`, from the known builds'). No toolkit mod changes it, and that difference is what leaves a camera unable to take pictures. | Do not use the file on this camera. Without `--stock`, give it: your backup is the only reference that says anything about your camera. If the camera's own firmware is already gone and the file is a donor's, see the donor route ([Recovery, section D](02-RECOVERY.md#the-donor-route)). |
+| `FAIL ...` then `RESULT: verify failed` | The file itself is wrong: name checksum, stamp, size (only 0x1E0000 and 0x169000 bytes are taken), build. | Rebuild it with `pack`; never rename an update file by hand. |
+| `WARN ...` no backup of this camera was given | Not a refusal: `--stock` is missing, so nothing compared the file with this camera's own firmware, and `stage` writes after it. | Stop and run it again with `--stock <your backup>`. No backup, no flash. |
+| `FAIL ...` `--stock` is not a complete read of a chip | `--stock` is not exactly 2 MiB with `SPII` and the build marks: an update file, a cut-off read, something else. | Give the `.bin` that `backup` wrote, not an update file made from it. |
+| `WARN ...` `--stock` is byte-identical to a public dump | It is the public dump, or this camera's read after a flash with the public restore file. Either way it shows what the camera runs now, not what fits it. | Read [Recovery, section D](02-RECOVERY.md#after-a-flash) before you flash. |
+| `FAIL sensor-table` | The image-sensor set-up table differs from your `--stock` dump's (or, without `--stock`, from the known builds'). No toolkit mod changes it, and that difference is what leaves a camera unable to take pictures. | Do not use the file on this camera. Without `--stock`, give it: your backup is the only reference that says anything about your camera. If your backup was read after the camera was flashed, the table in it is the flashed firmware's: if the camera's own firmware is already gone and the file is another, working camera's, see the donor route ([Recovery, section D](02-RECOVERY.md#the-donor-route)). |
+| `WARN sensor-table` with a match | The table is the same as in `--stock`, and `--stock` is one of the known builds. | The match proves a fit only if your backup was read before the camera was ever flashed ([The first flash, After a flash](01-FIRST-FLASH.md#after-a-flash)). |
+| `FAIL ...` several sensor programs | The file holds more than one sensor table the code refers to, with different contents, so nothing can tell which one the camera would run. | Do not use the file; rebuild it from your backup. |
+| `FAIL ...` ARM vector table | Bytes 0x200..0x240, where the camera starts, differ from `--stock`'s (or the known build's) in a file laid out like it. A camera flashed with it may not start far enough to run the card updater again. | Do not use the file; no flag of `stage` accepts it. Rebuild it from your backup. |
+| `FAIL stamp-camera` | The stamp in the name is the one found in `--stock`, so the camera would ignore the file. | Rebuild it with `pack`, which gives it a fresh stamp. |
+| `FAIL ...` candidate C, A or B | The file is one of the withdrawn [flash candidates](03-FLASH-CANDIDATES.md), known by its SHA-256. | Do not flash it. Make a file from your own backup instead. |
 | `--donor needs --stock` | The donor route was asked for without a read of this camera's own chip. | Read the chip first ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)) and give it as `--stock`. |
 | `FAIL from-donor` | The file is not the donor's firmware unchanged. | Build it from `--donor` with `pack`, and change nothing in it. |
 | `FAIL series` | The build marks (build string, stamp, sensor table) were not found. | Not Charmera firmware, or a damaged copy. Rebuild from a complete dump. |
@@ -157,7 +187,7 @@ in a USB reader mounts under `/run/media/deck/<label>` as well. In Konsole:
 
 ```
 ls /run/media/deck/
-python -m charmera_toolkit stage out/JH_5408202611041200_0F065D55.bin --card /run/media/deck/0123-4567
+python -m charmera_toolkit stage out/JH_5408202611041200_0F065D55.bin --card /run/media/deck/0123-4567 --stock backups/my_backup.bin
 ```
 
 The Deck's slot reports the card as `mmcblk0`, which sysfs marks as not removable; `stage` uses the mmc type

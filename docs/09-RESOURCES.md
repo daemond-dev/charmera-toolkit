@@ -4,8 +4,9 @@ Reading order: 9 of 13 · previous: [Photo frames](08-FRAMES.md) · next: [Photo
 
 What the GP+ pack at 0x120000 holds, how `resources list` / `extract` / `replace` treat it, and how to make a
 boot logo the camera has a chance of accepting. Every offset and length below was read off the stock
-original-series dump; what the camera does with a changed logo is UNTESTED (nothing from this toolkit has
-been flashed yet). The frames in the pack have their own command and document (`frames`, [Photo frames](08-FRAMES.md)),
+original-series dump; what the camera does with a changed logo is UNTESTED (no custom logo has been flashed;
+toolkit-built files have been, see [the incident notes](FIRST-FLASH-INCIDENT.md)). The frames in the pack have their
+own command and document (`frames`, [Photo frames](08-FRAMES.md)),
 the sounds too (`sounds`, [Image layout](11-FORMAT.md)).
 
 ## The pack
@@ -91,19 +92,21 @@ If any target file already exists the command refuses before writing anything an
 
 Puts a JPEG of your own into a JPEG slot. Without the gate flag it prints the plan (both files' properties,
 what would be stripped, how the slot would be padded) and writes nothing; with it, it writes a full image to
-`--out`. `--out` may not be the input, and an existing file is only replaced with `--overwrite`.
+`--out`. `--out` may not be the input, and an existing file is only replaced with `--overwrite`. A full image must not
+go on a card as it is, so `--out` may not be named like an update file (`JH_*.bin`, in any letter case) or lie in a
+folder that holds a DCIM folder or a `JH_*.bin`.
 
 ```
 charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jpg --out logo.bin
 charmera resources replace my_backup.bin --name POWER_ON_LOGO.JPG --file logo.jpg --out logo.bin --strip-metadata --i-understand-this-is-a-mod
 charmera pack --input logo.bin --out out/logo/ --i-understand-this-file-flashes-a-camera
-charmera verify out/JH_5408*.bin --stock my_backup.bin --allow-modified
+charmera verify out/logo/JH_5408<stamp>_<sum>.bin --stock my_backup.bin --allow-modified
 ```
 
 What has to hold, checked in this order; the first property that differs is named and the command exits 2:
 
 1. The image is the public dump's build or a copy of it (its fingerprint, or its build marks at that build's
-   offsets, say so). Other builds have an unknown pack layout.
+   offsets together with that build's sensor table, say so). Other builds have an unknown pack layout.
 2. The entry is a JPEG. For a WAV the message points at `sounds replace`, for a frame strip or thumbnail at
    `frames replace`; the other GPZP files and `GPRS.PAK` are refused because nobody knows yet what the
    firmware needs from them.

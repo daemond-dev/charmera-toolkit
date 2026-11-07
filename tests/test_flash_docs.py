@@ -28,7 +28,7 @@ def section(name: str, heading: str) -> str:
 FLASH_STEPS = [
     ("01-FIRST-FLASH.md", "5. Flash (the point of no return)"),
     ("02-RECOVERY.md", "A. The camera boots and the updater runs: restore through the SD card"),
-    ("03-FLASH-CANDIDATES.md", "Flashing order, when you are ready"),
+    ("03-FLASH-CANDIDATES.md", "If you rebuild one of these from your own backup"),
     ("04-STAGE.md", "The sequence on the camera"),
     ("06-ANDROID.md", "4. Flash"),
 ]
@@ -64,7 +64,7 @@ def test_every_flash_step_names_battery_and_edition(name, heading):
     assert "Millennium" in s and "CLOT" in s, name
 
 
-@pytest.mark.parametrize("name,before", [("01-FIRST-FLASH.md", "## 5. Flash"), ("03-FLASH-CANDIDATES.md", "## Flashing order")])
+@pytest.mark.parametrize("name,before", [("01-FIRST-FLASH.md", "## 5. Flash"), ("03-FLASH-CANDIDATES.md", "## If you rebuild one of these from your own backup")])
 def test_stored_photos_warning_before_the_flash_step(name, before):
     raw = (DOCS / name).read_text(encoding="utf-8")
     head = " ".join(raw[: raw.index(before) + 2000].split())
@@ -75,14 +75,14 @@ def test_verify_for_mods_shows_allow_modified_and_why():
     s = section("01-FIRST-FLASH.md", "3. Verify")
     assert "--allow-modified" in s
     assert "unless you tell it the change is intended" in s
-    assert "--allow-modified" in section("03-FLASH-CANDIDATES.md", "Flashing order, when you are ready")
+    assert "--allow-modified" in section("03-FLASH-CANDIDATES.md", "If you rebuild one of these from your own backup")
     assert "unless it is told the change is intended" in text("03-FLASH-CANDIDATES.md")
     assert "--allow-modified" in text("06-ANDROID.md")
 
 
 @pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "4. Put it on the card"),
                                           ("06-ANDROID.md", "3. Copy the file to the card root"),
-                                          ("03-FLASH-CANDIDATES.md", "Flashing order, when you are ready")])
+                                          ("03-FLASH-CANDIDATES.md", "If you rebuild one of these from your own backup")])
 def test_eject_before_removing(name, heading):
     assert "eject" in section(name, heading).lower(), name
 
@@ -121,7 +121,7 @@ HARD_STOP = re.compile(r"no backup[^.]{0,40}no flash", re.I)
 
 
 @pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "1. Back up your camera's chip (no backup, no flash)"),
-                                          ("03-FLASH-CANDIDATES.md", "Flashing order, when you are ready"),
+                                          ("03-FLASH-CANDIDATES.md", "If you rebuild one of these from your own backup"),
                                           ("06-ANDROID.md", "Before you flash from a phone"),
                                           ("04-STAGE.md", "What it does, in order")])
 def test_the_backup_is_a_hard_stop_before_every_flash(name, heading):
