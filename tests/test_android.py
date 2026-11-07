@@ -6,6 +6,7 @@ lifecycle rules of MainActivity are checked here in its source.
 """
 import hashlib
 import importlib.util
+import os
 import re
 from pathlib import Path
 
@@ -47,6 +48,25 @@ def test_app_build_identity_matches_the_python_one():
     check = java[java.index("public static Result check(String displayName, byte[] data, Build build, byte[] reference)"):]
     assert "build.stampOffset" not in check.split("boolean madeFrom")[0]
     assert "regionEquals(data, build.stampOffset" not in java and "regionEquals(data, build.buildOffset" not in java
+
+
+def test_app_names_the_film_mods_build_as_image_py_does():
+    """The second known build: the same fingerprint, offsets and compile date as image.FILM_MODS_BUILD."""
+    java = SRC.read_text(encoding="utf-8")
+    start = java.index("FILM_MODS_BUILD = new Build(")
+    block = java[start: java.index(");", start)]
+    b = image.FILM_MODS_BUILD
+    for text in (b.official_sha256, b.sensor_table_sha256):
+        assert f'"{text}"' in block, text
+    for number in (b.stamp_offset, b.build_offset, b.sensor_table_offset):
+        assert re.search(rf"0x{number:X}\b", block, re.I), hex(number)
+    assert f"compiled {b.compiled}" in block and b.compiled == "Nov 19 2025"
+    assert "OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD}" in java
+    restore = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
+    if restore.is_file():
+        data = restore.read_bytes()
+        assert f'"{hashlib.sha256(data[:0x120000]).hexdigest()}"' in block
+        assert hashlib.sha256(data).hexdigest() == b.official_sha256 and hashlib.sha1(data).hexdigest() == b.official_sha1
 
 
 def test_app_code_area_hash_is_the_stock_dumps(stock_image):

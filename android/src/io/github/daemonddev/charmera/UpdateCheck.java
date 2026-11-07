@@ -110,6 +110,23 @@ public final class UpdateCheck {
             "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
             0x218C4, 0x18964, 0xF5C6C);
 
+    /**
+     * The charmera-film-mods author's build, hashed from that project's public restore file (bytes 0..0x169000 of the
+     * author's factory dump; charmera_toolkit/image.py FILM_MODS_BUILD). Same stamp, different bytes, the same sensor
+     * table. Only 0x169000 bytes are public, so there is no hash over 0..0x170000.
+     */
+    public static final Build FILM_MODS_BUILD = new Build(
+            "the charmera-film-mods author's build (same stamp, different bytes, compiled Nov 19 2025)",
+            SHARED_STAMP,
+            null,
+            "b672ee59802a51f98b9d079e1cd2dfac77708afdf25a69bdf04c2e66b5fcb507",
+            "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f",
+            "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
+            0x218D0, 0x1897C, 0xF5D34);
+
+    /** Known builds other than the one a check is run against, named when a file is one of them unchanged. */
+    static final Build[] OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD};
+
     /** JH_ + 4-digit product + 12-digit stamp + _ + 8 hex digits, anywhere in the name (copies get " (1)" added). */
     static final Pattern NAME = Pattern.compile("JH_(\\d{4})(\\d{12})_([0-9A-Fa-f]{8})");
 
@@ -167,9 +184,13 @@ public final class UpdateCheck {
         public final int referencedFrom;
         /** The sensor's bus write address from the config struct after the reset table, or -1. */
         public final int busAddress;
+        /** The compile date the build carries ("Oct 14 2025"), or null. It differs between the two known builds. */
+        public final String compiled;
+        public final int compiledOffset;
 
         Marks(String stamp, int stampOffset, String buildString, int buildOffset, int resetStart, int sensorStart,
-              int sensorEnd, int sensorPairs, String sensorSha256, int referencedFrom, int busAddress) {
+              int sensorEnd, int sensorPairs, String sensorSha256, int referencedFrom, int busAddress, String compiled,
+              int compiledOffset) {
             this.stamp = stamp;
             this.stampOffset = stampOffset;
             this.buildString = buildString;
@@ -181,6 +202,8 @@ public final class UpdateCheck {
             this.sensorSha256 = sensorSha256;
             this.referencedFrom = referencedFrom;
             this.busAddress = busAddress;
+            this.compiled = compiled;
+            this.compiledOffset = compiledOffset;
         }
 
         /** The three marks every Charmera build carries. */
@@ -423,8 +446,34 @@ public final class UpdateCheck {
                 break;
             }
         }
+        String compiled = null;
+        int compiledOffset = -1;
+        for (int i = VA_OFFSET; i + 12 <= end && compiled == null; i++) {
+            if (isCompileDate(data, i)) {
+                compiled = new String(data, i, 11, StandardCharsets.US_ASCII);
+                compiledOffset = i;
+            }
+        }
         return new Marks(stamp, stampOffset, buildString, buildOffset, resetStart, sensorStart, sensorEnd, pairs,
-                sensorStart < 0 ? null : sha256Hex(data, sensorStart, sensorEnd), referencedFrom, bus);
+                sensorStart < 0 ? null : sha256Hex(data, sensorStart, sensorEnd), referencedFrom, bus, compiled,
+                compiledOffset);
+    }
+
+    private static final String[] MONTHS = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+    /** "Mmm dd 20yy" and a NUL at i, the form a compile date takes (as image.py's _COMPILED_RE). */
+    private static boolean isCompileDate(byte[] d, int i) {
+        if (!(d[i + 3] == ' ' && (d[i + 4] == ' ' || digit(d[i + 4])) && digit(d[i + 5]) && d[i + 6] == ' '
+                && d[i + 7] == '2' && d[i + 8] == '0' && digit(d[i + 9]) && digit(d[i + 10]) && d[i + 11] == 0)) {
+            return false;
+        }
+        String month = new String(d, i, 3, StandardCharsets.US_ASCII);
+        for (String m : MONTHS) {
+            if (m.equals(month)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // --- the checks ------------------------------------------------------------------------------------------------
@@ -555,23 +604,37 @@ public final class UpdateCheck {
                             + (marks.sensorStart < 0 ? "" : "sensor table at " + hex(marks.sensorStart) + ".")));
         } else {
             out.add(new Line(Level.PASS, "series", "Build marks", "Charmera firmware: build " + marks.buildString.trim()
-                    + ", stamp " + marks.stamp + ". The stamp is carried by two different builds and tells them"
-                    + " apart from nothing.",
-                    "build string at " + hex(marks.buildOffset) + ", stamp at " + hex(marks.stampOffset) + ", sensor table"
+                    + (marks.compiled == null ? "" : ", compiled " + marks.compiled) + ", stamp " + marks.stamp
+                    + ". The stamp is carried by two different builds and tells them apart from nothing; their"
+                    + " compile dates differ.",
+                    "build string at " + hex(marks.buildOffset) + ", stamp at " + hex(marks.stampOffset)
+                            + (marks.compiled == null ? ", no compile date found" : ", compile date at "
+                            + hex(marks.compiledOffset)) + ", sensor table"
                             + " at " + hex(marks.sensorStart) + ".."+ hex(marks.sensorEnd) + " (" + marks.sensorPairs
                             + " writes" + (marks.busAddress < 0 ? "" : ", bus address " + hex(marks.busAddress))
                             + (marks.referencedFrom < 0 ? ", no code reference found" : ", referenced from code at "
                             + hex(marks.referencedFrom)) + ")."));
-            boolean exact = n >= OFFICIAL_SIZE && sha256Hex(data, 0, OFFICIAL_SIZE).equals(build.officialSha256);
+            String officialSha = n >= OFFICIAL_SIZE ? sha256Hex(data, 0, OFFICIAL_SIZE) : null;
+            boolean exact = officialSha != null && officialSha.equals(build.officialSha256);
             boolean codeStock = n >= CODE_AREA_END && sha256Hex(data, 0, CODE_AREA_END).equals(build.codeAreaSha256);
             boolean madeFrom = marks.stampOffset == build.stampOffset && marks.buildOffset == build.buildOffset
                     && marks.sensorStart == build.sensorOffset;
+            Build other = null;
+            for (Build b : OTHER_KNOWN_BUILDS) {
+                if (b != build && officialSha != null && officialSha.equals(b.officialSha256)) {
+                    other = b;
+                }
+            }
             if (exact) {
                 out.add(new Line(Level.INFO, "build", "Build", build.label + ", unchanged. " + NOT_THE_CAMERA,
                         "bytes 0 to 0x169000 hash to the known build's."));
             } else if (codeStock || madeFrom) {
                 out.add(new Line(Level.INFO, "build", "Build", build.label + ", with changes (see Software below). "
                         + NOT_THE_CAMERA, "the build marks lie where that build keeps them."));
+            } else if (other != null) {
+                out.add(new Line(Level.WARN, "build", "Build", other.label + ", unchanged: not the public dump's. It"
+                        + " belongs only in a camera that ran it. " + NOT_THE_CAMERA,
+                        "bytes 0 to 0x169000 hash to that build's, SHA-256 " + other.officialSha256 + "."));
             } else {
                 out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know: not the public dump's."
                         + " It belongs only in the camera it was dumped from. " + NOT_THE_CAMERA,
@@ -585,11 +648,14 @@ public final class UpdateCheck {
                 compared = true;
                 boolean same = ref.sensorSha256.equals(marks.sensorSha256);
                 out.add(new Line(same ? Level.PASS : Level.FAIL, "sensor-table", "Image sensor set-up", same
-                        ? "the same as in your camera's backup, so the file drives your camera's image sensor the way"
-                        + " its own firmware does."
-                        : "different from your camera's backup. The file drives the image sensor differently from your"
-                        + " camera's own firmware, and a camera whose sensor is not the one a firmware drives freezes in"
-                        + " photo and video mode after the flash. Do not use this file on this camera.",
+                        ? "the same as in your camera's backup, so the file drives the image sensor the way the"
+                        + " firmware in that backup does. That is your camera's own way only if the backup was read"
+                        + " before any flash: a read taken after one shows what the camera runs now, not what fits it."
+                        : "different from your camera's backup. The file drives the image sensor differently from the"
+                        + " firmware in your backup, and a camera whose sensor is not the one a firmware drives freezes"
+                        + " in photo and video mode after the flash. Do not use this file on this camera from the app."
+                        + " If the camera's own firmware is already gone and the file is a working camera's, that"
+                        + " donor route goes through the toolkit on a computer (docs/02-RECOVERY.md, section D).",
                         "the file's table: " + marks.sensorPairs + " writes, SHA-256 " + marks.sensorSha256 + "; the"
                                 + " backup's: " + ref.sensorPairs + " writes, SHA-256 " + ref.sensorSha256 + "."));
             } else if (ref != null) {
@@ -767,7 +833,9 @@ public final class UpdateCheck {
         String sha = sha256Hex(data, 0, data.length);
         for (String s : publicSha256) {
             if (s.equalsIgnoreCase(sha)) {
-                return "it is the public stock dump, a copy of someone else's camera, not a read of yours";
+                return "it is byte for byte the public stock dump: a copy of someone else's camera, or a read of a camera"
+                        + " that was flashed with the public restore file and has changed no setting since. Either way it"
+                        + " is not firmware known to fit your camera, so the app has nothing to compare a file with";
             }
         }
         if (!(data[0] == 'S' && data[1] == 'P' && data[2] == 'I' && data[3] == 'I')) {

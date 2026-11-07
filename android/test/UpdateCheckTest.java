@@ -119,6 +119,13 @@ public final class UpdateCheckTest {
         expect("another stamp is still a Charmera build mark, since the stamp is no identity", r.ok
                 && line(r, "series", UpdateCheck.Level.PASS) && text(r, "series").contains("stamp 202601010000")
                 && line(r, "stamp-in-file", UpdateCheck.Level.INFO), r);
+        UpdateCheck.Marks marks = UpdateCheck.findMarks(base);
+        r = check(base, build);
+        expect("the compile date is found by content and shown with the build marks", "Oct 14 2025".equals(marks.compiled)
+                && marks.compiledOffset == 0xF3978 && text(r, "series").contains("compiled Oct 14 2025"), r);
+        m = base.clone();
+        m[0xF3983] = 'X';   // no NUL after the date: not a compile date any more
+        expect("a date without its NUL is not a compile date", UpdateCheck.findMarks(m).compiled == null, null);
 
         // --- the official update size ------------------------------------------------------------------------
 
@@ -157,6 +164,9 @@ public final class UpdateCheckTest {
         noMarks[0xF5C6C] = 0;
         expect("a dump without the marks is not a backup", UpdateCheck.backupProblem(noMarks, noPublic).contains("set-up table"), null);
         expect("nothing is not a backup", UpdateCheck.backupProblem(null, noPublic) != null, null);
+        String publicProblem = UpdateCheck.backupProblem(dump, new String[]{UpdateCheck.sha256Hex(dump, 0, dump.length)});
+        expect("a read identical to the public dump is refused, and the reason allows that it is this camera's", publicProblem
+                .contains("flashed with the public restore file") && publicProblem.contains("not firmware known to fit"), null);
 
         // --- what kind of mod: bytes 0..0x120000 (header, code, data) against the resources -------------------
 
@@ -371,6 +381,16 @@ public final class UpdateCheckTest {
         UpdateCheck.Result nameless = UpdateCheck.check("firmware.bin", base, build);
         expect("refuses a file without a card name", UpdateCheck.confirms(nameless, base) != null, nameless);
         expect("refuses no file", UpdateCheck.confirms(null, base) != null && UpdateCheck.confirms(good, null) != null, good);
+
+        String film = System.getenv("CHARMERA_FILM_MODS_RESTORE");
+        if (film != null && !film.isEmpty()) {
+            File f = new File(film);
+            byte[] d = Files.readAllBytes(f.toPath());
+            r = UpdateCheck.check(f.getName(), d);
+            expect("the film-mods restore file is named by its fingerprint and refused for its stamp", !r.ok
+                    && line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("charmera-film-mods")
+                    && line(r, "stamp", UpdateCheck.Level.FAIL) && text(r, "series").contains("compiled Nov 19 2025"), r);
+        }
 
         String real = System.getenv("CHARMERA_UPDATE_FILES");
         if (real != null && !real.isEmpty()) {
