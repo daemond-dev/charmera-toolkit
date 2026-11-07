@@ -1126,7 +1126,8 @@ def _second_program(img, literal_at=0x7B000):
     return bytes(out)
 
 
-def test_several_sensor_programs_are_refused(tmp_path, synthetic_build):
+def test_several_sensor_programs_are_refused(tmp_path, capsys, synthetic_build):
+    from charmera_toolkit import cli
     backup = synthetic_image([make_record()])
     two = pack.prepare_payload(_second_program(backup))
     marks = image.find_marks(two)
@@ -1143,6 +1144,12 @@ def test_several_sensor_programs_are_refused(tmp_path, synthetic_build):
     # a second table that no code refers to changes nothing
     stray = pack.prepare_payload(_second_program(backup, literal_at=0x7B001))
     assert image.find_marks(stray).several_sensor_programs == [] and image.find_marks(stray).sensor.init[0] == SENSOR_START
+    # inspect lists both, pack says verify refuses the file
+    (tmp_path / "two.bin").write_bytes(two)
+    assert cli.main(["inspect", str(tmp_path / "two.bin")]) == 0
+    out = capsys.readouterr().out
+    assert "also found:" in out and "SEVERAL sensor programs" in out
+    assert "SEVERAL sensor programs" in pack.describe(two, "202611061404")
 
 
 def test_two_different_stamps_after_the_update_pattern_give_no_stamp(tmp_path, synthetic_build):
@@ -1302,6 +1309,78 @@ def test_official_size_file_against_stock_compares_only_what_it_holds(tmp_path, 
     assert by["own-data"].severity == "warn" and "0x16e000..0x16e004" in by["own-data"].detail and "keeps it" in by["own-data"].detail
 
 
+def test_pack_refuses_a_drive_root_or_removable_media_without_dcim(tmp_path, capsys, monkeypatch):
+    from charmera_toolkit import cli
+    src = tmp_path / "s.bin"
+    src.write_bytes(synthetic_image([make_record()]))
+    gate = "--i-understand-this-file-flashes-a-camera"
+    root = tmp_path / "freshly-formatted-card"
+    root.mkdir()
+    monkeypatch.setattr(pack, "is_drive_root", lambda path: Path(path) == root)
+    assert cli.main(["pack", "--input", str(src), "--out", str(root), "--stamp", "202611050001", gate]) == 2
+    out = capsys.readouterr().out
+    assert "is a drive root or mount point" in out and "charmera stage" in out
+    assert list(root.iterdir()) == []
+    monkeypatch.undo()
+    # a folder on removable media, however deep and whether it exists yet
+    monkeypatch.setattr(pack, "windows_volume_info", lambda path: ("exFAT", "CARD", True))
+    monkeypatch.setattr(pack, "linux_mount_entry", lambda path, mounts_path="/proc/mounts": ("/dev/mmcblk0p1", "exfat"))
+    monkeypatch.setattr(pack, "linux_removable", lambda device, sys_root="/sys": True)
+    deep = tmp_path / "stick" / "updates"
+    assert cli.main(["pack", "--input", str(src), "--out", str(deep), "--stamp", "202611050001", gate]) == 2
+    assert "lies on removable media" in capsys.readouterr().out
+    assert not deep.exists()
+    monkeypatch.undo()
+    assert cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "202611050001", gate]) == 0
+
+
+def test_pack_keeps_the_untouched_block_of_a_dump_and_refuses_only_the_one_the_erase_destroys(tmp_path, capsys, synthetic_build):
+    from charmera_toolkit import cli
+    img = bytearray(synthetic_image([make_record()]))
+    img[0x1E0000: 0x1E0004] = b"KEEP"           # neither written nor erased by a 0x1E0000-byte flash
+    src = tmp_path / "dump.bin"
+    src.write_bytes(bytes(img))
+    assert len(pack.prepare_payload(bytes(img))) == checksum.UPDATE_FILE_SIZE
+    assert cli.main(["pack", "--input", str(src), "--out", str(tmp_path / "o"), "--stamp", "202611050001"]) == 0
+    out = capsys.readouterr().out
+    assert "note:" in out and "the camera keeps its own as they are" in out and "not all blank" in out
+    img[0x1F0000: 0x1F0004] = b"GONE"           # the block the final erase of a 0x1E0000-byte file destroys
+    with pytest.raises(ValueError, match="0x1f0000..0x200000 are not blank"):
+        pack.prepare_payload(bytes(img))
+    assert len(pack.prepare_payload(bytes(img), official_size=True)) == checksum.OFFICIAL_UPDATE_SIZE
+    # an official-size file blames the right thing for data past 0x169000
+    selftest = bytearray(synthetic_image([make_record()]))
+    selftest[0x16E000: 0x16E004] = b"JHCM"
+    with pytest.raises(ValueError, match="factory self-test sector") as exc:
+        pack.prepare_payload(bytes(selftest), official_size=True)
+    assert "resource pack" not in str(exc.value) and "lose its own copy" in str(exc.value)
+    big = bytearray(synthetic_image([make_record()]))
+    big[checksum.OFFICIAL_UPDATE_SIZE + 0x100] = 0x55
+    with pytest.raises(ValueError, match="the resource pack, or data after it"):
+        pack.prepare_payload(bytes(big), official_size=True)
+
+
+def test_inspect_says_a_file_named_like_an_update_file_of_another_size_never_goes_on_a_card(tmp_path, capsys):
+    from charmera_toolkit import cli
+    img = synthetic_image([make_record()])
+    full = tmp_path / "JH_5408202611061200_00000000.bin"
+    full.write_bytes(img)
+    assert cli.main(["inspect", str(full)]) == 0
+    out = capsys.readouterr().out
+    assert "DOES NOT MATCH file" in out and "renaming the file to match does not make it safe" in out
+    assert "NOT FOR A CARD" in out and "bricks the camera" in out
+    assert "read before it was ever flashed" in out
+    lower = tmp_path / "jh_5408202611061200_1dd7adf0.BIN"
+    lower.write_bytes(img[:0x170000])
+    assert cli.main(["inspect", str(lower)]) == 0
+    assert "NOT FOR A CARD" in capsys.readouterr().out
+    update = tmp_path / checksum.build_update_name(pack.prepare_payload(img), "202611061200").filename
+    update.write_bytes(pack.prepare_payload(img))
+    assert cli.main(["inspect", str(update)]) == 0
+    out = capsys.readouterr().out
+    assert "matches file" in out and "NOT FOR A CARD" not in out
+
+
 def test_stock_image_vector_table_and_sensor_literal(stock_image, tmp_path):
     """The public build's vector table hash is the dump's, and its sensor literal is aligned and referenced."""
     assert image.vector_table_sha256(stock_image) == image.PUBLIC_BUILD.vector_table_sha256
@@ -1319,3 +1398,4 @@ def test_stock_image_restore_file_photos_are_named(stock_image, tmp_path):
     by = _checks(_named(tmp_path, restore, "202610261427"), restore)
     assert "benbadio/keychain-camera-plus dump was read from" in by["photos"].detail
     assert "the photo directory lists none of them" in by["photos"].detail
+    assert "benbadio/keychain-camera-plus dump was read from" in pack.describe(restore, "202610261427")

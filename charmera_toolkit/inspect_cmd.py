@@ -6,12 +6,19 @@ import os
 from pathlib import Path
 
 from . import settings as settings_mod
-from .checksum import parse_update_name
+from .checksum import OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, parse_update_name
 from .image import SOUND_SLOTS, summarize
+from .stage import looks_like_update_file
 
 
 def _fmt_bool(v) -> str:
     return "yes" if v else ("no" if v is False else "n/a")
+
+
+def _program(t) -> str:
+    return (f"{t.pairs} register writes at {t.init[0]:#x}..{t.init[1]:#x} ({t.init_bytes_len} bytes), reset table at {t.reset[0]:#x}"
+            + (f", bus address {t.bus_address:#x}" if t.bus_address is not None else "")
+            + (f", referenced from code at {t.referenced_from:#x}" if t.referenced_from is not None else ", no code reference found"))
 
 
 def print_report(path: Path, image: bytes, show_resources: bool = False, show_settings: bool = False) -> int:
@@ -28,21 +35,32 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         print("reg init list:   " + ", ".join(f"[{r:#010x}]={v:#x}" for r, v in info["reg_init"]) + "  (INFERRED meaning)")
     print(f"build:           {info['identity']}  ({info['identity_label']})")
     print("                 a build match says which public image this is, not whether it fits a given camera: only a dump of")
-    print("                 that camera's own chip does. The stamp 202505201029 is carried by two different builds.")
+    print("                 that camera's own chip read before it was ever flashed does. The stamp 202505201029 is carried by")
+    print("                 two different builds.")
     for k, v in info["identity_checks"].items():
         print(f"  check {k:24s} {_fmt_bool(v)}")
     m = info["marks"]
-    print(f"stamp:           {m.stamp or '(not found)'}" + (f"  at {m.stamp_offset:#x}" if m.stamp else "") + "  (found by content, not at a fixed offset)")
+    if m.stamp_conflict:
+        print(f"stamp:           (not found: several different stamps follow '*.bin': {', '.join(m.stamp_conflict)}; which one the updater "
+              "compares cannot be told, and verify refuses the file)")
+    else:
+        print(f"stamp:           {m.stamp or '(not found)'}" + (f"  at {m.stamp_offset:#x}" if m.stamp else "") + "  (found by content, not at a fixed offset)")
     print(f"build string:    {m.build_string.decode('ascii', 'replace') if m.build_string else '(not found)'}" + (f"  at {m.build_offset:#x}" if m.build_string else ""))
     print(f"compiled:        {m.compiled.decode('ascii', 'replace') if m.compiled else '(not found)'}" + (f"  at {m.compiled_offset:#x}" if m.compiled else ""))
     if m.sensor:
         t = m.sensor
-        print(f"sensor table:    {t.pairs} register writes at {t.init[0]:#x}..{t.init[1]:#x} ({t.init_bytes_len} bytes), reset table at {t.reset[0]:#x}"
-              + (f", bus address {t.bus_address:#x}" if t.bus_address is not None else "")
-              + (f", referenced from code at {t.referenced_from:#x}" if t.referenced_from is not None else ", no code reference found"))
+        print(f"sensor table:    {_program(t)}")
         print(f"                 sha256 {t.sha256}")
         print("                 " + ("the same table as in both known builds (public dump, film-mods): it drives one sensor and reads no chip ID"
                                     if info["identity_checks"].get("sensor_table_known") else "NOT the known builds' table"))
+        if t.referenced_from is None:
+            print("                 no code refers to it by address, so the code may set the sensor up from another table (verify warns)")
+        others = [p for p in m.sensor_programs if p != t]
+        for p in others:
+            print(f"  also found:    {_program(p)}, sha256 {p.sha256[:8]}...")
+        if m.several_sensor_programs:
+            print(f"                 SEVERAL sensor programs: the code refers to {len(m.several_sensor_programs)} init tables with different "
+                  "contents, so which one sets up the sensor cannot be told; verify refuses the file")
     else:
         print("sensor table:    not found (no reset table 'fd 00 20 00 ff ff' followed by an init table in the code area)")
     if info["software_sha256"]:
@@ -51,13 +69,22 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
     if fp:
         print(f"official span:   sha1 {fp[1]}  byte sum {fp[2]:08X}  (bytes 0..0x169000, what an official-size file writes; the film-mods author's build is 91499bd3... / 0852C329)")
 
-    # Filename check when it looks like an update file.
+    # Filename check when it looks like an update file. The camera flashes any JH_5408*.bin in a card root whose sum
+    # matches its name, whatever its size, so a file of any other size must never go on a card under such a name.
+    named_like_update = looks_like_update_file(path.name)
     try:
         name = parse_update_name(path.name)
         ok = name.checksum == info["byte_sum"]
         print(f"update name:     stamp {name.stamp}, checksum {name.checksum:08X} -> {'matches file' if ok else 'DOES NOT MATCH file'}")
+        if not ok:
+            print("                 renaming the file to match does not make it safe: verify checks what the camera does not")
     except ValueError:
         pass
+    if named_like_update and info["size"] not in (UPDATE_FILE_SIZE, OFFICIAL_UPDATE_SIZE):
+        print(f"NOT FOR A CARD:  this file is named like an update file but is {info['size']:,} bytes; the camera is known to take")
+        print(f"                 only {UPDATE_FILE_SIZE:#x} and {OFFICIAL_UPDATE_SIZE:#x} bytes. Never put it on a card, under this name or")
+        print("                 any other (a 2 MiB file's final erase wraps to block 1 and bricks the camera). pack makes update files,")
+        print("                 and verify and stage check them.")
 
     res = info["resources"]
     print(f"resources:       {len(res)} entries in the GP+ pack" + (f", data ends at {info['resources_end']:#x}" if info["resources_end"] else ""))
@@ -91,7 +118,8 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
     if info["photo_index"] or info["stored_photos"]:
         print(f"stored photos:   index {[(p.slot, p.used, p.size) for p in info['photo_index']]}, "
               f"JPEG data {[(hex(o), n) for o, n in info['stored_photos']]}")
-        print("                 (these belong to whoever owned the camera that was dumped)")
+        if info["stored_photos"]:
+            print(f"                 ({info['photos_whose']})")
     if info["tail_blank"] is not None:
         print(f"tail 0x1E0000..: {'all 0xFF' if info['tail_blank'] else 'NOT blank'}")
     return 0
@@ -117,6 +145,10 @@ def handler(args) -> int:
             "sensor_table": None if not m.sensor else {"reset": list(m.sensor.reset), "init": list(m.sensor.init), "pairs": m.sensor.pairs,
                                                        "sha256": m.sensor.sha256, "bus_address": m.sensor.bus_address,
                                                        "referenced_from": m.sensor.referenced_from},
+            "sensor_programs": [{"init": list(p.init), "pairs": p.pairs, "sha256": p.sha256, "referenced_from": p.referenced_from}
+                                for p in m.sensor_programs],
+            "several_sensor_programs": bool(m.several_sensor_programs),
+            "stamp_conflict": list(m.stamp_conflict),
         }
         out["resources"] = [{"name": e.display_name, "offset": e.offset, "budget": e.budget} for e in info["resources"]]
         out["sounds"] = [{"name": s.entry.display_name, "offset": s.entry.offset, "rate": s.rate, "bits": s.bits,

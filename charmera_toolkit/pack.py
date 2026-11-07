@@ -6,46 +6,54 @@ programs the file byte for byte, and erases one more 64 KiB block at (length rou
 
 Two sizes are built here. The community size, 0x1E0000 bytes (30 blocks), writes the code, the resources,
 the settings bank and the stored photos of the image it was made from, and the final erase lands on the
-blank block at 0x1F0000; the last two blocks of flash are blank on every known camera, so trimming a 2 MiB
-dump to it loses nothing. The official size, 0x169000 bytes (--official-size; where the film-mods files
-end, and where official updates end according to the film-mods author: no official update file has been
-examined here), writes the code and the resources only: nothing of another camera's settings or photos
-goes in, and the final erase lands on the settings block at 0x170000, so the camera starts with factory
-defaults and an empty photo list; the stored photo data at 0x180000 and the blocks above 0x1E0000 are not
-touched. Such a file drops whatever lies between 0x169000 and 0x170000, so it is refused when anything does
-(blank in every known build). Never feed the camera a full 2 MiB file (see verify).
+block at 0x1F0000, blank on every known camera; the block at 0x1E0000 is neither written nor erased, so the
+camera keeps it as it is. A 2 MiB dump is trimmed to that size, and refused when its last block is not
+blank, since that file's final erase destroys the block on the camera. The official size, 0x169000 bytes
+(--official-size; where the film-mods files end, and where official updates end according to the
+film-mods author: no official update file has been examined here), writes the code and the resources only:
+nothing of another camera's settings or photos goes in, and the final erase lands on the settings block at
+0x170000, so the camera starts with factory defaults and an empty photo list; the stored photo data at
+0x180000 and the blocks above 0x1E0000 are not touched. Such a file drops whatever lies between 0x169000 and
+0x170000, which the camera then holds erased, so it is refused when anything does (blank in every known
+build). Never feed the camera a full 2 MiB file (see verify).
+
+pack writes on the computer only: it refuses an --out that is a drive root or a mount point, lies on
+removable media (a card, a USB stick) or holds a DCIM folder. stage is the one way onto a card.
 
 Without the gate flag this command only prints what it would write.
 """
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Sequence
 
 from . import settings as settings_mod
-from .checksum import FLASH_SIZE, OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, build_update_name, now_stamp
-from .image import (PHOTO_INDEX, SETTINGS_BASE, SOFTWARE_END, USER_AREA_END, describe_erase_target, detect_build,
-                    find_resources_end, image_kind, resource_directory, stored_photos, updater_extra_erase)
-from .stage import list_update_files
+from .checksum import BLOCK_SIZE, FLASH_SIZE, OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, build_update_name, now_stamp
+from .image import (PHOTO_INDEX, RESOURCE_LIMIT, SETTINGS_BASE, SOFTWARE_END, USER_AREA_END, describe_erase_target, detect_build,
+                    find_resources_end, image_kind, photos_whose, resource_directory, stored_photos, updater_extra_erase)
+from .stage import is_drive_root, linux_mount_entry, linux_removable, list_update_files, normalize_card, windows_volume_info
 from .verify import resource_problems
 
 GATE_FLAG = "--i-understand-this-file-flashes-a-camera"
+# The block a 0x1E0000-byte file's final erase destroys on the camera (updater_extra_erase(0x1E0000)).
+LAST_BLOCK = UPDATE_FILE_SIZE + BLOCK_SIZE
 
 
 def prepare_payload(image: bytes, blank_settings: bool = False, blank_photos: bool = False,
                     factory_settings: bool = False, official_size: bool = False) -> bytes:
     """Trim to 0x1E0000 (or, with official_size, to 0x169000) and optionally reset the camera-specific areas.
 
-    Inputs: a 2 MiB dump (trimmed; its last 0x20000 bytes must be blank), a 0x1E0000 update file (as it is),
-    an official-size update file of 0x169000 bytes or a software-only image of exactly 0x170000 bytes (both
-    padded with an erased settings bank, a zeroed photo directory and 0xFF). Any other length below 0x1E0000
-    is refused as truncated: padding a cut-off file would put 0xFF over the end of the code or the resource
-    pack, and the camera checks neither.
+    Inputs: a 2 MiB dump (trimmed; for the 0x1E0000 size its last block, which that file's final erase
+    destroys on the camera, must be blank), a 0x1E0000 update file (as it is), an official-size update file of
+    0x169000 bytes or a software-only image of exactly 0x170000 bytes (both padded with an erased settings
+    bank, a zeroed photo directory and 0xFF). Any other length below 0x1E0000 is refused as truncated: padding
+    a cut-off file would put 0xFF over the end of the code or the resource pack, and the camera checks neither.
 
     official_size cuts the result at 0x169000, after the resource pack: the settings options above then
-    change nothing, because nothing of the camera's own area is in the file. It is refused when the
-    resource pack reaches past 0x169000.
+    change nothing, because nothing of the camera's own area is in the file. It is refused when anything
+    lies between 0x169000 and the settings bank: the resource pack, or the factory self-test sector.
 
     factory_settings keeps only the first CRC-valid settings record (the factory record on every known
     dump), moved to sector 0, and erases the rest of the bank, so the firmware's normal load path picks it
@@ -61,9 +69,11 @@ def prepare_payload(image: bytes, blank_settings: bool = False, blank_photos: bo
             f"file of {OFFICIAL_UPDATE_SIZE:#x} bytes, or a software-only image of exactly {SOFTWARE_END:#x} bytes; padding "
             "anything else would leave part of the code or the resource pack erased. Get a complete copy and run pack again.")
     if kind == "dump":
-        tail = image[USER_AREA_END:]
-        if tail != b"\xff" * len(tail):
-            raise ValueError("bytes 0x1E0000..0x200000 are not blank in this dump; refusing to trim them away")
+        last = image[LAST_BLOCK:]
+        if not official_size and last != b"\xff" * len(last):
+            raise ValueError(f"bytes {LAST_BLOCK:#x}..0x200000 are not blank in this dump, and the final erase of a 0x1E0000-byte "
+                             "file erases that block on the camera: refusing to build a file that destroys them. An official-size "
+                             "file (--official-size) leaves everything above 0x170000 as it is")
         payload = bytearray(image[:UPDATE_FILE_SIZE])
     elif kind == "update":
         payload = bytearray(image)
@@ -90,21 +100,47 @@ def prepare_payload(image: bytes, blank_settings: bool = False, blank_photos: bo
     if not settings_mod.photo_directory_consistent(bytes(payload)):
         payload[PHOTO_INDEX: PHOTO_INDEX + settings_mod.PHOTO_DIRECTORY_LEN] = b"\x00" * settings_mod.PHOTO_DIRECTORY_LEN
     if official_size:
+        below = find_resources_end(bytes(payload[:RESOURCE_LIMIT]))
+        if below > OFFICIAL_UPDATE_SIZE:
+            raise ValueError(f"the resource pack, or data after it, reaches {below:#x}, past the official size {OFFICIAL_UPDATE_SIZE:#x}: "
+                             "an official-size file would cut it off. Build the 0x1E0000-byte file instead.")
         end = find_resources_end(bytes(payload))
         if end > OFFICIAL_UPDATE_SIZE:
-            raise ValueError(f"the image holds data up to {end:#x}, past the official size {OFFICIAL_UPDATE_SIZE:#x} (the "
-                             "resource pack, or something between it and the settings bank such as the factory self-test sector at "
-                             "0x16E000, blank in every known build); an official-size file would drop it. Build the 0x1E0000-byte file "
-                             "instead.")
+            first = next(i for i in range(RESOURCE_LIMIT, end) if payload[i] != 0xFF)
+            raise ValueError(f"the image holds data at {first:#x}..{end:#x}, past the official size, in the factory self-test sector "
+                             f"at {RESOURCE_LIMIT:#x} (blank in every known build; the factory writes it): an official-size file would "
+                             "drop it, and the camera would lose its own copy too, since the update leaves 0x169000..0x170000 erased. "
+                             "Build the 0x1E0000-byte file instead, which keeps it.")
         return bytes(payload[:OFFICIAL_UPDATE_SIZE])
     return bytes(payload)
 
 
-def describe_input(input_len: int) -> str:
-    """What pack did to the input's length: trimmed, kept or padded, and with what."""
+def payload_notes(image: bytes, official_size: bool = False) -> List[str]:
+    """What of a 2 MiB dump stays on the camera although the update file does not carry it, as plain sentences."""
+    if image_kind(image) != "dump":
+        return []
+    if official_size:
+        if image[USER_AREA_END:] != b"\xff" * (FLASH_SIZE - USER_AREA_END):
+            return [f"bytes {USER_AREA_END:#x}..0x200000 of this dump are not blank. An official-size file does not carry them and "
+                    "its flash touches nothing above 0x170000, so the camera keeps its own as they are."]
+        return []
+    if image[USER_AREA_END:LAST_BLOCK] != b"\xff" * (LAST_BLOCK - USER_AREA_END):
+        return [f"bytes {USER_AREA_END:#x}..{LAST_BLOCK:#x} of this dump are not blank. The update file does not carry them, and a "
+                "0x1E0000-byte flash neither writes nor erases that block, so the camera keeps its own as they are."]
+    return []
+
+
+def describe_input(input_len: int, output_len: int = UPDATE_FILE_SIZE, tail_blank: bool = True) -> str:
+    """What pack did to the input's length: trimmed, kept, padded or cut, and with what."""
+    if output_len == OFFICIAL_UPDATE_SIZE:
+        if input_len == OFFICIAL_UPDATE_SIZE:
+            return f"{OFFICIAL_UPDATE_SIZE:#x}-byte official-size update file, length kept"
+        what = {FLASH_SIZE: "2 MiB dump", UPDATE_FILE_SIZE: f"{UPDATE_FILE_SIZE:#x}-byte update file",
+                SOFTWARE_END: f"{SOFTWARE_END:#x}-byte software-only image"}.get(input_len, f"{input_len:,}-byte image")
+        return f"{what}, cut to {OFFICIAL_UPDATE_SIZE:#x}: code, data and the resource pack; nothing after them goes into the file"
     if input_len == FLASH_SIZE:
         return (f"2 MiB dump, trimmed to {UPDATE_FILE_SIZE:#x} (the {FLASH_SIZE - UPDATE_FILE_SIZE:,} bytes "
-                f"{UPDATE_FILE_SIZE:#x}..{FLASH_SIZE:#x} dropped are blank)")
+                f"{UPDATE_FILE_SIZE:#x}..{FLASH_SIZE:#x} dropped are " + ("blank)" if tail_blank else "not all blank: see the note below)"))
     if input_len == UPDATE_FILE_SIZE:
         return f"{UPDATE_FILE_SIZE:#x}-byte update file, length kept"
     if input_len == SOFTWARE_END:
@@ -116,10 +152,23 @@ def describe_input(input_len: int) -> str:
     return f"{input_len:,} bytes"
 
 
-def describe(payload: bytes, stamp: str, input_len: Optional[int] = None) -> str:
+def _sensor_line(build) -> str:
+    several = build.marks.several_sensor_programs
+    if several:
+        return (f"SEVERAL sensor programs the code refers to ({', '.join(f'{t.pairs} writes at {t.init[0]:#x}' for t in several)}): "
+                "verify and stage refuse this file")
+    t = build.marks.sensor
+    if t is None:
+        return "NOT FOUND"
+    return (f"{t.pairs} writes at {t.init[0]:#x}, sha256 {t.sha256[:8]}..."
+            + (" (the one both known builds carry)" if build.checks.get("sensor_table_known") else " (NOT the known builds' table)")
+            + ("" if t.referenced_from is not None else "; no code reference found"))
+
+
+def describe(payload: bytes, stamp: str, input_len: Optional[int] = None, notes: Sequence[str] = (), tail_blank: bool = True) -> str:
     name = build_update_name(payload, stamp)
     build = detect_build(payload)
-    lines = [f"input:           {describe_input(input_len)}"] if input_len is not None else []
+    lines = [f"input:           {describe_input(input_len, len(payload), tail_blank)}"] if input_len is not None else []
     official = len(payload) == OFFICIAL_UPDATE_SIZE
     extra = updater_extra_erase(len(payload))
     lines += [
@@ -131,11 +180,10 @@ def describe(payload: bytes, stamp: str, input_len: Optional[int] = None) -> str
         f"sha256:          {hashlib.sha256(payload).hexdigest()}",
         f"build:           {build.identity} ({build.label})",
         "                 a build match says which public image this file was made from, not whether it fits the camera it goes into",
-        f"sensor table:    " + (f"{build.marks.sensor.pairs} writes at {build.marks.sensor.init[0]:#x}, sha256 {build.marks.sensor.sha256[:8]}..."
-                                + (" (the one both known builds carry)" if build.checks.get("sensor_table_known") else " (NOT the known builds' table)")
-                                if build.marks.sensor else "NOT FOUND"),
+        f"sensor table:    {_sensor_line(build)}",
         f"software region: {'identical to the public dump' if build.exact and build.build is not None and build.build.key == 'public-dump' else ('identical to ' + build.build.label if build.exact else 'MODIFIED or unknown')}",
     ]
+    lines += [f"note:            {n}" for n in notes]
     entries = resource_directory(payload)
     problems = resource_problems(payload, entries) if entries else ["no GP+ resource pack"]
     if problems:
@@ -157,8 +205,37 @@ def describe(payload: bytes, stamp: str, input_len: Optional[int] = None) -> str
         except ValueError as exc:
             lines.append(f"settings:        {len(recs)} records; the camera would apply defaults ({exc})")
     photos = stored_photos(payload)
-    lines.append(f"stored photos:   {len(photos)}" + (" (another camera's, unless this is your own dump)" if photos else ""))
+    listed = settings_mod.photo_directory_lists(payload)
+    lines.append(f"stored photos:   {len(photos)}" + (f" ({photos_whose(payload)}); the photo directory lists {listed}" if photos else ""))
     return "\n".join(lines)
+
+
+def card_problem(out_dir: Path) -> Optional[str]:
+    """Why --out is no place for an update file, or None: a drive root or mount point, or a folder on removable
+    media (a card, a USB stick), where the camera would find the file at its next power-on. None for a folder on a
+    fixed disk, and wherever the platform does not say."""
+    root = normalize_card(str(out_dir))
+    if (out_dir.is_dir() and is_drive_root(out_dir)) or (root.is_dir() and is_drive_root(root)):
+        return f"{out_dir} is a drive root or mount point"
+    probe = Path(os.path.abspath(str(out_dir)))
+    while not probe.exists() and probe.parent != probe:
+        probe = probe.parent          # pack creates the missing folders; the medium is that of the nearest one there is
+    removable: Optional[bool] = None
+    device: Optional[str] = None
+    if os.name == "nt":
+        drive = os.path.splitdrive(str(probe))[0]
+        if drive:
+            removable = windows_volume_info(Path(drive + "\\"))[2]
+    else:
+        mount = Path(os.path.realpath(str(probe)))
+        while not is_drive_root(mount) and mount.parent != mount:
+            mount = mount.parent
+        device, _fstype = linux_mount_entry(mount)
+        if device:
+            removable = linux_removable(device)
+    if removable:
+        return f"{out_dir} lies on removable media" + (f" ({device})" if device else "") + ", like a card or a USB stick"
+    return None
 
 
 def handler(args) -> int:
@@ -167,9 +244,9 @@ def handler(args) -> int:
         print(f"error: {src} is not a file")
         return 2
     image = src.read_bytes()
+    official_size = bool(getattr(args, "official_size", False))
     try:
-        payload = prepare_payload(image, args.blank_settings, args.blank_photos, args.factory_settings,
-                                  bool(getattr(args, "official_size", False)))
+        payload = prepare_payload(image, args.blank_settings, args.blank_photos, args.factory_settings, official_size)
     except ValueError as exc:
         print(f"error: {exc}")
         return 2
@@ -179,7 +256,7 @@ def handler(args) -> int:
         print("       cannot tell that it is Charmera firmware at all. Refusing to pack it. Use --allow-unknown-build only for a")
         print("       dump taken from the camera it will go back into.")
         return 2
-    if build.build is None and build.charmera:
+    if build.made_from is None and build.charmera:
         print("note: Charmera firmware of a build this toolkit does not know. It belongs only in the camera it was dumped from,")
         print("      or, by the donor route, in a camera whose own firmware is gone: verify and stage then take --stock <that")
         print("      camera's own read> --donor <this dump> (docs/02-RECOVERY.md, section D).")
@@ -189,7 +266,8 @@ def handler(args) -> int:
     except ValueError as exc:
         print(f"error: {exc}")
         return 2
-    text = describe(payload, stamp, len(image))
+    notes = payload_notes(image, official_size)
+    text = describe(payload, stamp, len(image), notes, tail_blank=not notes)
     print(text)
     print()
     entries = resource_directory(payload)
@@ -204,6 +282,12 @@ def handler(args) -> int:
     out = out_dir / name.filename
     if out_dir.exists() and not out_dir.is_dir():
         print(f"error: --out must be a directory; pack names the file itself (it would write {out_dir}/{name.filename})")
+        return 2
+    problem = card_problem(out_dir)
+    if problem:
+        print(f"error: {problem}. pack never writes to a card or a removable medium: write the file to a folder on the")
+        print("       computer, run `charmera verify` on it, then put it on the card with `charmera stage`, which checks the file")
+        print("       again, refuses a second update file and reads the copy back.")
         return 2
     if out_dir.is_dir():
         try:
@@ -234,7 +318,7 @@ def handler(args) -> int:
         print(f"error: cannot write into {out_dir}: {exc}")
         return 2
     print(f"wrote {out}")
-    print("Before it touches a card: run `charmera verify` on it with --stock <a dump of the camera it goes into>.")
+    print("Before it touches a card: run `charmera verify` on it with --stock <a read of the chip of the camera it goes into>.")
     print("No backup of that camera's own flash chip, no flash: a file that does not fit the camera cannot be undone without one.")
     return 0
 
@@ -247,14 +331,17 @@ def register(subparsers) -> None:
                    help="build a 0x169000-byte file (code and resources only, as the film-mods files are): nothing of the camera's own area is written; "
                         "the updater's final erase then resets the settings and empties the photo list, and leaves the stored photo data and the blocks above 0x1E0000 alone")
     p.add_argument("--out", default="out",
-                   help="output directory on the computer; refused if it holds a DCIM folder (a card: use stage) or another JH_*.bin")
+                   help="output directory on the computer; refused if it is a drive root or mount point, lies on removable media "
+                        "or holds a DCIM folder (a card: use stage), or holds another JH_*.bin")
     p.add_argument("--stamp", help="build stamp of 12 ASCII digits 0-9, YYYYMMDDhhmm (default: now, UTC); must differ from 202505201029, the stamp both known builds carry")
     p.add_argument("--factory-settings", action="store_true",
                    help="keep only the first CRC-valid (factory) settings record and erase the rest of the bank; the photo directory "
                         "is zeroed only if it is erased, and stored photos are kept (add --blank-photos to remove them)")
     p.add_argument("--blank-settings", action="store_true", help="erase the settings store so the camera recreates defaults (verified in code, not on hardware)")
     p.add_argument("--blank-photos", action="store_true", help="erase the internally stored photos and their index")
-    p.add_argument("--allow-unknown-build", action="store_true")
+    p.add_argument("--allow-unknown-build", action="store_true",
+                   help="pack an image that carries no Charmera build marks: only a dump read from the camera it goes back into "
+                        "(stage refuses such a file)")
     p.add_argument("--overwrite", action="store_true", help="replace an existing output file of the same name")
     p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the update file")
     p.set_defaults(func=handler)
