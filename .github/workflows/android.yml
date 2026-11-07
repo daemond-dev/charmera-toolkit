@@ -38,6 +38,14 @@ jobs:
             "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin"
           echo "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f  $RUNNER_TEMP/stock.bin" | sha256sum -c -
           echo "CHARMERA_STOCK_IMAGE=$RUNNER_TEMP/stock.bin" >> "$GITHUB_ENV"
+          # Optional: the film-mods build's public restore file, for the test that the app names it. Its test skips without it.
+          if curl -fsSL --retry 5 -o "$RUNNER_TEMP/film-restore.bin" \
+               "https://github.com/Hyperlite-Media/charmera-film-mods/releases/download/Charmera_Restore/JH_5408202505201029_0852C329.bin" \
+             && echo "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f  $RUNNER_TEMP/film-restore.bin" | sha256sum -c -; then
+            echo "CHARMERA_FILM_MODS_RESTORE=$RUNNER_TEMP/film-restore.bin" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The film-mods restore file could not be fetched or did not match its hash; its test is skipped."
+          fi
       - name: Signing key
         id: key
         env:
