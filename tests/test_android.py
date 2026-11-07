@@ -136,15 +136,22 @@ def test_app_takes_the_stamp_and_a_changed_copy_as_image_py_does(stock_image):
     assert marks.stamp is None and marks.stamp_conflict == ("202601010101", "202505201029")
 
 
-_SOURCE_TREE = re.compile(rb"\\2247\\5408\\([\x20-\x5b\x5d-\x7e]{1,64})\\")
+_SOURCE_TREE_PREFIX = b"\\2247\\5408\\"
+_SOURCE_TREE_FOLDER = re.compile(rb"([\x20-\x5b\x5d-\x7e]{1,64})\\")
 
 
 def _source_tree(data: bytes):
     """The source-tree folder by the app's rule (S15), as (folder, offset where its name first begins, how many source
     paths name it): the folder named most often after \\2247\\5408\\ in the code area, the first found on a tie, or
-    (None, None, 0). A name is 1 to 64 bytes from 0x20 to 0x7E other than the backslash, and each path is looked for
-    after the one before."""
-    found = [(m.group(1).decode("ascii"), m.start(1)) for m in _SOURCE_TREE.finditer(data[:image.CODE_AREA_END])]
+    (None, None, 0). A name is 1 to 64 bytes from 0x20 to 0x7E other than the backslash, and every place the prefix
+    starts is looked at, even one that begins at the backslash ending the path before."""
+    code, found = data[:image.CODE_AREA_END], []
+    at = code.find(_SOURCE_TREE_PREFIX)
+    while at >= 0:
+        m = _SOURCE_TREE_FOLDER.match(code, at + len(_SOURCE_TREE_PREFIX))
+        if m:
+            found.append((m.group(1).decode("ascii"), m.start(1)))
+        at = code.find(_SOURCE_TREE_PREFIX, at + 1)
     if not found:
         return None, None, 0
     names = collections.Counter(name for name, _ in found)
@@ -159,10 +166,11 @@ def test_app_records_each_known_builds_source_folder():
     assert 'SOURCE_TREE_PREFIX = "\\\\2247\\\\5408\\\\".getBytes(' in java
     find = _bodies(java, "public static Marks findMarks(byte[] data)")[0]
     assert "indexOf(data, SOURCE_TREE_PREFIX, 0, end)" in find and "e.getValue() > trees.get(sourceTree)" in find
-    # the name's bytes, the offset kept (where the name begins) and the next search (after the path's backslash)
+    # the name's bytes, the offset kept (where the name begins) and the next search (from the next byte, so every
+    # place the prefix starts is looked at, as image.py does)
     assert "data[q] >= 0x20 && data[q] <= 0x7E && data[q] != '\\\\'" in find and "MAX_FOLDER = 64;" in java
     assert "int p = at + SOURCE_TREE_PREFIX.length;" in find and "treeAt.put(folder, p);" in find
-    assert "next = q + 1;" in find and "at = indexOf(data, SOURCE_TREE_PREFIX, next, end);" in find
+    assert "at = indexOf(data, SOURCE_TREE_PREFIX, at + 1, end);" in find and "next = q + 1;" not in find
     assert '"v006",' in _build_block(java, "PUBLIC_BUILD") and '"v008_test",' in _build_block(java, "FILM_MODS_BUILD")
     assert "A different source folder shows a different build, the same one does not show the same build, and neither" \
            " says whether the file fits your camera." in _joined(java)
@@ -188,6 +196,18 @@ def test_app_source_folders_are_the_files_own(stock_image):
         assert data[at - 11: at] == b"\\2247\\5408\\" and data[at: at + len(folder)] == folder.encode("ascii")
         marks = image.find_marks(data)
         assert (marks.source_tree, marks.source_tree_offset, marks.source_tree_paths) == (folder, at, 27), folder
+
+
+def test_app_rule_and_image_py_agree_on_overlapping_paths():
+    """Every place the prefix starts is looked at, in the app as in image.py, so a path that starts at the backslash
+    ending the one before counts on both sides (the round-three review's overlap)."""
+    code = bytearray(0x1000)
+    nested = b"G:\\code\\2247\\5408\\v006\\2247\\5408\\v007\\init.c"
+    plain = b"G:\\code\\2247\\5408\\v007\\host\\init.c"
+    code[0x100:0x100 + len(nested)] = nested
+    code[0x400:0x400 + len(plain)] = plain
+    code = bytes(code)
+    assert _source_tree(code) == image.source_tree_marks(code) == ("v007", 0x121, 2)
 
 
 def test_app_source_folders_match_image_py():

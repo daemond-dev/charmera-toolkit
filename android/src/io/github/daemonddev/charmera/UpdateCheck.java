@@ -654,8 +654,8 @@ public final class UpdateCheck {
             }
         }
         // The source-tree folder: printable ASCII other than the backslash up to the next backslash, in each source
-        // path. As in image.py, each path is looked for after the backslash that ends the one before, and the offset
-        // kept is where the folder's name begins.
+        // path. As in image.py, every place the prefix starts is looked at, even one that begins at the backslash
+        // ending the path before, and the offset kept is where the folder's name begins.
         Map<String, Integer> trees = new LinkedHashMap<>();
         Map<String, Integer> treeAt = new LinkedHashMap<>();
         for (int at = indexOf(data, SOURCE_TREE_PREFIX, 0, end); at >= 0; ) {
@@ -664,7 +664,6 @@ public final class UpdateCheck {
             while (q < end && q - p <= MAX_FOLDER && data[q] >= 0x20 && data[q] <= 0x7E && data[q] != '\\') {
                 q++;
             }
-            int next = at + 1;
             if (q > p && q - p <= MAX_FOLDER && q < end && data[q] == '\\') {
                 String folder = new String(data, p, q - p, StandardCharsets.US_ASCII);
                 Integer seen = trees.get(folder);
@@ -672,9 +671,8 @@ public final class UpdateCheck {
                 if (seen == null) {
                     treeAt.put(folder, p);
                 }
-                next = q + 1;
             }
-            at = indexOf(data, SOURCE_TREE_PREFIX, next, end);
+            at = indexOf(data, SOURCE_TREE_PREFIX, at + 1, end);
         }
         String sourceTree = null;
         for (Map.Entry<String, Integer> e : trees.entrySet()) {

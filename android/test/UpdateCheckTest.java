@@ -370,15 +370,15 @@ public final class UpdateCheckTest {
         m[0x52000 + 19 + 2] = (byte) 0xE9;     // the # as a byte above 0x7E
         expect("a byte below 0x20 or above 0x7E makes a name no folder", UpdateCheck.findMarks(m).sourceTrees.keySet()
                 .equals(java.util.Collections.singleton("v006")), null);
-        // Each path is looked for after the backslash that ends the one before, as image.py's regular expression is:
-        // here the second \2247\5408\ starts at the backslash that ends v006's path.
+        // Every place \2247\5408\ starts is looked at, as image.py does: here the second one starts at the backslash
+        // that ends v006's path, and it counts too.
         m = base.clone();
         String nested = "G:\\code\\2247\\5408\\v006\\2247\\5408\\v007\\init.c";
         m[0x50000] = 0;
         put(m, 0x50001, nested);
         m[0x50001 + nested.length()] = 0;
-        expect("a path that starts inside the one before it is not counted", UpdateCheck.findMarks(m).sourceTrees.get(
-                "v006") == 4 && !UpdateCheck.findMarks(m).sourceTrees.containsKey("v007"), null);
+        expect("a path that starts at the backslash ending the one before it is counted", UpdateCheck.findMarks(m)
+                .sourceTrees.get("v006") == 4 && UpdateCheck.findMarks(m).sourceTrees.get("v007") == 1, null);
         m = base.clone();
         for (int at : new int[]{0x3A4C8, 0x3C448, 0x46608}) {
             m[at + 1] = '3';                   // \3247\ in place of \2247\: no source path left
