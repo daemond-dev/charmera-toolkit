@@ -62,6 +62,8 @@ public class MainActivity extends Activity {
     // The buttons' labels. Instructions and messages quote them with q(), so they always match the screen.
     private static final String BACKUP = "Choose this camera's backup";
     private static final String DOWNLOAD = "Download the stock restore file";
+    private static final String MAKE_PROBE = "Make the sensor-ID probe";
+    private static final String READ_RESULT = "Read the sensor result from the card";
     private static final String USE_FILE = "Use a file on the phone";
     private static final String SAVE = "Save a copy to the phone";
     private static final String CHOOSE = CardState.CHOOSE_BUTTON;
@@ -145,6 +147,11 @@ public class MainActivity extends Activity {
     private Button chooseButton;
     private TextView cleanStatus;
     private Button saveButton;
+    private Button probeButton;
+    private Button readResultButton;
+    private TextView sensorStatus;
+    /** A read of SENSOR.TXT is running; it blocks a second read until it ends. */
+    private volatile boolean readingSensor;
     /** The owner's dump of this camera's flash chip, once chosen and accepted; the update file is compared with it. */
     private byte[] backup;
     /**
@@ -193,6 +200,10 @@ public class MainActivity extends Activity {
     /** The write confirmation while it is on screen, or null: it goes when the backup or the check changes. */
     private AlertDialog writeDialog;
 
+    // Colours for the card layout, chosen in resolveTheme() from the phone's light/dark mode and the theme accent.
+    private LinearLayout col;
+    private int accent, onAccent, windowBg, cardFill, cardStroke, disabledFill, disabledText, ripple, warnAccent, cautionFill, cautionStroke;
+
     /** The card's tree as chosen, and what was found the last time it was looked at. */
     private static final class Card {
         final Uri tree;
@@ -225,156 +236,142 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         setTitle(R.string.app_name);
+        resolveTheme();
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
+        col.setBackgroundColor(windowBg);
         int pad = dp(16);
         col.setPadding(pad, pad, pad, pad);
+        this.col = col;
 
-        col.addView(heading("Before you start"));
-        col.addView(warning("No backup of this camera, no flash. The app writes to the card only while a dump of this"
-                + " camera's own flash chip is on record (step 0), and only a file it has compared with that dump.\n"
-                + "Only for the original 2025 series: matte body, yellow Kodak boot screen. Never flash a Millennium"
-                + " Edition (blue boot screen) or a CLOT edition.\n"
-                + "Charge the camera's battery fully first."));
-        col.addView(body("A file of the longer size the camera takes (1,966,080 bytes, as the stock restore file is)"
-                + " replaces the two photos the camera keeps in its own memory. The stock restore file carries the two"
-                + " photos of the camera it was copied from, but its photo list is empty, so the camera does not show"
-                + " them; your own two are gone all the same. A file of the shorter size (1,478,656 bytes) leaves them in"
-                + " the camera's memory but erases the list, so the camera no longer shows them either. If they matter,"
-                + " copy the SPIDCIM folder off the card before you flash, with the Files app or on a computer. That is"
-                + " where the camera copies them."));
+        banner();
 
-        col.addView(heading("0. Back up this camera first"));
-        col.addView(body("Whether a firmware fits a camera cannot be told from outside. Two cameras of the same series"
-                + " can need different firmware, because they carry different image sensors, and nothing in a file or"
-                + " on the camera's screen shows which one is fitted. After the public dump's firmware was flashed, one"
-                + " original-series camera could no longer take pictures. The one file known to fit your camera is a"
-                + " dump of its own flash chip read before the camera was ever flashed, and without a dump of the chip"
-                + " a flash that does not fit cannot be undone.\n"
-                + "So first read the chip with a CH341A clip on a computer (the toolkit's backup command;"
-                + " docs/02-RECOVERY.md, section B), keep that 2 MB file somewhere safe, copy it to the phone, and tap "
-                + q(BACKUP) + ". The app takes it only if it is a complete dump that is not one of the public copies,"
-                + " nor a read with \"unverified-read\" in its name: the toolkit names a read so when no second read"
-                + " agreed with it. Which camera it was read from, and when, the app cannot tell. It then compares the"
-                + " update file with it: the two must drive the image sensor the same way, or the app will not write. A"
-                + " dump read after a flash is still the way back to what the camera runs now, but it holds what was"
-                + " flashed, not what fits: when its firmware is a public build, the app says so."));
-        backupButton = button(BACKUP, v -> pickBackup());
-        col.addView(backupButton);
+        LinearLayout s0 = stepCard("0", "Back up the camera", "Read this camera's flash chip to a 2 MB file (a CH341A"
+                + " clip on a computer — see docs/02-RECOVERY.md, section B), copy it to the phone, and choose it"
+                + " here. Every update file is compared with it before the app will write.");
+        backupButton = primary(BACKUP, v -> pickBackup());
+        s0.addView(backupButton);
         backupStatus = body("");
-        col.addView(backupStatus);
+        s0.addView(backupStatus);
+        expander(s0, "Why a backup is required", "Firmware that does not fit cannot be reversed without a chip dump"
+                + " taken before the first flash. Cameras of the same series can use different image sensors, and"
+                + " nothing on screen shows which. The app accepts only a full dump that is not a public copy or an"
+                + " \"unverified-read\", and cannot tell which camera a dump came from — so make sure it is this"
+                + " one's. A dump read after a flash holds what was flashed, not what fits; when that is a public"
+                + " build, the app says so.");
 
-        col.addView(heading("1. Get the update file"));
-        col.addView(body("The update file is the file the camera flashes itself from. Tap " + q(DOWNLOAD) + ". The app"
-                + " downloads the stock dump from GitHub (2 MB): a public copy of one working camera's memory. It checks"
-                + " the stock dump and makes the stock restore file from it. Several owners report working cameras after"
-                + " flashing it; what their cameras ran before is not known. On a camera that ran the public build it"
-                + " puts that build back, with the settings of the camera the dump came from. The app uses it only if"
-                + " it matches the published file exactly.\n"
-                + "That the file is exactly the public one says nothing about your camera. The app compares it with"
-                + " your camera's backup from step 0 and says whether the two drive the image sensor the same way."));
-        downloadButton = button(DOWNLOAD, v -> downloadDump());
-        col.addView(downloadButton);
-        TextView offline = body("No connection, or the file is already on the phone? Tap " + q(USE_FILE) + " and"
-                + " choose the stock dump or an update file. To get the stock dump in a browser, open its page: "
-                + Candidates.STOCK_DUMP_PAGE);
+        LinearLayout s1 = stepCard("1", "Get the update file", "Download the public 2 MB dump from GitHub. It is checked"
+                + " and the stock restore file is built from it. On a camera that ran the public build, flashing it"
+                + " restores that build.");
+        downloadButton = primary(DOWNLOAD, v -> downloadDump(Candidates.Kind.RESTORE));
+        s1.addView(downloadButton);
+        TextView offline = body("Offline, or the file is already on the phone? Tap " + q(USE_FILE) + " and choose the"
+                + " stock dump or an update file. In a browser: " + Candidates.STOCK_DUMP_PAGE);
         android.text.util.Linkify.addLinks(offline, android.text.util.Linkify.WEB_URLS);
-        col.addView(offline);
-        col.addView(button(USE_FILE, v -> pickFile()));
+        s1.addView(offline);
+        s1.addView(button(USE_FILE, v -> pickFile()));
         fileStatus = body("");
-        col.addView(fileStatus);
+        s1.addView(fileStatus);
         fileDetail = mono();
-        col.addView(fileDetail);
-        col.addView(body("Only for a card in the phone's own SD slot on Android 11 or later (see step 2):"));
+        s1.addView(fileDetail);
+        TextView slotNote = body("Using the phone's own SD slot on Android 11+? Save a copy, then copy it onto the card"
+                + " with the Files app (see step 2).");
+        slotNote.setPadding(0, dp(10), 0, dp(2));
+        s1.addView(slotNote);
         saveButton = button(SAVE, v -> saveCopy());
-        col.addView(saveButton);
+        s1.addView(saveButton);
         saveStatus = body("");
-        col.addView(saveStatus);
+        s1.addView(saveStatus);
+        expander(s1, "What the stock restore file is", "A public copy of a working camera's memory, under its published"
+                + " name. Several owners report working cameras after flashing it, though what their cameras ran before"
+                + " is not known. Matching the public file exactly says nothing about your camera, so the app still"
+                + " compares it with your step 0 backup before it will write.");
+        divider(s1);
+        s1.addView(subTitle("Identify the image sensor"));
+        s1.addView(body("Build the sensor-ID probe. It is a diagnostic, not a repair — it will not make the camera"
+                + " take pictures. When the camera next enters photo mode it writes the sensor's identifier to"
+                + " SENSOR.TXT on the card, then stops as it does now. It is the one file that needs no backup. Read the"
+                + " result with " + q(READ_RESULT) + " in step 4."));
+        probeButton = primary(MAKE_PROBE, v -> confirmMakeProbe());
+        s1.addView(probeButton);
+        expander(s1, "Why the probe needs no backup", "It changes no boot or update code and leaves the sensor table"
+                + " untouched — only a dead debug routine and one sensor-setup call are patched. The stock restore"
+                + " file reverses it.");
 
-        col.addView(heading("2. Connect the camera"));
-        col.addView(warning("Plugging the cable into a switched-off camera switches it on. If its card holds an update"
-                + " file, the camera flashes that file again. So always connect the camera this way:"));
-        col.addView(body("• If the camera is on, switch it off.\n"
-                + "• Take the card out of the camera.\n"
-                + "• Switch the camera on with its power key.\n"
-                + "• Wait 10 seconds. The camera looks for an update file only in the first five seconds after"
-                + " power-on.\n"
-                + "• Put the card back in.\n"
-                + "• Connect the camera to the phone with a USB-C data cable. The camera then shows its card to the"
-                + " phone as a drive: the camera's drive.\n"
-                + "Tap " + q(CHOOSE) + ". In the picker's menu, open the camera's drive. Tap \"Use this folder\" while"
-                + " you are in its top folder, not inside DCIM.\n"
-                + "No drive in the picker? See \"If the drive does not show up\" at the bottom.\n"
-                + "A USB card reader works the same way: put the card in the reader and connect the reader to the"
-                + " phone. The phone's own SD slot works the same way only on Android 7 to 10. From Android 11 on,"
-                + " Android does not let an app choose the top folder of a card in the phone's slot.\n"
-                + "On Android 11 and later, for the slot: tap " + q(SAVE) + " in step 1. Copy that file to the card's"
-                + " top folder with the Files app. Then tap " + q(USE_FILE) + " and choose the copy on the card to have"
-                + " it checked. Only when step 1 then says \"OK to put on the card\", compared with this camera's"
-                + " backup, go on with step 4."));
-        chooseButton = button(CHOOSE, v -> pickCard());
-        col.addView(chooseButton);
+        LinearLayout s2 = stepCard("2", "Connect the camera", null);
+        s2.addView(caution("Plugging the cable into a switched-off camera turns it on, and it will flash any update file"
+                + " on the card. Connect it in this order:"));
+        s2.addView(body("1. Switch the camera off and take the card out.\n"
+                + "2. Switch it on with the power key; wait 10 seconds (it only looks for an update file in the first"
+                + " five).\n"
+                + "3. Put the card back in, then connect the camera to the phone with a USB-C data cable.\n"
+                + "4. Tap " + q(CHOOSE) + ", open the camera's drive, and tap \"Use this folder\" in its top folder"
+                + " — not inside DCIM."));
+        chooseButton = primary(CHOOSE, v -> pickCard());
+        s2.addView(chooseButton);
         cardStatus = body("");
-        col.addView(cardStatus);
+        s2.addView(cardStatus);
+        expander(s2, "Card reader or the phone's SD slot", "A USB card reader works the same way. The phone's own slot"
+                + " works only on Android 7–10; from Android 11 the system will not let an app pick a card's top"
+                + " folder in the slot. For the slot on Android 11+: tap " + q(SAVE) + " in step 1, copy that file onto"
+                + " the card with the Files app, then tap " + q(USE_FILE) + " and choose the copy to have it checked."
+                + " No drive in the picker? See the last card.");
 
-        col.addView(heading("3. Write to the card"));
-        col.addView(body("Tap " + q(WRITE) + ". It works once a backup is on record in step 0, step 1 says \"OK to put"
-                + " on the card\" after comparing the file with that backup, and step 2 says the card is ready. The app"
-                + " asks before it writes. It copies the update file to the card's top folder and reads it back to check"
-                + " it."));
-        writeButton = button(WRITE, v -> confirmWrite());
-        col.addView(writeButton);
+        LinearLayout s3 = stepCard("3", "Write to the card", "Tap " + q(WRITE) + " once step 0 has a backup, step 1 says"
+                + " \"OK to put on the card\", and step 2 shows the card is ready. The file is copied to the card's top"
+                + " folder and read back to verify. Nothing changes on the camera yet.");
+        writeButton = primary(WRITE, v -> confirmWrite());
+        s3.addView(writeButton);
         writeStatus = body("");
-        col.addView(writeStatus);
+        s3.addView(writeStatus);
         ejectButton = button(EJECT, v -> openStorageSettings());
-        col.addView(ejectButton);
+        s3.addView(ejectButton);
 
-        col.addView(heading("4. Flash"));
-        col.addView(body("• Eject the drive: tap " + q(EJECT) + " above, tap the USB drive there, then \"Eject\". Or"
-                + " tap \"Eject\" in the notification Android shows for the USB drive. Then unplug the cable. With a"
-                + " card reader or the phone's slot: eject, then put the card in the camera.\n"
-                + "• Check once more: this camera's backup is kept somewhere safe, original 2025 series camera, battery"
-                + " fully charged.\n"
-                + "• If the camera is on, switch it off. Then switch it on with its power key, with the card in it. The"
-                + " camera looks for the update file only in the first five seconds after power-on. It then shows"
-                + " \"Upgrade\" with a percentage, about 15 to 20 seconds in all. Do not touch the camera or the card"
-                + " until it reaches 100%.\n"
-                + "• No \"Upgrade\" screen, and the camera starts as usual? Then it did not find the update file. Switch"
-                + " the camera off. Connect it as in step 2, and check that step 2 lists the update file. If it does,"
-                + " eject the drive and try step 4 again. If it does not, write the update file again in step 3."));
-        col.addView(warning("At 100% the camera stays on its last screen. It does not switch itself off and does not"
-                + " delete the update file. Take the card out first, then hold the power key about a second to switch"
-                + " the camera off."));
-        col.addView(body("\"Program error\" on the camera means it found the update file damaged and did not use it."
-                + " Nothing was erased, and the camera switches itself off. Take the card out. Then remove the update"
-                + " file as in step 5, and write it again in step 3."));
+        LinearLayout s4 = stepCard("4", "Flash", "Eject the drive before unplugging: tap " + q(EJECT) + " in step 3, tap"
+                + " the USB drive, then \"Eject\" (or use Android's USB notification). With a reader or the slot, eject"
+                + " and put the card in the camera.");
+        s4.addView(body("1. Confirm the backup is safe, it is an original 2025-series camera, and the battery is full.\n"
+                + "2. Switch the camera off, then on with the power key, card in it. It shows \"Upgrade\" with a"
+                + " percentage for about 15–20 seconds — do not touch anything until 100%."));
+        s4.addView(caution("At 100% the camera stays on its last screen; it does not switch off or delete the update"
+                + " file. Take the card out first, then hold the power key about a second to switch off."));
+        expander(s4, "No \"Upgrade\" screen, or \"Program error\"", "No \"Upgrade\" and it starts normally? It did not"
+                + " find the file — reconnect as in step 2, confirm step 2 lists the update file, then eject and"
+                + " retry; if it is not listed, write it again in step 3. \"Program error\" means the camera found the"
+                + " file damaged and ignored it; nothing was erased. Remove the file (step 5) and write it again.");
+        divider(s4);
+        s4.addView(subTitle("Read the sensor result"));
+        s4.addView(body("Flashed the sensor-ID probe? Open photo mode (the camera stops there as before, but writes"
+                + " SENSOR.TXT first), switch it off, reconnect the card, tap " + q(CHOOSE) + " in step 2 if needed,"
+                + " then tap " + q(READ_RESULT) + "."));
+        readResultButton = primary(READ_RESULT, v -> readSensorResult());
+        s4.addView(readResultButton);
+        sensorStatus = body("");
+        s4.addView(sensorStatus);
 
-        col.addView(heading("5. Clean up"));
-        col.addView(warning("The update file is still on the card. The camera would flash it again at every power-on,"
-                + " so remove it now."));
-        col.addView(body("• Keep the card out of the camera.\n"
-                + "• Switch the camera on with its power key, not by plugging in the cable.\n"
-                + "• Wait 10 seconds. The camera looks for the update file only in the first five seconds after"
-                + " power-on, so it cannot flash again now.\n"
-                + "• Put the card in.\n"
-                + "• Connect the camera to the phone.\n"
-                + "• Tap " + q(REMOVE) + ". If it is greyed out, first tap " + q(CHOOSE) + " and pick the camera's"
-                + " drive again.\n"
-                + "Card in the phone's own slot on Android 11 or later? Put the card in the phone. Delete the update"
-                + " file from its top folder with the Files app. Eject the card before you take it out."));
-        cleanButton = button(REMOVE, v -> confirmClean());
-        col.addView(cleanButton);
+        LinearLayout s5 = stepCard("5", "Clean up", null);
+        s5.addView(caution("The update file is still on the card, and the camera would flash it again at every"
+                + " power-on. Remove it now."));
+        s5.addView(body("1. Keep the card out of the camera. Switch the camera on with the power key (not by plugging"
+                + " in the cable) and wait 10 seconds.\n"
+                + "2. Put the card in, connect the camera, and tap " + q(REMOVE) + ". Greyed out? Tap " + q(CHOOSE)
+                + " and pick the drive again."));
+        cleanButton = primary(REMOVE, v -> confirmClean());
+        s5.addView(cleanButton);
         cleanStatus = body("");
-        col.addView(cleanStatus);
-        col.addView(body("When the update file is gone: eject the drive and unplug the cable. Then switch the camera off"
-                + " and on again. Check the boot screen, the live view and a test photo."));
+        s5.addView(cleanStatus);
+        TextView after = body("Once it is gone: eject, unplug, switch the camera off and on, and check the boot screen,"
+                + " live view, and a test photo.");
+        after.setPadding(0, dp(10), 0, dp(2));
+        s5.addView(after);
+        expander(s5, "Phone's own SD slot (Android 11+)", "Put the card in the phone, delete the update file from its"
+                + " top folder with the Files app, and eject the card before removing it.");
 
-        col.addView(heading("If the drive does not show up"));
-        col.addView(body("Check the cable first: some USB-C cables only charge.\n"
-                + "Android may refuse a card the camera has used, because the camera leaves a flag set on it. The phone"
-                + " then offers to format the card. Formatting works, but it erases everything on the card: copy your"
-                + " photos off it first, for example on a computer. On a computer, the toolkit can also clear the flag"
-                + " without erasing anything. Details: docs/05-CARDS.md and docs/06-ANDROID.md in the toolkit."));
+        LinearLayout help = card();
+        expander(help, "The drive does not show up", "Check the cable first — some USB-C cables only charge."
+                + " Android may refuse a card the camera has used (it leaves a flag set on the card) and offer to"
+                + " format it; formatting erases everything, so copy your photos off first. On a computer, the toolkit"
+                + " can clear the flag without erasing. See docs/05-CARDS.md and docs/06-ANDROID.md.");
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFitsSystemWindows(true);
@@ -519,12 +516,6 @@ public class MainActivity extends Activity {
         updateButtons();
     }
 
-    private TextView warning(String s) {
-        TextView t = body(s);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        return t;
-    }
-
     /**
      * Android does not let an app eject a drive, so this opens the storage settings, where the USB drive or card has
      * an Eject entry.
@@ -573,13 +564,206 @@ public class MainActivity extends Activity {
         updateButtons();
     }
 
-    private TextView heading(String s) {
+    /** Pick the card-layout colours from the phone's light/dark mode and the theme's accent. */
+    private void resolveTheme() {
+        boolean night = (getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        TypedValue tv = new TypedValue();
+        accent = getTheme().resolveAttribute(android.R.attr.colorAccent, tv, true) ? tv.data : 0xFF3B6FB6;
+        onAccent = 0xFFFFFFFF;
+        warnAccent = night ? 0xFFF0B429 : 0xFFB06A00;
+        if (night) {
+            windowBg = 0xFF121212;
+            cardFill = 0xFF1E1E1E;
+            cardStroke = 0xFF2E2E2E;
+            disabledFill = 0xFF333333;
+            disabledText = 0xFF808080;
+            ripple = 0x40FFFFFF;
+            cautionFill = 0xFF2A2109;
+            cautionStroke = 0xFF4A3A12;
+        } else {
+            windowBg = 0xFFF3F3F4;
+            cardFill = 0xFFFFFFFF;
+            cardStroke = 0xFFE3E3E6;
+            disabledFill = 0xFFDCDCE0;
+            disabledText = 0xFF9A9A9A;
+            ripple = 0x22000000;
+            cautionFill = 0xFFFFF7E6;
+            cautionStroke = 0xFFF0DFA8;
+        }
+    }
+
+    /** A rounded surface card, added to the main column, that step content goes into. */
+    private LinearLayout card() {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(cardFill);
+        bg.setCornerRadius(dp(14));
+        bg.setStroke(Math.max(1, dp(1)), cardStroke);
+        c.setBackground(bg);
+        int p = dp(16);
+        c.setPadding(p, p, p, p);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(12);
+        c.setLayoutParams(lp);
+        col.addView(c);
+        return c;
+    }
+
+    /** The round step number at the head of a step card. */
+    private TextView badge(String n) {
+        TextView b = new TextView(this);
+        b.setText(n);
+        b.setTextColor(onAccent);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setGravity(android.view.Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        bg.setColor(accent);
+        b.setBackground(bg);
+        int s = dp(28);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, s);
+        lp.rightMargin = dp(10);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    /** A card headed by a round step number and a bold title, then an optional line of instruction. */
+    private LinearLayout stepCard(String number, String title, String instruction) {
+        LinearLayout c = card();
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        head.addView(badge(number));
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        head.addView(t);
+        c.addView(head);
+        if (instruction != null) {
+            TextView ins = body(instruction);
+            ins.setPadding(0, dp(10), 0, dp(2));
+            c.addView(ins);
+        }
+        return c;
+    }
+
+    /** A filled accent button for a step's main action; it dims when disabled, which a bare drawable would not. */
+    private Button primary(String label, View.OnClickListener onClick) {
+        Button b = button(label, onClick);
+        int[][] states = {{-android.R.attr.state_enabled}, {}};
+        android.graphics.drawable.GradientDrawable fill = new android.graphics.drawable.GradientDrawable();
+        fill.setColor(new android.content.res.ColorStateList(states, new int[]{disabledFill, accent}));
+        fill.setCornerRadius(dp(10));
+        b.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(ripple), fill, null));
+        b.setTextColor(new android.content.res.ColorStateList(states, new int[]{disabledText, onAccent}));
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(8);
+        b.setLayoutParams(lp);
+        int py = dp(10);
+        b.setPadding(0, py, 0, py);
+        return b;
+    }
+
+    /** An amber alert box for a destructive-step warning: a tinted, rounded surface with bold text. */
+    private View caution(String text) {
+        TextView t = body(text);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(cautionFill);
+        bg.setCornerRadius(dp(10));
+        bg.setStroke(Math.max(1, dp(1)), cautionStroke);
+        t.setBackground(bg);
+        int px = dp(12);
+        t.setPadding(px, px, px, px);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(8);
+        lp.bottomMargin = dp(4);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    /** A faint rule inside a card, setting a secondary block apart from the main action. */
+    private void divider(LinearLayout parent) {
+        View line = new View(this);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
+        lp.topMargin = dp(16);
+        lp.bottomMargin = dp(4);
+        line.setLayoutParams(lp);
+        line.setBackgroundColor(cardStroke);
+        parent.addView(line);
+    }
+
+    /** A bold sub-heading inside a card. */
+    private TextView subTitle(String s) {
         TextView t = new TextView(this);
         t.setText(s);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setPadding(0, dp(20), 0, dp(6));
+        t.setPadding(0, dp(4), 0, dp(2));
         return t;
+    }
+
+    /** A tappable label that shows or hides a block of detail, collapsed to begin with. */
+    private void expander(LinearLayout parent, String label, String detail) {
+        final TextView detailView = body(detail);
+        detailView.setVisibility(View.GONE);
+        final TextView toggle = new TextView(this);
+        toggle.setText("▸ " + label);
+        toggle.setTextColor(accent);
+        toggle.setTypeface(Typeface.DEFAULT_BOLD);
+        toggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        toggle.setPadding(0, dp(10), 0, dp(4));
+        toggle.setOnClickListener(v -> {
+            boolean show = detailView.getVisibility() == View.GONE;
+            detailView.setVisibility(show ? View.VISIBLE : View.GONE);
+            toggle.setText((show ? "▾ " : "▸ ") + label);
+        });
+        parent.addView(toggle);
+        parent.addView(detailView);
+    }
+
+    /** The one hard rule, in a card with an amber title, at the top of the screen. */
+    private void banner() {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(cautionFill);
+        bg.setCornerRadius(dp(14));
+        bg.setStroke(Math.max(1, dp(1)), cautionStroke);
+        c.setBackground(bg);
+        int bp = dp(16);
+        c.setPadding(bp, bp, bp, bp);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.bottomMargin = dp(12);
+        c.setLayoutParams(blp);
+        col.addView(c);
+        TextView t = new TextView(this);
+        t.setText("Before you flash");
+        t.setTextColor(warnAccent);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        c.addView(t);
+        TextView rule = body("No backup of this camera, no flash. Original 2025 series only — matte body, yellow"
+                + " Kodak boot screen; never a Millennium Edition (blue boot screen) or a CLOT edition. Charge the"
+                + " battery fully first.");
+        rule.setPadding(0, dp(6), 0, dp(2));
+        c.addView(rule);
+        expander(c, "What a flash does to your photos", "A longer file (1,966,080 bytes, like the stock restore file)"
+                + " replaces the two photos the camera keeps in its own memory. A shorter one (1,478,656 bytes) keeps"
+                + " them but clears the list, so the camera stops showing them either way. To keep them, copy the"
+                + " SPIDCIM folder off the card first, with the Files app or a computer.");
     }
 
     private TextView body(String s) {
@@ -621,6 +805,8 @@ public class MainActivity extends Activity {
         writeButton.setEnabled(idle && fileOk && cardOk);
         cleanButton.setEnabled(idle && card != null && card.state.listed && !card.state.updateFiles.isEmpty());
         downloadButton.setEnabled(idle && !downloading);
+        probeButton.setEnabled(idle && !downloading);
+        readResultButton.setEnabled(idle && !readingSensor && card != null && card.state.listed);
         backupButton.setEnabled(idle && !loadingBackup);
         saveButton.setEnabled(idle && fileOk);
         // Another drive picked during a write would show the write's result under the wrong drive.
@@ -738,6 +924,11 @@ public class MainActivity extends Activity {
             }
         }
         return null;
+    }
+
+    /** Whether a checked file is the sensor-ID probe, by its reviewed SHA-256: the one file written without a backup. */
+    private static boolean isProbe(UpdateCheck.Result result) {
+        return result != null && Candidates.Kind.PROBE.sha256.equals(result.sha256);
     }
 
     /** The first sentence of a message: up to and including the first full stop that ends a sentence. */
@@ -877,6 +1068,13 @@ public class MainActivity extends Activity {
             checking = false;
             return;
         }
+        // The probe is backup-independent; its check is never re-made against a backup. This keys on the applied
+        // check (fileCheck), which is set and cleared together with fileData on the UI thread, so a probe in fileData
+        // always has isProbe(fileCheck) true here (finding 7). Keep that lock-step if you change how file state is set.
+        if (isProbe(fileCheck)) {
+            checking = false;
+            return;
+        }
         if (!checking && fileCheck != null && Objects.equals(fileCheck.referenceSha256, backupSha256)) {
             return;   // already checked against this backup
         }
@@ -918,7 +1116,11 @@ public class MainActivity extends Activity {
         fileName = name;
         fileOrigin = origin;
         fileChosen = chosen;
-        if (!Objects.equals(result.referenceSha256, backupSha256)) {
+        // The sensor-ID probe is backup-independent (WriteGate's one exemption): it is checked with no reference
+        // (buildRestore), so its check never needs re-checking against the backup on record, and must not be —
+        // comparing it with a backup it was never meant to match would fail its sensor-table line and refuse the one
+        // file that needs no backup. Apply the probe's check as it stands.
+        if (!isProbe(result) && !Objects.equals(result.referenceSha256, backupSha256)) {
             fileCheck = null;
             recheckFile();
             return;
@@ -932,6 +1134,10 @@ public class MainActivity extends Activity {
         String next;
         if (!result.ok) {
             next = "";
+        } else if (isProbe(result)) {
+            next = "This is the sensor-ID probe, so it needs no backup in step 0. Connect the camera (step 2) and tap "
+                    + q(WRITE) + ". After it flashes, open photo mode on the camera, then read it with " + q(READ_RESULT)
+                    + " in step 4.";
         } else if (!result.compared) {
             next = "Next: choose this camera's backup in step 0, so the app can compare the file with it. It does not"
                     + " write to the card without that.";
@@ -1061,8 +1267,8 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** Download the public stock dump from its pinned upstream address, then make the stock restore file from it. */
-    private void downloadDump() {
+    /** Download the public stock dump from its pinned upstream address, then make the chosen kind of file from it. */
+    private void downloadDump(Candidates.Kind kind) {
         dismissDialog();
         final int request = ++fileRequest;
         fileData = null;
@@ -1074,7 +1280,7 @@ public class MainActivity extends Activity {
             writeStatus.setText("");
         }
         if (stockDump != null) {               // already downloaded and checked: make the file again without a new download
-            buildRestore(stockDump, request, "Used the stock dump the app already has.");
+            buildRestore(stockDump, request, "Used the stock dump the app already has.", kind);
             return;
         }
         showFile("Downloading the stock dump from GitHub (2 MB)…", null);
@@ -1133,9 +1339,41 @@ public class MainActivity extends Activity {
                     updateButtons();
                     return;
                 }
-                buildRestore(d, request, "Downloaded the stock dump from GitHub and checked it.");
+                buildRestore(d, request, "Downloaded the stock dump from GitHub and checked it.", kind);
             });
         });
+    }
+
+    /** Explain the sensor-ID probe (a diagnostic, written without a backup), then build it on the owner's go-ahead. */
+    private void confirmMakeProbe() {
+        if (busy() || dialog != null || downloading) {
+            return;
+        }
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Make the sensor-ID probe?")
+                .setMessage("This is a diagnostic, not a repair. It will not make the camera take pictures.\n\n"
+                        + "It is the one file the app puts on the card without a backup in step 0, because it is built"
+                        + " from the public build and the stock restore file (step 1) puts it back: its boot and update"
+                        + " code are that file's, byte for byte.\n\n"
+                        + "After you flash it (steps 2 to 4) and open photo mode on the camera, it writes the image"
+                        + " sensor's identifier to SENSOR.TXT on the card and the camera stops as it does now. Read it"
+                        + " with " + q(READ_RESULT) + " in step 4.\n\n"
+                        + "The app cannot prove the file fits your camera without a dump of its chip, which you do not"
+                        + " have. The worst case is an empty result, not a damaged camera.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Make it", (di, w) -> downloadDump(Candidates.Kind.PROBE))
+                .create();
+        d.setOnDismissListener(di -> {
+            if (dialog == di) {
+                dialog = null;
+            }
+            if (!gone()) {
+                updateButtons();
+            }
+        });
+        dialog = d;
+        d.show();
+        updateButtons();
     }
 
     private static byte[] fetch(String address) throws IOException {
@@ -1154,13 +1392,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Make the stock restore file from the dump. from says where the dump came from, for the top of step 1's readout. */
-    private void buildRestore(byte[] dump, int request, String from) {
+    /** Make the chosen kind of update file from the dump. from says where the dump came from, for step 1's readout. */
+    private void buildRestore(byte[] dump, int request, String from, Candidates.Kind kind) {
         stockDump = dump;
         if (request != fileRequest) {
             return;
         }
-        final Candidates.Kind kind = Candidates.Kind.offeredKinds()[0];   // the stock restore file is the one file offered
         final byte[] ref = backup;
         showFile("Making the update file…", null);
         WORKER.execute(() -> {
@@ -1170,7 +1407,7 @@ public class MainActivity extends Activity {
             String technical = null;
             try {
                 data = Candidates.build(dump, kind);
-                result = UpdateCheck.check(kind.fileName, data, UpdateCheck.PUBLIC_BUILD, ref);
+                result = Candidates.check(kind.fileName, data, ref);
             } catch (RuntimeException e) {
                 data = null;
                 result = null;
@@ -1270,7 +1507,7 @@ public class MainActivity extends Activity {
                                 + "; the public stock dump's is " + Candidates.STOCK_DUMP_SHA256 + ".");
                     }
                 } else {
-                    result = UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
+                    result = Candidates.check(name, data, ref);
                     boolean renamed = result.cardName != null && !result.cardName.equals(name);
                     boolean restore = Candidates.Kind.RESTORE.sha256.equals(result.sha256);
                     Candidates.Kind withdrawn = withdrawnKind(result.sha256);
@@ -1331,7 +1568,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (s != null) {
-                    buildRestore(s, request, from);
+                    buildRestore(s, request, from, Candidates.Kind.RESTORE);
                     return;
                 }
                 if (r != null && o != null) {
@@ -1428,6 +1665,7 @@ public class MainActivity extends Activity {
             if (!busy()) {
                 writeStatus.setText("");
                 cleanStatus.setText("");
+                sensorStatus.setText("");    // a sensor result read from another drive no longer applies
             }
             if (!DocumentsContract.isTreeUri(uri)) {
                 tree = null;
@@ -1571,7 +1809,9 @@ public class MainActivity extends Activity {
             return;
         }
         final String name = check.cardName;
-        final String backupLine = backupName + ", SHA-256 " + backupSha256.substring(0, 16) + "…";
+        final boolean probe = isProbe(check);
+        final String backupLine = backupSha256 == null ? null
+                : backupName + ", SHA-256 " + backupSha256.substring(0, 16) + "…";
         CardState.Item same = c.state.sameFile(check);
         if (same != null) {
             compareWithCard(c, same, check);
@@ -1583,14 +1823,21 @@ public class MainActivity extends Activity {
             return;
         }
         AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Write the update file to the card?")
+                .setTitle(probe ? "Write the sensor-ID probe to the card?" : "Write the update file to the card?")
                 .setMessage("The app copies the update file to the card's top folder. Nothing changes on the camera"
                         + " yet: it flashes the file the next time it switches on with this card in it.\n\n"
                         + "Update file: " + name + "\n"
-                        + "Compared with this camera's backup: " + backupLine + "\n"
+                        + (probe
+                            ? "This is the sensor-ID probe, written without a backup (the one file the app allows"
+                            + " that). It reads the image sensor's identifier to SENSOR.TXT and does not fix the"
+                            + " camera.\n"
+                            : "Compared with this camera's backup: " + backupLine + "\n")
                         + "Card: " + (c.state.label == null ? "the chosen card" : c.state.label) + "\n\n"
-                        + "The app cannot tell which camera a backup was read from: write only if that backup is a"
-                        + " read of the camera this card goes into.\n\n"
+                        + (probe
+                            ? "After it flashes, open photo mode on the camera, then read the result with "
+                            + q(READ_RESULT) + " in step 4.\n\n"
+                            : "The app cannot tell which camera a backup was read from: write only if that backup is a"
+                            + " read of the camera this card goes into.\n\n")
                         + "Detail: " + UpdateCheck.bytes(check.size) + ", SHA-256 " + check.sha256 + ".")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Write", (di, w) -> write(c, data, check))
@@ -1661,6 +1908,7 @@ public class MainActivity extends Activity {
         final Operation op = start(true, 1);
         setStatus(writeStatus, WRITING);
         cleanStatus.setText("");          // a result about an earlier removal no longer applies
+        sensorStatus.setText("");         // a sensor result from a previous flash no longer applies
         updateButtons();
         WORKER.execute(() -> {
             String outcome = null;
@@ -1796,6 +2044,107 @@ public class MainActivity extends Activity {
         }
     }
 
+    // --- reading the sensor-ID probe's result -------------------------------------------------------------------
+
+    /** Read SENSOR.TXT the sensor-ID probe wrote to the card, and say in plain words what its two bytes mean. */
+    private void readSensorResult() {
+        final Card c = card;
+        if (busy() || dialog != null || readingSensor || c == null || !c.state.listed) {
+            return;
+        }
+        final Uri t = c.tree;
+        readingSensor = true;
+        setStatus(sensorStatus, "Reading SENSOR.TXT from the card…");
+        updateButtons();
+        WORKER.execute(() -> {
+            String text;
+            try {
+                text = decodeSensor(readCardFile(t, "SENSOR.TXT"));
+            } catch (RuntimeException e) {
+                text = "Could not read the card: " + sentence(cause(e, "the drive may have come loose")) + " Tap "
+                        + q(CHOOSE) + " in step 2 and pick the drive again." + detail(why(e));
+            }
+            final String tt = text;
+            ui.post(() -> {
+                if (gone()) {
+                    return;
+                }
+                readingSensor = false;
+                setStatus(sensorStatus, tt);
+                updateButtons();
+            });
+        });
+    }
+
+    /**
+     * The bytes of the file with this name in the card's top folder (any case), or null when the card was read and
+     * there is genuinely no such file. A card that cannot be read now returns a null children cursor (as fillCard
+     * treats it too): that throws, so a dropped or loose drive is never reported as a missing file.
+     */
+    private byte[] readCardFile(Uri t, String name) {
+        String docId = DocumentsContract.getTreeDocumentId(t);
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(t, docId);
+        String foundId = null;
+        try (Cursor q = getContentResolver().query(children, new String[]{
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE}, null, null, null)) {
+            if (q == null) {
+                throw new RuntimeException("the drive did not answer");
+            }
+            while (q.moveToNext()) {
+                if (name.equalsIgnoreCase(q.getString(1))
+                        && !DocumentsContract.Document.MIME_TYPE_DIR.equals(q.getString(2))) {
+                    foundId = q.getString(0);
+                    break;
+                }
+            }
+        }
+        if (foundId == null) {
+            return null;
+        }
+        try (InputStream in = getContentResolver().openInputStream(
+                DocumentsContract.buildDocumentUriUsingTree(t, foundId))) {
+            return readAll(in);
+        } catch (IOException e) {
+            throw new RuntimeException(why(e).isEmpty() ? "the file could not be read" : why(e));
+        }
+    }
+
+    /** What SENSOR.TXT's two bytes mean, for the owner. */
+    private String decodeSensor(byte[] b) {
+        if (b == null) {
+            return "No SENSOR.TXT on the card yet.\n\nFlash the sensor-ID probe (steps 2 to 4), then open photo mode on"
+                    + " the camera: it stops there as before, but writes the file first. Then bring the card back and"
+                    + " tap " + q(READ_RESULT) + " again.";
+        }
+        if (b.length < 2) {
+            return "SENSOR.TXT holds " + b.length + (b.length == 1 ? " byte" : " bytes") + ", not the two the probe"
+                    + " writes. The probe may not have finished. Flash it again, open photo mode, and read it again.";
+        }
+        int hi = b[0] & 0xFF;
+        int lo = b[1] & 0xFF;
+        String id = String.format(java.util.Locale.ROOT, "0x%02X 0x%02X", hi, lo);
+        // SENSOR.TXT should be exactly the two bytes the probe writes; anything longer was written by something else.
+        String caveat = b.length > 2 ? "\n\nNote: SENSOR.TXT is longer than the two bytes the probe writes, so it may"
+                + " be a different file. Remove it (step 5), flash the probe again, then read once more." : "";
+        // No answer: the sensor bus reads all-ones or all-zeros. Neither is a real sensor ID, so treat both as no read.
+        if ((hi == 0xFF && lo == 0xFF) || (hi == 0x00 && lo == 0x00)) {
+            return "Sensor ID " + id + ": the sensor did not answer, or the camera stopped before the read. No harm"
+                    + " done. Flash the probe again and make sure you open photo mode before reading." + caveat;
+        }
+        // The SP140A reports 0x14 (product-ID high) then 0x0A (low). The probe writes high byte first, but accept
+        // either order so a reversed read still names it rather than falling through to "a different sensor".
+        if ((hi == 0x14 && lo == 0x0A) || (hi == 0x0A && lo == 0x14)) {
+            return "Sensor ID " + id + ": the SP140A, the sensor the firmware already drives.\n\nSo the sensor is not"
+                    + " the mismatch. The fault is in the camera's hardware (power, clock or wiring to the sensor),"
+                    + " which no firmware change can fix. The way forward is a replacement sensor or camera, not"
+                    + " another flash." + caveat;
+        }
+        return "Sensor ID " + id + ": a different sensor from the one the firmware drives. That is the useful result:"
+                + " now that the sensor is named, building a firmware that drives it becomes possible. Note this pair"
+                + " down." + caveat;
+    }
+
     // --- cleaning up --------------------------------------------------------------------------------------------
 
     private void confirmClean() {
@@ -1836,6 +2185,7 @@ public class MainActivity extends Activity {
         final Operation op = start(false, files.size());
         setStatus(cleanStatus, REMOVING);
         writeStatus.setText("");          // a result about the write before the flash no longer applies
+        sensorStatus.setText("");         // a sensor result from a previous flash no longer applies
         updateButtons();
         WORKER.execute(() -> {
             String outcome = null;

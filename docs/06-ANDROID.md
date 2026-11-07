@@ -38,13 +38,12 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 ## The app
 
 [Charmera Card](../android/README.md) does the card part on the phone: it downloads the public stock dump, makes the
-published stock restore file from it (it can make nothing else), compares that file with your backup, writes it to
+published stock restore file from it and a sensor-ID probe (it builds nothing else), compares the restore file with your backup, writes it to
 the camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup. It
-writes nothing without a backup on record. That is version 0.5.
+writes nothing without a backup on record, except the sensor-ID probe (described below). That is version 0.7.
 Download [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
-on the phone, and check which version you got: 0.5 is the release titled "Charmera Card for Android 0.5", and its
-screen opens with "Before you start" and "No backup of this camera, no flash", then a step "0. Back up this camera
-first". Version 0.4, published before it, had no backup step and did not refuse the withdrawn candidates C, A and B;
+on the phone. Its screen is a column of cards: a yellow "Before you flash" notice ("No backup of this camera, no
+flash"), then numbered steps beginning with "Back up the camera". Version 0.4, published before it, had no backup step and did not refuse the withdrawn candidates C, A and B;
 it was taken down on 2026-11-06, and if you still have it installed, do not flash with it. The rest of this page is
 the same job done by hand, and what the app cannot help with.
 
@@ -60,6 +59,37 @@ Which way the card reaches the app depends on the Android version:
   (**Use a file on the phone**), with your backup on record in step 0, to have it checked where it lies. If the check
   finds a problem, or there was no backup on record to compare the file with, delete the copy before the card goes
   into the camera. Delete it with the Files app after the flash too.
+
+## Identify the image sensor (the sensor-ID probe)
+
+If a camera boots to its menu but freezes when it enters photo or video mode, the cause may be an image sensor the
+firmware does not drive. The app can build a **sensor-ID probe** (step 1, "Identify the image sensor") to find out
+which sensor is fitted. It is a diagnostic, not a repair: it does not make the camera take pictures.
+
+The probe is the stock restore file with a small reviewed patch. Its boot code, update code and image-sensor table
+are the stock restore file's byte for byte; only a dead debug routine and the one call that writes the sensor set-up
+are changed. When the camera next enters photo mode, the patch reads the sensor's identifier over the sensor bus,
+writes the two bytes (product-ID high then low) to `SENSOR.TXT` in the card's root, then stops as the camera does
+now. Because it changes no boot or update code and the stock restore file puts it back, it is the one file the app
+writes without a backup in step 0.
+
+After flashing it and opening photo mode, bring the card back to the phone and tap **Read the sensor result from the
+card** (step 4). The two bytes read as:
+
+- `14 0A` — the SP140A, the sensor the firmware already drives. The sensor is not the mismatch; the fault is in the
+  camera's hardware (power, clock or wiring to the sensor), which no firmware change can fix.
+- `FF FF` or `00 00` — the sensor did not answer, or the camera stopped before the read. No harm done; flash the
+  probe again and open photo mode before reading.
+- any other pair — a different sensor from the one the firmware drives. Now that it is named, building a firmware
+  that drives it becomes possible.
+
+The app builds the probe deterministically and checks it against a fixed hash, so a wrong byte cannot produce a
+usable file. The exact artifact:
+
+- file name: `JH_5408202611071200_0F065671.bin`
+- SHA-256: `be19fb35d1ce1c17ffdb56c5cdaa0232c21dd6bd50e32359ee293c21a5a4650b`
+
+To undo it, flash the stock restore file (`JH_5408202610261427_0F065D55.bin`), which the app also makes.
 
 ## What the phone has to do
 

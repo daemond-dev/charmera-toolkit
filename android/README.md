@@ -3,7 +3,7 @@
 A small Android app (7.0 or later) that does an SD-card flash from the phone, with no computer for the card part: it
 downloads the public stock firmware dump, makes the published stock restore file from it, compares that file with a
 dump of your own camera's flash chip, writes it to the camera's card over the camera's USB-C cable, and walks you through
-flashing and cleaning up. The camera flashes itself from the card, as described in [The first flash](../docs/01-FIRST-FLASH.md).
+flashing and cleaning up. It can also build a **sensor-ID probe** that reports which image sensor a camera has — a diagnostic for a camera that boots to its menu but freezes entering photo mode. The camera flashes itself from the card, as described in [The first flash](../docs/01-FIRST-FLASH.md).
 
 **No backup of your own camera, no flash.** The app writes to the card only while a dump of that camera's own flash chip
 is on record (step 0 on its screen), and only an update file it has compared with that dump. Whether a firmware fits a
@@ -25,11 +25,12 @@ Status, 2026-11-06: the app wrote two files to one camera's card that day, over 
 in the camera. Version 0.3 wrote candidate C, which the camera flashed twice (the second time when the cable was plugged
 into it while it was switched off, which the connection steps below now prevent); version 0.4 wrote the stock restore
 file. The writing, the flashes and the cleanup worked as the app describes them. Neither file fitted that camera, which
-is why 0.5 adds the backup step.
+is why 0.5 adds the backup step. Version 0.7 adds a sensor-ID probe that reports which image sensor a camera has, and
+rebuilds the screen as a column of cards.
 
 Version 0.4, the one published at the [android-app release](https://github.com/daemond-dev/charmera-toolkit/releases/tag/android-app)
 before 0.5, had no backup step and did not refuse C, A or B; it was taken down on 2026-11-06, and if you still have
-it installed, do not flash with it. 0.5 had not been run on a phone when this was written. Its plain-Java parts (the
+it installed, do not flash with it. 0.7 had not been run on a phone when this was written. Its plain-Java parts (the
 checker, the card
 rules, the file builder and WriteGate, the rule the screen asks before every write and save) compile and pass their
 tests on a computer's JVM ([Build](#build)). The screen itself needs the Android SDK and is built only by the
@@ -60,10 +61,9 @@ workflow.
 
 ## Install
 
-Check the version first: 0.5 is the release titled "Charmera Card for Android 0.5", and its screen opens with "Before
-you start" and "No backup of this camera, no flash", then a step "0. Back up this camera first". Version 0.4 had no
-backup step and did not refuse the withdrawn candidates C, A and B; if you still have it installed, do not flash
-with it.
+Check the version first: the current build's screen is a column of cards, headed by a yellow "Before you flash" notice
+("No backup of this camera, no flash") and a numbered step "Back up the camera". Version 0.4 had no backup step and did
+not refuse the withdrawn candidates C, A and B; if you still have it installed, do not flash with it.
 
 Download
 [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
@@ -74,7 +74,7 @@ phone over USB.
 
 ## Use
 
-The app's screen is the same six steps.
+The app's screen is a column of cards, one per step; a card's **▸** line opens the detail behind it. The six steps:
 
 0. **Back up this camera first.** Copy the 2 MB file the toolkit's `backup` command read from this camera's chip to
    the phone and tap **Choose this camera's backup**. The app takes it only if it is a complete dump that carries the
@@ -107,7 +107,7 @@ The app's screen is the same six steps.
    cannot be cleared and the write stays off. Offline, or made a file on a computer?
    **Use a file on the phone** takes the stock dump, a `JH_5408…bin` file of either size the app accepts (0x1E0000 or
    0x169000 bytes), or a copy already on the card. If the file chosen is candidate C, A or B, the app refuses it: the
-   file is dropped, and the write and the copy stay off ([why](../docs/03-FLASH-CANDIDATES.md)).
+   file is dropped, and the write and the copy stay off ([why](../docs/03-FLASH-CANDIDATES.md)). Under step 1 is also **Make the sensor-ID probe**: a diagnostic that writes the camera's image-sensor identifier to `SENSOR.TXT` when the camera next enters photo mode, read back with **Read the sensor result from the card** in step 4. It is the one file the app writes without a backup, because it changes no boot or update code and the stock restore file above puts it back ([the probe](../docs/06-ANDROID.md#identify-the-image-sensor-the-sensor-id-probe)).
 2. **Connect the camera.** Plugging the cable into a switched-off camera switches it on, and if its card holds an
    update file the camera flashes that file again. So the app always has you connect the camera this way: switch
    it off if it is on, take the card out, switch the camera on with its power key, wait 10 seconds, put the card
@@ -158,7 +158,7 @@ that flash is wanted.
   compares the update file with it ([Recovery, section B](../docs/02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)).
 - **Unreadable cards:** it cannot make Android read a card the camera has marked dirty. Format the card in the
   phone, or run `charmera card-fix` on a computer ([SD card problems](../docs/05-CARDS.md)).
-- **Other mods:** it makes only the stock restore file. A file from your own backup, frames, a boot logo or start-up
+- **Other mods:** it makes only the stock restore file and the sensor-ID probe. A file from your own backup, frames, a boot logo or start-up
   tweaks need the toolkit on a computer, or in Termux ([Using an Android phone](../docs/06-ANDROID.md)); the app then
   checks the file they produce, against your backup, and writes it. In Termux, `pip install` takes the toolkit
   straight from its GitHub URL.

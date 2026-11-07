@@ -434,9 +434,18 @@ def test_release_certificate_is_pinned_and_the_workflow_checks_it():
 def test_app_candidates_match_the_documented_ones():
     java = (SRC.parent / "Candidates.java").read_text(encoding="utf-8")
     doc = (SRC.parents[6] / "docs" / "03-FLASH-CANDIDATES.md").read_text(encoding="utf-8")
-    for name, sha in re.findall(r'"(JH_5408\d{12}_[0-9A-F]{8}\.bin)", "([0-9a-f]{64})"', java):
+    android = (SRC.parents[6] / "docs" / "06-ANDROID.md").read_text(encoding="utf-8")
+    pairs = re.findall(r'"(JH_5408\d{12}_[0-9A-F]{8}\.bin)", "([0-9a-f]{64})"', java)
+    assert len(pairs) == 5   # restore, C, A, B, and the sensor-ID probe
+    # The four flash candidates are documented in docs/03; the probe is a diagnostic, documented in the Android guide.
+    probe = [(n, h) for n, h in pairs if n not in doc or h not in doc]
+    assert len(probe) == 1, "exactly one candidate (the sensor-ID probe) should not be a docs/03 flash candidate"
+    for name, sha in pairs:
+        if (name, sha) == probe[0]:
+            continue
         assert name in doc and sha in doc, name
-    assert len(re.findall(r'"JH_5408\d{12}_[0-9A-F]{8}\.bin", "[0-9a-f]{64}"', java)) == 4   # restore, C, A, B
+    pn, ph = probe[0]
+    assert pn in android and ph in android, "the sensor-ID probe must be documented in docs/06-ANDROID.md"
     stock = re.search(r'STOCK_DUMP_SHA256 = "([0-9a-f]{64})"', java).group(1)
     assert "charmera_stock_latest.bin" in image.PUBLIC_DUMPS[stock]
     commit = "209c25a47ce91c805b663edb6e18861b367a5a1b"
@@ -484,14 +493,33 @@ def test_app_never_uses_a_check_made_against_another_backup():
     nothing is written meanwhile, and a write confirmation, a "Done" and a "Saved" made with the old backup go."""
     java = ACTIVITY.read_text(encoding="utf-8")
     apply = _bodies(java, "private void applyCheck(")[0]
-    stale = apply.index("if (!Objects.equals(result.referenceSha256, backupSha256)) {")
+    # Finding 7: the sensor-ID probe is backup-independent and exempt from the re-check; every other file whose check
+    # was made against a different backup is re-checked, and nothing is kept meanwhile. Lock the exact condition so a
+    # dropped !isProbe guard cannot pass.
+    assert "if (!isProbe(result) && !Objects.equals(result.referenceSha256, backupSha256)) {" in apply
+    stale = apply.index("!Objects.equals(result.referenceSha256, backupSha256)")
     assert stale < apply.index("recheckFile();") < apply.index("showChecked(result, origin, chosen);")
     assert "fileCheck = null;" in apply[stale:apply.index("recheckFile();")]
     for opener in ("private void loadFile(", "private void buildRestore("):
         body = _bodies(java, opener)[0]
         assert "applyCheck(" in body and "fileCheck = r;" not in body, opener
+    # The probe is checked with no reference on every file-entry path, through one shared rule (Candidates.check), so
+    # no backup it was never meant to match can refuse it (finding 7). recheckFile never checks the probe (its guard).
+    for opener in ("private void loadFile(", "private void buildRestore("):
+        assert "Candidates.check(" in _bodies(java, opener)[0], opener
+    cand = (PKG / "Candidates.java").read_text(encoding="utf-8")
+    check_rule = _bodies(cand, "public static UpdateCheck.Result check(")[0]
+    # Lock the exact polarity: a != -> == typo must fail here (CandidatesTest also proves the rule by execution).
+    assert "reference != null && isProbe(data) ? null : reference" in check_rule
+    probe_rule = _bodies(cand, "public static boolean isProbe(")[0]
+    assert "Kind.PROBE.sha256.equals(" in probe_rule and "sha256Hex(data" in probe_rule
     recheck = _bodies(java, "private void recheckFile()")[0]
     assert "checking = true;" in recheck and "fileCheck = null;" in recheck and "dismissWriteDialog();" in recheck
+    # The probe is never re-checked against a backup: the isProbe(fileCheck) guard must RETURN. Slice to the NEXT
+    # if-statement so a dropped return inside this guard (leaving a later return in the slice) fails here.
+    guard = recheck.index("if (isProbe(fileCheck)) {")
+    guard_block = recheck[guard:recheck.index("if (", guard + 1)]
+    assert "return;" in guard_block
     posted = _bodies(recheck, "ui.post(() ->")[0]
     assert "check != checkRequest" in posted and "checking = false;" in posted and "dismissWriteDialog();" in posted
     load = _bodies(java, "private void loadBackup(")[0]
@@ -504,7 +532,7 @@ def test_app_never_uses_a_check_made_against_another_backup():
     assert "savedWith != null && !savedWith.equals(now)" in outdated and "startsWith(SAVED)" in outdated
     assert "writtenWith = op.backupSha256;" in _bodies(java, "private void catchUp()")[0]
     assert "savedWith = with;" in _bodies(java, "private void writeCopy(")[0]
-    for opener in ("private void loadFile(", "private void downloadDump()"):
+    for opener in ("private void loadFile(", "private void downloadDump("):
         assert "checking = false;" in _bodies(java, opener)[0], opener
     show = _bodies(java, "private void showChecked(")[0]
     assert "backup == null" not in show and show.count("result.compared") == 2
@@ -531,7 +559,7 @@ def test_app_points_to_step_0_only_a_dump_that_step_0_takes():
     """A 2 MiB file picked in step 1 is pointed to step 0 only when step 0 would take it as a backup; any other one
     gets what UpdateCheck.backupProblem finds wrong with it. Candidates.stockDump's refusal names no step."""
     load = _bodies(ACTIVITY.read_text(encoding="utf-8"), "private void loadFile(")[0]
-    dump = load[load.index("} else if (data.length == Candidates.DUMP_SIZE) {"): load.index("result = UpdateCheck.check(name, data")]
+    dump = load[load.index("} else if (data.length == Candidates.DUMP_SIZE) {"): load.index("result = Candidates.check(name, data")]
     assert "String problem = UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S);" in dump
     accepted, refused = dump.split("} else {", 1)
     assert "if (problem == null) {" in accepted and "q(BACKUP)" in accepted

@@ -40,8 +40,28 @@ public final class Candidates {
             Arrays.asList("BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV");
 
     /**
+     * The sensor-ID probe (Kind.PROBE): the stock restore file with a reviewed 172-byte patch in two windows, over the
+     * restore file's own bytes and nothing else, both inside the 0x1E0000 image. PROBE_HOOK, at PROBE_HOOK_OFFSET,
+     * redirects the one call that writes the image sensor's set-up table so the patch runs first. PROBE_STUB, at
+     * PROBE_STUB_OFFSET, is that patch, written over a routine the firmware never calls: it reads the sensor's ID
+     * register over the sensor bus, writes the two bytes to C:\SENSOR.TXT on the card, then lets the set-up table be
+     * written and the camera stop as before. build() checks the result against Kind.PROBE's SHA-256, so a wrong offset
+     * or byte here cannot produce a file the app will use.
+     */
+    static final int PROBE_HOOK_OFFSET = 0x7B898;
+    static final int PROBE_STUB_OFFSET = 0x62120;
+    static final byte[] PROBE_HOOK = hex("209affeb");
+    static final byte[] PROBE_STUB = hex("f04f2de908d04de20040a0e178509fe50500a0e1fd10a0e30020a0e3392effeb0500a0e10210a0e30d20a0e13f2effeb0500a0e1" +
+            "0310a0e302208de23b2effebb000dde1b210dde10400cde50510cde53c009fe534109fe58f0402eb000050e3050000ba0060a0e1" +
+            "04108de20220a0e3430502eb0600a0e12d0302eb08d08de20400a0e1f04fbde8b76400eaa483100002060000b81f0600433a5c53" +
+            "454e534f522e545854000000");
+
+    /**
      * What the app can make. RESTORE is the published stock restore file: the stock dump's first 0x1E0000 bytes, under
-     * its published name. C, A and B are withdrawn and not offered: they are the same software with other settings,
+     * its published name. PROBE is the sensor-ID probe: the stock restore file with a reviewed patch that reads the
+     * image sensor's identifier and writes it to the card, so the owner can tell which sensor is fitted; it does not
+     * fix the camera, and RESTORE puts it back. C, A and B are withdrawn and not offered: they are the same software
+     * with other settings,
      * and when C was flashed on a camera that then froze in photo and video mode, the restore file froze it the same
      * way. The cause is most likely a firmware that does not fit that camera's image sensor, which no file made from
      * the public dump can fix; a copy of C, A or B picked from the phone is recognised and refused.
@@ -53,6 +73,14 @@ public final class Candidates {
                 + " not known. After it was flashed, one original-series camera could no longer take pictures; the"
                 + " likely cause is a sensor it does not drive.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906"),
+        PROBE(true, "The sensor-ID probe: the stock restore file with a small reviewed patch. When the camera enters"
+                + " photo mode it reads the image sensor's identifier over the sensor bus, writes it to SENSOR.TXT at"
+                + " the root of the card, then stops as the camera does now. It does not fix the camera: it reports"
+                + " which sensor is fitted, so you can tell whether a firmware fix is even possible. Its boot code,"
+                + " update code and image-sensor table are the stock restore file's byte for byte; only a dead debug"
+                + " routine and the one call that writes the sensor set-up are changed. The stock restore file (above)"
+                + " puts the camera back.",
+                "JH_5408202611071200_0F065671.bin", "be19fb35d1ce1c17ffdb56c5cdaa0232c21dd6bd50e32359ee293c21a5a4650b"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
@@ -152,6 +180,23 @@ public final class Candidates {
         return out;
     }
 
+    /** Whether these exact bytes are the reviewed sensor-ID probe, by SHA-256: the one file written without a backup. */
+    public static boolean isProbe(byte[] data) {
+        return Kind.PROBE.sha256.equals(UpdateCheck.sha256Hex(data, 0, data.length));
+    }
+
+    /**
+     * UpdateCheck.check against the public build, with the one rule every file-entry path in the app shares: the
+     * sensor-ID probe is checked with no reference, whatever backup is passed. It is backup-independent (WriteGate's
+     * one exemption), so no path may compare it with a backup it was never meant to match — that would fail its
+     * sensor-table line and refuse the one file that needs no backup (finding 7). Every other file is checked against
+     * the reference given. The extra hash runs only when a reference is present (the common no-backup case is free).
+     */
+    public static UpdateCheck.Result check(String name, byte[] data, byte[] reference) {
+        byte[] ref = reference != null && isProbe(data) ? null : reference;
+        return UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
+    }
+
     /** The recipe itself, without the final hash check (the tests run it on synthetic images). */
     static byte[] transform(byte[] dump, Kind kind) {
         if (dump.length != DUMP_SIZE) {
@@ -159,6 +204,12 @@ public final class Candidates {
         }
         if (kind == Kind.RESTORE) {
             return Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the published restore file is exactly this
+        }
+        if (kind == Kind.PROBE) {
+            byte[] payload = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the restore file, with the probe patch
+            System.arraycopy(PROBE_HOOK, 0, payload, PROBE_HOOK_OFFSET, PROBE_HOOK.length);
+            System.arraycopy(PROBE_STUB, 0, payload, PROBE_STUB_OFFSET, PROBE_STUB.length);
+            return payload;
         }
         byte[] image = dump.clone();
         int first = firstValidRecord(image);
@@ -267,5 +318,14 @@ public final class Candidates {
 
     static long u32(byte[] b, int off) {
         return (b[off] & 0xFFL) | (b[off + 1] & 0xFFL) << 8 | (b[off + 2] & 0xFFL) << 16 | (b[off + 3] & 0xFFL) << 24;
+    }
+
+    /** Bytes from a string of two hex digits each, for the reviewed probe patch above. */
+    static byte[] hex(String s) {
+        byte[] out = new byte[s.length() / 2];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) Integer.parseInt(s.substring(2 * i, 2 * i + 2), 16);
+        }
+        return out;
     }
 }

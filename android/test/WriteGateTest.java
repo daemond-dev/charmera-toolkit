@@ -76,6 +76,53 @@ public final class WriteGateTest {
         expect("a check against a backup it could not be compared with is refused",
                 refused(tableless, data, backupY, false, false, "not checked against the backup"));
 
+        // The sensor-ID probe is the one reviewed file the gate lets through without a backup (WriteGate's class
+        // note), recognised only by the reviewed SHA-256 and only for the bytes that hash to it. A check that merely
+        // claims the probe's SHA-256 over other bytes is caught by confirms, never waved through as a flash with no
+        // backup.
+        UpdateCheck.Result probeClaim = new UpdateCheck.Result(new ArrayList<>(), Candidates.Kind.PROBE.fileName,
+                Candidates.Kind.PROBE.sha256, data.length, false, null);
+        // "changed" (from confirms), not "no backup": the probe branch was taken and the file-level check still ran.
+        expect("a probe SHA-256 over other bytes is caught by its own check (confirms), not waved through",
+                refused(probeClaim, data, null, false, false, "changed"));
+        expect("the probe exemption still waits while the file is being checked",
+                refused(probeClaim, data, null, false, true, "being checked again"));
+
+        // With the real stock dump, the actual probe the app builds goes to the card with no backup on record; the
+        // stock restore file does not; and the file-level checks still hold for the probe.
+        String stockEnv = System.getenv("CHARMERA_STOCK_IMAGE");
+        byte[] stock = stockEnv == null || stockEnv.isEmpty() ? null : readMaybe(stockEnv);
+        if (stock == null || !Candidates.isStockDump(stock)) {
+            System.out.println("WriteGateTest: probe-with-real-dump checks SKIPPED (set CHARMERA_STOCK_IMAGE to the"
+                    + " public stock dump)");
+        } else {
+            byte[] dump = Candidates.stockDump(stock);
+            byte[] probe = Candidates.build(dump, Candidates.Kind.PROBE);
+            UpdateCheck.Result probeCheck = UpdateCheck.check(Candidates.Kind.PROBE.fileName, probe,
+                    UpdateCheck.PUBLIC_BUILD, null);
+            expect("the sensor-ID probe goes to the card with no backup on record",
+                    WriteGate.refusal(probeCheck, probe, null, false, false) == null, null);
+            expect("the probe still waits while it is being checked again",
+                    refused(probeCheck, probe, null, false, true, "being checked again"));
+            // Finding 7: the app checks the probe with no reference (buildRestore), so its check carries no backup
+            // comparison that a backup on record could turn into a FAIL. A probe compared with a backup whose sensor
+            // differs would fail its sensor-table line; the reference-free check the app makes cannot, and the gate
+            // lets the probe through whatever backup is on record.
+            expect("the probe's check makes no backup comparison, so no backup can turn it not-OK",
+                    !probeCheck.compared && probeCheck.ok, null);
+            expect("the sensor-ID probe goes to the card with a backup on record too",
+                    WriteGate.refusal(probeCheck, probe, sha(dump), false, false) == null, null);
+            byte[] tampered = probe.clone();
+            tampered[200] ^= 1;
+            expect("probe bytes changed after the check are refused",
+                    refused(probeCheck, tampered, null, false, false, "changed"));
+            byte[] restore = Candidates.build(dump, Candidates.Kind.RESTORE);
+            UpdateCheck.Result restoreCheck = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore,
+                    UpdateCheck.PUBLIC_BUILD, null);
+            expect("the stock restore file is not the probe: with no backup it is still refused",
+                    refused(restoreCheck, restore, null, false, false, "no backup"));
+        }
+
         for (String why : new String[]{WriteGate.refusal(checkedX, data, backupY, false, false),
                 WriteGate.refusal(checkedX, data, backupX, true, false), WriteGate.refusal(checkedX, data, null, false, false),
                 WriteGate.refusal(checkedX, data, backupY, false, true)}) {
@@ -101,6 +148,15 @@ public final class WriteGateTest {
         char[] a = new char[n];
         Arrays.fill(a, c);
         return new String(a);
+    }
+
+    /** The file's bytes, or null if it cannot be read (the real-dump checks then skip). */
+    static byte[] readMaybe(String path) {
+        try {
+            return java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path));
+        } catch (java.io.IOException e) {
+            return null;
+        }
     }
 
     static boolean refused(UpdateCheck.Result check, byte[] data, String backupSha256, boolean loading, boolean checking,

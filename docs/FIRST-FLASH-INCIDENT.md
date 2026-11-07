@@ -50,6 +50,14 @@ none of them:
 So the factory rebuilt the firmware under one stamp at least twice within five weeks in 2025, and a camera sold in
 November 2026 can carry a later build.
 
+The next step on the camera is to find out which image sensor it has, without opening it. The app (below) can build a
+**sensor-ID probe**: the public build with a small reviewed patch that, when the camera next enters photo mode, reads
+the sensor's identifier over the bus and writes the two bytes to `SENSOR.TXT` on the card, then stops as the camera
+does now. `14 0A` is the SP140A the firmware already drives, so the fault would be in the camera's hardware and no
+firmware could fix it; any other pair names a different sensor, which a firmware could then be built for. It is a
+diagnostic, not a repair, and needs no backup: its boot and update code are the stock restore file's byte for byte,
+and the app makes that file to reverse it. Not yet run on the camera.
+
 ## What was built
 
 - **The toolkit** (Python, Windows and Linux): the research report, `pack`, `verify` and `stage` for update files,
@@ -264,6 +272,24 @@ Status on the morning of 2026-11-07, on the branch `claude/charmera-firmware-too
 - Not verified on hardware: the official-size file's final erase (factory settings and an empty photo list at the
   next start), `restore`'s new read-first flow on a real chip, and the donor route. Not yet run on a phone: version
   0.5 of the app. It is published only when the branch is merged into `main`, which is your call.
+
+Later on 2026-11-07, version 0.7 of the app adds the sensor-ID probe and rebuilds its screen as a column of cards:
+
+- The app builds the probe (step 1, "Make the sensor-ID probe") and reads its result back (step 4, "Read the sensor
+  result from the card"), decoding `SENSOR.TXT` as above. The probe is the one file the app writes without a backup on
+  record; every file-level check still holds (name, size, the SPII start, the sum and the SHA-256), and the waiver is
+  keyed to the reviewed SHA-256 of the probe's bytes, so it can reach no other file.
+- A review of the probe wiring found one edge (finding 7): with a backup of a *different* camera already on record,
+  the app checked the probe against it, the two sensor tables differed, and the probe was refused with a message about
+  the backup -- the one file that needs no backup, refused for not matching one. It is fixed: the probe is now checked
+  with no reference on every path by which a file reaches the card (one rule, `Candidates.check`), so no backup on
+  record can refuse it, and the re-check machine leaves the probe alone. For a camera with no backup on record (this
+  one), the behaviour was already correct and is unchanged.
+- Verified this session on the JVM and against the public dump: the four suites pass 151, 22, 41 and 26, with the
+  probe's reference-free rule exercised in CandidatesTest and WriteGateTest against the real probe built from the
+  dump; the app's source checks (`tests/test_android.py`) pass 31, and the Java typechecks against android-35. Not run
+  on a phone, and the probe is not tested on a camera; 0.7 is signed with a throwaway key for testing, and nothing is
+  published.
 
 ## Evidence from the camera's own photos
 

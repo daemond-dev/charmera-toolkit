@@ -53,8 +53,9 @@ public final class CandidatesTest {
         // Whether a 2 MiB file could be a backup is for UpdateCheck.backupProblem to say: step 0 may refuse it too.
         expect("a refused dump is not pointed to step 0", !refused(() -> Candidates.stockDump(junk), "step 0")
                 && !refused(() -> Candidates.stockDump(junk), "Choose this camera's backup"));
-        expect("only the stock restore is offered", java.util.Arrays.equals(Candidates.Kind.offeredKinds(),
-                new Candidates.Kind[]{Candidates.Kind.RESTORE}));
+        expect("the stock restore and the sensor-ID probe are offered, in that order", java.util.Arrays.equals(
+                Candidates.Kind.offeredKinds(),
+                new Candidates.Kind[]{Candidates.Kind.RESTORE, Candidates.Kind.PROBE}));
         byte[] restore0 = invokeTransform(img, Candidates.Kind.RESTORE);
         expect("the restore is the dump's first 0x1E0000 bytes, untouched",
                 java.util.Arrays.equals(restore0, java.util.Arrays.copyOf(img, UpdateCheck.UPDATE_SIZE)));
@@ -75,6 +76,23 @@ public final class CandidatesTest {
             }
             byte[] restore = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);
             expect("the published restore file is accepted as the dump", Arrays.equals(Candidates.stockDump(restore), dump));
+            // Finding 7, executed: Candidates.check is the one rule every file-entry path shares. The sensor-ID probe
+            // is checked with no reference whatever backup is passed, so a backup it was never meant to match cannot
+            // fail its sensor-table line and refuse the one file that needs no backup. Every other file is checked
+            // against the reference. Run here because this logic is safety-critical and must not rest on a source test.
+            byte[] probe7 = Candidates.build(dump, Candidates.Kind.PROBE);
+            UpdateCheck.Result probeWithBackup = Candidates.check(Candidates.Kind.PROBE.fileName, probe7, dump);
+            UpdateCheck.Result probeNoBackup = Candidates.check(Candidates.Kind.PROBE.fileName, probe7, null);
+            expect("the probe is checked with no reference even when a backup is passed", probeWithBackup.ok
+                    && !probeWithBackup.compared && probeWithBackup.referenceSha256 == null);
+            expect("the probe comes out identical with or without a backup passed", probeNoBackup.ok
+                    && !probeNoBackup.compared && probeNoBackup.referenceSha256 == null
+                    && probeWithBackup.sha256.equals(probeNoBackup.sha256));
+            UpdateCheck.Result restoreWithBackup = Candidates.check(Candidates.Kind.RESTORE.fileName, restore, dump);
+            expect("a non-probe file is still checked against the backup passed (the rule is probe-only)",
+                    restoreWithBackup.compared && restoreWithBackup.referenceSha256 != null);
+            expect("Candidates.isProbe keys on the exact probe bytes", Candidates.isProbe(probe7)
+                    && !Candidates.isProbe(restore));
             UpdateCheck.Marks mk = UpdateCheck.findMarks(dump);
             expect("the real dump's marks are found by content where the research put them", mk.complete()
                     && mk.stampOffset == 0x218C4 && "202505201029".equals(mk.stamp) && mk.buildOffset == 0x18964
