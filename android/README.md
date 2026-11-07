@@ -8,38 +8,60 @@ flashing and cleaning up. The camera flashes itself from the card, as described 
 **No backup of your own camera, no flash.** The app writes to the card only while a dump of that camera's own flash chip
 is on record (step 0 on its screen), and only an update file it has compared with that dump. Whether a firmware fits a
 camera cannot be told from the file, from the version stamp or from the boot screen: two different builds carry the same
-stamp, and the public dump left one original-series camera unable to take pictures. The dump of a camera's own chip is
-the one file known to fit it, and the only way back. Reading the chip needs a CH341A clip and a computer
+stamp, and the public dump left one original-series camera unable to take pictures. A dump of a camera's own chip read
+before it was ever flashed is the one file known to fit it; any dump of the chip is the way back to what it held when
+it was read. Reading the chip needs a CH341A clip and a computer
 ([Recovery, section B](../docs/02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)); the app
-cannot do it.
+cannot do it, and it cannot tell whose chip a dump came from: it refuses only the two public stock dumps, so give it
+only a dump read from this camera with a clip.
 
 It uses the network only to download the stock dump from its upstream repository on GitHub, at a fixed commit, and
 accepts the download only if its SHA-256 is that of the public dump. No firmware is shipped inside the app. It
 reaches the card through Android's own folder picker, which grants access to the one folder you choose, so it needs
 no storage permission.
 
-Status: version 0.4 did one flash on a phone over the camera's USB-C cable on 2026-11-06, with the camera's card in the
-camera. The writing, the flash and the cleanup worked as the app describes them. The file it wrote did not fit that
-camera, which is why 0.5 adds the backup step. Version 0.5 is built and tested on a computer and has not been run on a
-phone yet.
+Status, 2026-11-06: the app wrote two files to one camera's card that day, over the camera's USB-C cable with the card
+in the camera. Version 0.3 wrote candidate C, which the camera flashed twice (the second time when the cable was plugged
+into it while it was switched off, which the connection steps below now prevent); version 0.4 wrote the stock restore
+file. The writing, the flashes and the cleanup worked as the app describes them. Neither file fitted that camera, which
+is why 0.5 adds the backup step.
+
+The APK published at the [android-app release](https://github.com/daemond-dev/charmera-toolkit/releases/tag/android-app)
+is still 0.4, and stays so until 0.5 is published from `main`. 0.4 has no backup step and does not refuse C, A or B: do
+not flash with it. 0.5 has not yet been built in CI or run on a phone. Its plain-Java parts (the checker, the card
+rules and the file builder) compile and pass their tests on a computer's JVM: at commit 7a12da2, with the public stock
+dump and the film-mods restore file set, UpdateCheckTest 85, CardStateTest 22 and CandidatesTest 25 passed. The
+screen itself, which holds the backup gate, needs the Android SDK and is built only by the workflow.
 
 ## Before you flash
 
 - **A backup of this camera's flash chip,** read with a CH341A clip and kept somewhere safe. Without it the app does not
   write. The backup is also what you compare the update file with: the app refuses a file whose image-sensor set-up
-  differs from your camera's own firmware, because that is what leaves a camera unable to take pictures.
+  differs from the firmware in your backup, because that is what leaves a camera unable to take pictures. A backup
+  read after the camera was flashed holds the flashed firmware, not the camera's own: it shows what the camera runs
+  now, not what fits it, so when it is one of the known builds the app shows a matching set-up as a warning, not a
+  pass ([After a flash](../docs/01-FIRST-FLASH.md#after-a-flash)). A camera whose own firmware is gone needs another
+  camera's firmware by the donor route, which takes a computer
+  ([Recovery, section D](../docs/02-RECOVERY.md#the-donor-route)).
 - **Original 2025 series only:** matte body, yellow Kodak boot screen. Never flash a Millennium Edition (blue boot
   screen) or a CLOT edition with these files. Owners report that the firmware boots there but the live view freezes or
   the camera cannot take a picture ([Recovery, section D](../docs/02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera));
   the same happened to an original-series camera, so the body alone proves nothing.
 - **Charge the battery fully first.** Programming takes 15 to 20 seconds, and a power loss in that window leaves a
   camera that only a chip programmer can bring back ([Recovery](../docs/02-RECOVERY.md)).
-- **Stored photos:** the flash replaces the two photos the camera keeps in its own memory. The stock restore file
-  carries the two photos of the camera it was dumped from, but its photo list is empty, so the camera does not show
-  them; your own two are gone all the same. If yours matter, copy the `SPIDCIM` folder off the card first
+- **Stored photos:** a 0x1E0000-byte file, such as the stock restore file, replaces the two photos the camera keeps in
+  its own memory. The stock restore file carries the two photos of the camera it was dumped from, but its photo list
+  is empty, so the camera does not show them; your own two are gone all the same. A 0x169000-byte file (made with
+  `pack --official-size` on a computer) leaves the photo data in place, but the camera empties its photo list, so it
+  no longer shows them. If yours matter, copy the `SPIDCIM` folder off the card first
   ([The first flash, step 5](../docs/01-FIRST-FLASH.md#5-flash-the-point-of-no-return)).
 
 ## Install
+
+Check the version first. Until 0.5 is published from `main`, the release below serves 0.4, which has no backup step and
+does not refuse the withdrawn candidates C, A and B: do not flash with it. 0.5 is the release titled "Charmera Card for
+Android 0.5", and its screen opens with "Before you start" and "No backup of this camera, no flash", then a step "0.
+Back up this camera first".
 
 The repository is private, so first sign in to GitHub in the phone's browser, with an account that can see the
 repository. Signed out, GitHub answers the download link with 404 (Not Found). Then download
@@ -55,20 +77,26 @@ The app's screen is the same six steps.
 
 0. **Back up this camera first.** Copy the 2 MB file the toolkit's `backup` command read from this camera's chip to
    the phone and tap **Choose this camera's backup**. The app takes it only if it is a complete dump that carries the
-   firmware's build marks and is not one of the public dumps (those are copies of someone else's camera). It shows the
-   file's name and SHA-256, compares the update file with it in step 1, and writes to the card only while this backup
-   is on record. A recreated screen (dark mode, font size) reads the file again; after the app is closed, choose it
-   again.
+   firmware's build marks and is not byte for byte one of the two public stock dumps: such a file is a copy of someone
+   else's camera, or a read of a camera flashed with the public restore file that has changed no setting since, and
+   either way not firmware known to fit yours. It cannot tell whose chip any other dump came from, so choose only one
+   read from this camera with a clip. It shows the file's name and SHA-256, compares the update file with it in step
+   1, and writes to the card only while this backup is on record. A recreated screen (dark mode, font size) reads the
+   file again; after the app is closed, choose it again.
 1. **Get the update file.** Tap **Download the stock restore file**. The app downloads the stock dump, checks it,
    and makes the published stock restore file from it (its first 0x1E0000 bytes), using it only if its SHA-256 is
    the published file's (`b10a2f1c…`). That file is a copy of one working camera's memory, with that camera's
-   settings. Several owners have put it back on cameras that already ran this build; it did not fit every
-   original-series camera. The checks shown under the button compare it with your backup: the image-sensor set-up
-   must be the same, and the software line says whether the file is your camera's own firmware, byte for byte, or
-   differs. Without a backup, the sensor line is a warning that cannot be cleared and the write stays off.
-   Offline, or made a file on a computer? **Use a file on the phone** takes the stock dump, a `JH_5408…bin` file of
-   either size the camera accepts (0x1E0000 or 0x169000 bytes), or a copy already on the card. If the file chosen is
-   candidate C, A or B, the app says not to put it on the card ([why](../docs/03-FLASH-CANDIDATES.md)).
+   settings. Several owners report flashing it and working cameras afterwards; what their cameras ran before is not
+   known, and it did not fit every original-series camera. The checks shown under the button compare it with your
+   backup: the image-sensor set-up must be the same, and the software line says whether the file is the same software
+   as your backup, byte for byte, or differs (a difference is a warning, never a pass, but the start of the program,
+   the ARM vector table at 0x200, must be your backup's in a file laid out like it). When your backup is itself one
+   of the known builds, as a camera flashed with the public restore file reads, a matching set-up is a warning too:
+   it proves a fit only if the backup was read before the camera was ever flashed. Without a backup, the sensor line
+   is a warning that cannot be cleared and the write stays off. Offline, or made a file on a computer? **Use a file on
+   the phone** takes the stock dump, a `JH_5408…bin` file of either size the app accepts (0x1E0000 or 0x169000
+   bytes), or a copy already on the card. If the file chosen is candidate C, A or B, the app refuses it: the file is
+   dropped, and the write and the copy stay off ([why](../docs/03-FLASH-CANDIDATES.md)).
 2. **Connect the camera.** Plugging the cable into a switched-off camera switches it on, and if its card holds an
    update file the camera flashes that file again. So the app always has you connect the camera this way: switch
    it off if it is on, take the card out, switch the camera on with its power key, wait 10 seconds, put the card
@@ -124,6 +152,9 @@ that flash is wanted.
   checks the file they produce, against your backup, and writes it. Because the repository is private, `pip install`
   from its GitHub URL in Termux needs a GitHub personal access token; or download the source on the phone while
   signed in to GitHub and run `pip install` on the unpacked folder.
+- **The donor route:** for a camera whose own firmware is gone and does not fit it, another camera's firmware is
+  the only help, and the app never takes that route: it compares every file with the backup on record and refuses a
+  sensor set-up that differs. A computer does it ([Recovery, section D](../docs/02-RECOVERY.md#the-donor-route)).
 - **Read-back:** the comparison may read Android's cached copy rather than the card itself. Ejecting the card
   before removing it is what makes sure the data reached the card.
 - **Card root on Android 11 and later:** Android blocks the picker from granting access to the top level of the
@@ -139,10 +170,13 @@ and `build-tools;35.0.0`, a JDK 17 or newer, and `zip`. The version name default
 the checker's, the card rules' and the file builder's tests on the plain JVM first (`test/UpdateCheckTest.java`,
 `test/CardStateTest.java` and `test/CandidatesTest.java`). Set `CHARMERA_STOCK_IMAGE` to the public stock dump to
 have CandidatesTest make the restore file and the three withdrawn candidates and compare them with the published and
-reviewed files, and to check that the checker finds the dump's build marks by content; set `CHARMERA_UPDATE_FILES` to
-real update files to check those too. Then it builds and signs `out/charmera-card-<version>.apk`. No Gradle.
-The workflow downloads the public dump from upstream for every build, checks its SHA-256, and runs those checks
-before it publishes.
+reviewed files, and to check that the checker finds the dump's build marks by content; set
+`CHARMERA_FILM_MODS_RESTORE` to the film-mods project's public restore file to have UpdateCheckTest check that the
+checker names that build; set `CHARMERA_UPDATE_FILES` to real update files to check those too. At commit 7a12da2 the
+three report 85, 22 and 25 passed with the first two set, and 84, 22 and 17 with neither. Then it builds and signs
+`out/charmera-card-<version>.apk`. No Gradle. The workflow downloads the public dump and the film-mods restore file
+from upstream for every build, checks their SHA-256, and runs those checks before it publishes; it does not set
+`CHARMERA_UPDATE_FILES`.
 
 GitHub Actions builds it on every push to `main` that touches `android/` and publishes it as the `android-app`
 release (`.github/workflows/android.yml`), one run at a time. Run from the Actions tab on another branch, it builds

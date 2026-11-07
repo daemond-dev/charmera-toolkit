@@ -4,9 +4,11 @@ Reading order: 6 of 13 · previous: [SD card problems](05-CARDS.md) · next: [Co
 
 Short version: a phone can do the SD-card route, which covers every normal flash. It cannot do the chip-level
 route (CH341A), which is what you need for the backup that every flash requires, and for a camera that no longer
-boots. Flashing from a phone was done once, on 2026-11-06, over the camera's own USB-C cable: the write, the flash and
-the cleanup worked as described here. The file flashed that day did not fit the camera, which is why the backup is a
-hard stop below. The parts that are still inference are marked.
+boots. On 2026-11-06 the app wrote two files to one camera's card over the camera's own USB-C cable, candidate C
+(app version 0.3) and then the stock restore file (version 0.4), and the camera flashed each; it flashed C a second
+time when the cable was plugged into it while it was switched off. The writes, the flashes and the cleanup worked
+as described here. Neither file fitted the camera, which is why the backup is a hard stop below. The parts that are
+still inference are marked.
 
 ## Before you flash from a phone
 
@@ -15,25 +17,35 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 - No backup of your own camera, no flash. The backup is a dump of this camera's flash chip, read with a CH341A clip
   on a computer ([step 1 of The first flash](01-FIRST-FLASH.md#1-back-up-your-cameras-chip-no-backup-no-flash)). The app
   does not write to the card without it, and compares the update file's image-sensor set-up with it; `verify
-  --stock <backup>` does the same on a computer. Whether a firmware fits a camera cannot be told any other way.
+  --stock <backup>` does the same on a computer. Whether a firmware fits a camera cannot be told any other way, and
+  only a dump read before the camera was ever flashed tells it: after a flash the dump holds the flashed firmware, and
+  when it is one of the known builds the app shows a matching sensor set-up as a warning, not a pass
+  ([After a flash](01-FIRST-FLASH.md#after-a-flash)). The app cannot tell whose chip a dump came from: it refuses only
+  the two public stock dumps, so give it only a dump read from this camera with a clip.
 - Original 2025 series only: matte body, yellow Kodak boot screen. Never a Millennium Edition (blue boot
   screen) or a CLOT edition ([Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). The body
   alone proves nothing: an original-series camera was left unable to take pictures by the public dump.
 - Charge the battery fully before every flash. A power loss while the camera programs itself leaves a camera
   that only a chip programmer can bring back ([Recovery, section C](02-RECOVERY.md#c-an-interrupted-flash)).
-- The photos the camera stores in its own memory are replaced by the flash. The
-  [flash candidates](03-FLASH-CANDIDATES.md) and any file packed with `--blank-photos` erase them; a file packed
-  from the public dump without that option, as in step 1 below, replaces them with that owner's.
+- A 0x1E0000-byte file, such as the stock restore file the app makes, replaces the two photos the camera keeps in its
+  own memory. The stock restore file carries the two photos of the camera it was copied from, but its photo list is
+  empty, so the camera does not show them; your own two are gone all the same. A 0x169000-byte file
+  (`pack --official-size` on a computer) leaves the photo data in place, but the camera empties its photo list, so it
+  no longer shows them. If yours matter, copy the `SPIDCIM` folder off the card first
+  ([step 5 of The first flash](01-FIRST-FLASH.md#5-flash-the-point-of-no-return)).
 
 ## The app
 
 [Charmera Card](../android/README.md) does the card part on the phone: it downloads the public stock dump, makes the
 published stock restore file from it (it can make nothing else), compares that file with your backup, writes it to
 the camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup. It
-writes nothing without a backup on record.
+writes nothing without a backup on record. That is version 0.5, which has not been published yet.
 Download [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
-on the phone (sign in to GitHub in the phone's browser first: the repository is private). The rest of this page is
-the same job done by hand, and what the app cannot help with.
+on the phone (sign in to GitHub in the phone's browser first: the repository is private), but check which version
+you got. Until 0.5 is published from `main`, that link serves version 0.4, which has no backup step and does not
+refuse the withdrawn candidates C, A and B: do not flash with it. 0.5 is the release titled "Charmera Card for
+Android 0.5", and its screen opens with "Before you start" and "No backup of this camera, no flash", then a step "0.
+Back up this camera first". The rest of this page is the same job done by hand, and what the app cannot help with.
 
 Which way the card reaches the app depends on the Android version:
 
@@ -44,8 +56,9 @@ Which way the card reaches the app depends on the Android version:
 - Android 7 to 10: the phone's own SD slot works as well.
 - Only the slot, on Android 11 or later: copy the update file to the card's top level with the Files app
   ([section 3](#3-copy-the-file-to-the-card-root)), then pick that copied file in the app's step 1
-  (**Use a file on the phone**) to have it checked where it lies. Delete the copy with the Files app after the
-  flash.
+  (**Use a file on the phone**), with your backup on record in step 0, to have it checked where it lies. If the check
+  finds a problem, or there was no backup on record to compare the file with, delete the copy before the card goes
+  into the camera. Delete it with the Files app after the flash too.
 
 ## What the phone has to do
 
@@ -55,14 +68,20 @@ So the phone's whole job is to put the right file, with its name unchanged, in t
 
 ## 1. Get the update file
 
+Build it from your own backup, the dump of this camera's chip from
+[step 1 of The first flash](01-FIRST-FLASH.md#1-back-up-your-cameras-chip-no-backup-no-flash), and check it against
+that backup. This route needs the backup as much as the app does: without one, do not use it. Never build the file
+from the public dump, and never give the public dump as `--stock`: compared with itself, a file always matches, and
+nothing is then compared with your camera.
+
 Either build it on a computer or the Steam Deck and copy it to the phone, or build it on the phone in Termux
 (from F-Droid). The toolkit is plain Python with no extra packages, so it should run there; that is untested.
 
 ```
 pkg install python git
 pip install git+https://github.com/daemond-dev/charmera-toolkit
-charmera pack --input charmera_stock_latest.bin --out out/restore/ ...
-charmera verify out/JH_5408<stamp>_<sum>.bin --stock charmera_stock_latest.bin
+charmera pack --input <your backup>.bin --out out/restore/ --i-understand-this-file-flashes-a-camera
+charmera verify out/restore/JH_5408<stamp>_<sum>.bin --stock <your backup>.bin
 ```
 
 The repository is private, so the `pip install git+https://...` line needs a GitHub token in the URL. Simpler:
@@ -102,8 +121,10 @@ After the camera has written to the card again, the flag comes back.
 Use the phone's Files app: copy the `.bin` file to the top level of the SD card, not into `DCIM` or any other
 folder. Then check that the name is exactly what `pack` printed, including the 8-character sum after the
 underscore; some apps add `(1)` or change case when a file of the same name exists, and a renamed file is either
-ignored or rejected with "Program error". Delete any older `JH_5408*.bin` from the card root first. To have the
-copy checked, pick it in the app's step 1.
+ignored or rejected with "Program error". Delete any older `JH_5408*.bin` from the card root first. Then have the
+copy checked where it lies: pick it in the app's step 1 (**Use a file on the phone**), with your backup on record in
+step 0. If the check finds a problem, or the app has no backup on record to compare it with, delete the copy before
+the card goes into the camera.
 
 Before you take the card out of the phone or the reader, eject it (Settings, Storage, the card, Eject), so
 that everything written has reached the card.
@@ -140,8 +161,9 @@ flash is wanted; and the camera looks for the file only in the first five second
 notice a file added while it runs. The same dirty-flag problem applies. The app's screens for this route are in its
 README: [the app's steps](../android/README.md#use).
 
-1. Connect the camera to the phone with a USB-C data cable, pick the camera's drive in the app and write the
-   file, as for a card reader.
+1. Connect the camera the way the app's step 2 says: switch it off if it is on, take the card out, switch it on with
+   its power key, wait 10 seconds, put the card back in, then connect it to the phone with a USB-C data cable. Pick
+   the camera's drive in the app and write the file, as for a card reader.
 2. Eject the drive in Android (Settings, Storage, the USB drive, Eject), then unplug the cable.
 3. With a fully charged battery and no cable, switch the camera off, then on again. It only looks for the file
    in the first five seconds after power-on, so it did not notice the file while it was running. The cable comes
@@ -162,6 +184,9 @@ Never switch the camera on with the update file on its card except to flash.
   but that is untested guesswork. The Steam Deck runs flashrom and the toolkit's backup and restore scripts as any Linux
   machine does ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)).
 - `card-check` and `card-fix`, which open the raw card device. Android does not give apps that access without root.
+- The donor route, for a camera whose own firmware is gone and does not fit it
+  ([Recovery, section D](02-RECOVERY.md#the-donor-route)). The app never takes it: it compares every file with the
+  backup on record and refuses a sensor set-up that differs.
 
 ---
 
