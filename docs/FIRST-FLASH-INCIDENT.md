@@ -131,7 +131,8 @@ November 2026 can carry a later build.
   - Neither known build has the card-triggered whole-flash backup that some older firmware from the same factory has
     (no `FirmwareUpgrade_Msg.ini` or `Firmware_Backup` string in either; VERIFIED by string search).
   - At 06:54 your three asks for photos straight off the card went up, to arjunbazinga, Seabass567 and phobits
-    ([Routes, 3](#routes-to-a-working-camera)). Each was checked for its facts and its wording first.
+    ([Routes, 3](#routes-to-a-working-camera)). Each was checked for its facts and its wording first. At 08:23 a
+    fourth went to alicanadal, who has a Millennium unit and had offered untouched samples.
 
 ## What I got wrong
 
@@ -221,7 +222,8 @@ The second session found these in the first follow-up:
    camera writes no EXIF
    ([comment](https://github.com/RAIT-09/kodak-charmera-exif-fixer/pull/3#issuecomment-6703607354)). alicanadal, who has
    an orange Millennium unit, offered untouched sample photos in RickCaleg/charmera-importer#18; their header would
-   show whether that edition's firmware writes photos the way this camera's did. What to ask
+   show whether that edition's firmware writes photos the way this camera's did. On 11-07 you asked them to attach a
+   few, zipped ([comment](https://github.com/RickCaleg/charmera-importer/issues/18#issuecomment-6704447245)). What to ask
    anyone: one unedited photo straight off the card, a photo of the camera module's flex, when and in which country
    they bought the camera, and, from anyone with a clip, a dump.
 4. **Identify the sensor.** Open the camera ([Recovery, section B](02-RECOVERY.md#opening-the-camera)) and
