@@ -82,10 +82,13 @@ The app's screen is the same six steps.
    either way not firmware known to fit yours. It also refuses a dump whose sounds, pictures and menus are missing or
    damaged, as a read that lost contact part way is, and a dump with the build string and the stamp but no
    image-sensor set-up table of the kind it knows, which it asks you to keep and look at with `charmera inspect` on a
-   computer. It cannot tell whose chip any other dump came from, so choose only one read from this camera with a clip.
-   It shows the file's name and SHA-256, compares the update file with it in step 1, and writes to the card only
-   while this backup is on record. A recreated screen (dark mode, font size) reads the file again; after the app is
-   closed, choose it again.
+   computer. And it refuses a file named like a read that no second read confirmed
+   (`<label>_<UTC time>.unverified-read<n>.bin`, the name `backup` gives a single read and reads that differ): read
+   the chip again until two reads agree, and choose the `<label>_<UTC time>.bin` that `backup` then keeps. It cannot
+   tell whose chip any other dump came from, so choose only one read from this camera with a clip. It shows the
+   file's name and SHA-256, compares the update file with it in step 1, and writes to the card only while this backup
+   is on record. A recreated screen (dark mode, font size) reads the file again; after the app is closed, choose it
+   again.
 1. **Get the update file.** Tap **Download the stock restore file**. The app downloads the stock dump, checks it,
    and makes the published stock restore file from it (its first 0x1E0000 bytes), using it only if its SHA-256 is
    the published file's (`b10a2f1c…`). That file is a copy of one working camera's memory, with that camera's
@@ -93,12 +96,14 @@ The app's screen is the same six steps.
    known, and it did not fit every original-series camera. The checks shown under the button compare it with your
    backup: the image-sensor set-up must be the same, and the software line says whether the file is the same software
    as your backup, byte for byte, or differs (a difference is a warning, never a pass, but the start of the program,
-   the ARM vector table at 0x200, must be your backup's in a file laid out like it, and otherwise that of the known
-   build whose layout the file has). When your backup is itself one of the known builds, as a camera flashed with
-   the public restore file reads, a matching set-up is a warning too: it proves a fit only if the backup was read
-   before the camera was ever flashed. With a backup of a build nobody has published, the same set-up is a pass only
-   when the program around it is your backup's too, and a warning that says so otherwise. Without a backup, the
-   sensor line is a warning that cannot be cleared and the write stays off. Offline, or made a file on a computer?
+   the ARM vector table at 0x200, must be your backup's in a file laid out like it; a file laid out otherwise than
+   your backup, or checked while no backup is on record, is held to the table of the known build whose layout it has,
+   and only a file laid out like neither, whose table is not your backup's, gets a warning that the table could not
+   be compared). When your backup is itself one of the known builds, as a camera flashed with the public restore file
+   reads, a matching set-up is a warning too: it proves a fit only if the backup was read before the camera was ever
+   flashed. With a backup of a build nobody has published, the same set-up is a pass only when the program around it
+   is your backup's too, and a warning that says so otherwise. Without a backup, the sensor line is a warning that
+   cannot be cleared and the write stays off. Offline, or made a file on a computer?
    **Use a file on the phone** takes the stock dump, a `JH_5408…bin` file of either size the app accepts (0x1E0000 or
    0x169000 bytes), or a copy already on the card. If the file chosen is candidate C, A or B, the app refuses it: the
    file is dropped, and the write and the copy stay off ([why](../docs/03-FLASH-CANDIDATES.md)).

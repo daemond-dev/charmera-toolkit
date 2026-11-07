@@ -241,18 +241,21 @@ to get pin 1 right.
    build marks are present, whether the blank tail is blank, and whether the file matches one of the public dumps.
    When the reads differ, each one stays under its `.unverified-read<n>.bin` name for you to compare, nothing else is
    written, and `backup` exits 1. A single read (`--reads 1`) keeps its `.unverified-read1.bin` name, with a `.sha256`
-   and a manifest: no second read confirmed it, so it is not a backup. A blank or corrupt chip is still saved, with
-   warnings: it is the record of what was there. A read that is not 2 MiB is also kept, but `backup`
-   exits 1 and says so: that file is not a full-flash image, `restore` will refuse it, and `probe`
-   should be reporting a 2048 kB chip before you try again.
+   and a manifest: no second read confirmed it, so it is not a backup. `verify` and `stage` show a WARN for a
+   `--stock` or a `--donor` with such a name (`stock-read`, `donor-read`), and the app refuses such a file as its
+   backup: read the chip again until two reads agree. A blank or corrupt chip is still saved, with warnings: it is the
+   record of what was there. A read that is not 2 MiB is also kept, but `backup` exits 1 and says so: that file is not
+   a full-flash image, `restore` will refuse it, and `probe` should be reporting a 2048 kB chip before you try again.
 
    On a healthy camera the manifest shows `magic_ok: true`, `build_marks_ok: true` (the build string, the 12-digit
    stamp and the image-sensor set-up table, each found by its content, with the offset where it was found; in the
    public dump `0x18964`, `0x218C4` and `0xF5C6C`) and `tail_blank: true`. `build` names the build when it is a known
-   one (`public-dump`, `film-mods`) and says `charmera-unknown-build` when nobody has published it, which is the backup
-   worth most: nobody else can give you that firmware. A camera that was flashed before this read holds the flashed
-   firmware: a read of a camera flashed with the public restore file says `public-dump`, and is the way back to that
-   state, not a record of what fits the camera ([section D](#after-a-flash)).
+   one: `public-dump` or `film-mods`, or `public-dump-modified` or `film-mods-modified` for that build with changes,
+   whose marks lie where that build keeps them and whose stamp, sensor table, source-tree folder and compile date are
+   that build's ([Image layout](11-FORMAT.md#build-identity)). It says `charmera-unknown-build` for any other build, one
+   nobody has published, which is the backup worth most: nobody else can give you that firmware. A camera that was
+   flashed before this read holds the flashed firmware: a read of a camera flashed with the public restore file says
+   `public-dump`, and is the way back to that state, not a record of what fits the camera ([section D](#after-a-flash)).
 
 ### Restore
 
@@ -279,9 +282,10 @@ The source, in order of preference:
 
 `restore` refuses an image that is not exactly 2,097,152 bytes, does not start with `SPII`, or carries no
 Charmera build marks (the build string, the stamp and the sensor table, found by content; `--allow-unknown-build`
-overrides that check and nothing else; use it only for an image you know belongs to this camera). It prints the
-image's size, SHA-256 and build marks, which build it is, and that a build match says which public image it is, not
-whether it fits this camera.
+overrides that check and nothing else; use it only for an image you know belongs to this camera). It also refuses an
+image whose code refers to more than one sensor program with different contents, since which one would set up the
+sensor cannot be told. It prints the image's size, SHA-256 and build marks, which build it is, and that a build match
+says which public image it is, not whether it fits this camera.
 
 What `restore` does before it writes, in this order. No backup of the chip on the clip, no write: it reads the chip
 itself, and a backup file given from elsewhere could not prove that it came from this chip as it is now.
@@ -296,9 +300,10 @@ itself, and a backup file given from elsewhere could not prove that it came from
 3. It prints which of the 32 blocks of 64 KiB differ between the image and that read, so you can see that, for
    example, only the settings store changes. When the chip already holds the image, byte for byte, it says so and
    writes nothing.
-4. It prints the image's sensor table next to the chip's. When they differ, or the chip holds none of the kind the
-   known builds use (it is blank or damaged, or holds another kind of firmware), it says that nothing here can tell
-   whether that firmware fits this camera, and after `RESTORE` it asks for a second typed word, `DIFFERENT`.
+4. It prints the image's sensor table next to the chip's. When they differ, when the chip holds none of the kind the
+   known builds use (it is blank or damaged, or holds another kind of firmware), or when the chip holds several
+   sensor programs, it says that nothing here can tell whether that firmware fits this camera, and after `RESTORE` it
+   asks for a second typed word, `DIFFERENT`.
 5. It writes the bytes it checked to a private copy in a temporary folder, prints the exact flashrom command and the
    plan, and waits for you to type `RESTORE`. Just before flashrom runs it hashes that copy again, and flashrom writes
    the copy, never your file in place, so a file that changed after the check cannot reach the chip.
@@ -373,14 +378,16 @@ What is known and what is not:
   paths of their source files, `v006` and `v008_test` (VERIFIED), so the factory rebuilt the firmware under one stamp,
   and a camera bought later may run a later build. The toolkit names a build by a fingerprint over its bytes, finds
   the build marks (the compile date and the source-tree folder included) by their content rather than at fixed
-  offsets, and says plainly that a build match tells which image a file was made from, not whether it fits a camera.
-  The one check that does is `verify --stock <a dump of that camera>`, the file's sensor table against the camera's
-  own, and only when that dump was read before the camera's first flash: a read taken after one shows what the camera
-  runs now, not what fits it.
+  offsets, calls a file a known build "with changes" only when its marks lie where that build keeps them and its
+  stamp, sensor table, source-tree folder and compile date are that build's (any other file laid out like a known
+  build is a build it does not know, "laid out like" that one), and says plainly that a build match tells which image
+  a file was made from, not whether it fits a camera. The one check that does is
+  `verify --stock <a dump of that camera>`, the file's sensor table against the camera's own, and only when that dump
+  was read before the camera's first flash: a read taken after one shows what the camera runs now, not what fits it.
 - Do not flash an image from another camera, your own backup of another camera or a public dump included, onto a
   camera whose own chip has not been read. `restore` cannot know which camera is on the clip: it reads the chip
   first and asks a second time when the image's sensor table differs from the one it read, or the chip holds none of
-  the kind the known builds use, but the same table proves no fit either.
+  the kind the known builds use or several sensor programs, but the same table proves no fit either.
 - If it has already been done: the camera boots, so the SD updater still runs. The way back is the camera's own
   backup through [section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card), if it was read
   before the flash. Without one, only a dump from a working camera with the same sensor can help (the donor route
@@ -419,14 +426,23 @@ took on its original firmware has a bare 624-byte header: no EXIF block, the com
 IJG quality 80 (VERIFIED from that photo's first 624 bytes). Still photos with that header come from neither known
 build: the public build writes a 1,424-byte header with an EXIF block (Make `Generalplus`, Model `CBB3`, Software
 `20150615`) and the comment `GPEncoder` padded with spaces (VERIFIED: its header template, the code that fills it and
-the two photos stored in the public dump), and the film-mods build holds the same template and the same code
-(VERIFIED by comparing the bytes). Compare the kind of header and the comment: in the public build the size and the
-quality follow the camera's settings and whether a card was in (VERIFIED), so they say nothing on their own.
+the two photos stored in the public dump), and keeps the bare header for thumbnails, video frames and a Wi-Fi
+stream; the film-mods build holds the same templates and the same code (VERIFIED by comparing the bytes). Compare
+the kind of header and the comment: in the public build the size and the quality follow the camera's settings and
+whether a card was in (VERIFIED), so they say nothing on their own. Use the photo files as they came off each
+camera's card: not a copy that a phone, an editor or a messaging app saved again, and not a frame taken out of a
+video, which has the bare header too.
 
-What that can prove, and what it cannot: a different header proves a different build, so a donor whose photos carry
-another kind of header than this camera's pre-flash photos ran, when it took them, a build other than the one this
-camera came with. The same header does not show the same build and proves nothing about the image sensor: it makes
-the donor worth opening, to compare the marking on its sensor module with this camera's and to read its chip.
+What that can prove, and what it cannot: the bare header and the still header are both written by a camera's own
+firmware, so a donor whose photos carry the one while this camera's pre-flash photos carry the other ran, when it
+took them, a build other than the one this camera came with. A header neither known build writes says less.
+`photo-id` calls a photo re-saved by another program only when its header carries a mark an editor leaves (an XMP
+block, an APP2, APP13 or APP14 segment, a progressive frame, a rotated size); for any other such header, another
+program saved the photo again or another build wrote it, and nothing in the header tells which. The same header does
+not show the same build and proves nothing about the image sensor: it makes the donor worth opening, to compare the
+marking on its sensor module with this camera's and to read its chip. A video helps less: its frame header does not
+tell the known builds apart (INFERRED), though a text in its `JUNK` chunk other than the known builds' packer text
+shows other code ([Command reference](07-USAGE.md#read-only-commands)).
 
 What the route needs, and what it does not prove:
 

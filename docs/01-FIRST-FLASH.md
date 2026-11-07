@@ -62,9 +62,11 @@ charmera inspect backups/<file>.bin
 lifted, pin 1 of the clip on the chip's dot. `backup` reads the chip twice and keeps the file only when the reads
 agree. `inspect` must find the build marks (the build string, the stamp and the sensor table) and say which build the
 file is: `public-dump` means your camera runs the same software as the public dump, byte for byte, and `film-mods`
-that it runs the build of the charmera-film-mods author's camera; `charmera-unknown-build` means it runs a build
-nobody has published, which is exactly the case the backup is for. Keep the file in two places. It is your way back,
-and it is the `--stock` every later `verify` and `stage` takes.
+that it runs the build of the charmera-film-mods author's camera; `public-dump-modified` or `film-mods-modified`
+means that build with changes, such as a mod made from it ([Image layout](11-FORMAT.md#build-identity) says what
+counts as one); `charmera-unknown-build` means it runs a build nobody has published, which is exactly the case the
+backup is for. Keep the file in two places. It is your way back, and it is the `--stock` every later `verify` and
+`stage` takes.
 
 ### After a flash
 
@@ -84,7 +86,11 @@ Do not flash. The public dump is a copy of one camera; it is not known to fit yo
 undone without your own backup. A camera that already lost its original firmware this way can still be flashed
 through the card, but only a dump from a working camera with the same sensor can fix it (the donor route above), and
 reading its current chip first is still what the rule asks. Choosing a donor can start without a clip: `photo-id`
-compares a would-be donor's photos with the ones this camera took before its flash, without opening either camera
+reads the header of a would-be donor's photos and of the ones this camera took before its flash, without opening
+either camera. A different header written by the cameras' own firmware shows a different build. A photo that another
+program saved again says nothing about the camera: `photo-id` calls a photo re-saved only when its header carries a
+mark an editor leaves, such as an XMP block, and any other header neither known build writes may be such a copy or
+another build's, with nothing in it to tell which. So use the photos as they came off each camera's card
 ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 
 ## 2. Pick the file
@@ -130,16 +136,20 @@ own read after a flash with the public restore file, and then it shows what the 
 `verify` fails closed. A FAIL line means the file does not go on a card. The `sensor-table` line compares the file's
 image-sensor set-up table with your backup's, found by content in both. A table that differs from your backup's is a
 FAIL that no flag clears, `--allow-unknown-build` included, because that difference is what leaves a camera unable to
-take pictures, and so is a backup with no sensor table of the kind the known builds use, which leaves nothing to
-compare the file with; the one deliberate way past both is the donor route
-([Recovery, section D](02-RECOVERY.md#the-donor-route)). `--allow-unknown-build` covers only a file without the build
-marks and, without `--stock`, a table that is not the known builds'. A match is a WARN when your backup is one of the
-known builds ([After a flash](#after-a-flash)). When your backup is a build nobody has published, a match is a PASS
-only when the program around the table (bytes 0..0x120000, the code and its data) is your backup's too, and a WARN
-that says the program differs otherwise: a different program can drive the same sensor differently. The `build` line
-names the known build a file was made from, or says the build is unknown, and adds what a build match proves: which
-public image the file came from, not whether it fits your camera. The stamp in the file's name must differ from the
-one in your backup (`stamp-camera`), or the camera would ignore the file.
+take pictures; so are a file with no sensor table of the kind the known builds use and a backup with none, since
+either leaves nothing to compare; the one deliberate way past them is the donor route
+([Recovery, section D](02-RECOVERY.md#the-donor-route)). `--allow-unknown-build` covers only a file without all the
+build marks (with `--stock`, only one that still has a sensor table of the known kind) and, without `--stock`, a
+table that is not the known builds'. A match is a WARN when your backup is one of the known builds
+([After a flash](#after-a-flash)). When your backup is a build nobody has published, a match is a PASS only when the
+program around the table (bytes 0..0x120000, the code and its data) is your backup's too, and a WARN that says the
+program differs otherwise: a different program can drive the same sensor differently. The `build` line names the
+known build a file was made from, unchanged or "with changes", or says the build is unknown, and adds what a build
+match proves: which public image the file came from, not whether it fits your camera. A file is a known build with
+changes only when its build marks lie where that build keeps them and it carries that build's stamp, sensor table,
+source-tree folder and compile date, as a mod of a backup of that build does; with any of the four different, it is a
+build the toolkit does not know, "laid out like" that one ([Image layout](11-FORMAT.md#build-identity)). The stamp in
+the file's name must differ from the one in your backup (`stamp-camera`), or the camera would ignore the file.
 
 `verify` refuses any change to bytes 0..0x170000 (the code and the resource pack) unless you tell it the change is
 intended, which is what `--allow-modified` does; the `software-region` line is then a WARN, never a PASS. No flag

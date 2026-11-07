@@ -3,7 +3,8 @@ photos, --allow-modified for mods, eject before removing, the Android 11 slot li
 holds to the backup rule: the hard stop is stated where a flash starts, every stage example gives --stock, the public
 dump is never anyone's --stock outside the candidates' recipe, and no doc calls the series or the stamp a proof.
 Every probe, backup, restore and photo-id command line in the docs runs with the options the tool registers, restore
-keeps its read in --out, and the docs name backup's files as backup writes them.
+keeps its read in --out, the docs name backup's files as backup writes them, and they name the warning about a read
+that no second read confirmed as verify names it.
 
 DOCS_DIR selects the docs folder (default: the repository's docs/); the two READMEs are read from its parent."""
 import argparse
@@ -17,7 +18,7 @@ from typing import List, Optional, Tuple
 
 import pytest
 
-from charmera_toolkit import cli, flash
+from charmera_toolkit import cli, flash, verify
 
 DOCS = Path(os.environ.get("DOCS_DIR", Path(__file__).resolve().parent.parent / "docs"))
 README = DOCS.parent / "README.md"
@@ -250,6 +251,10 @@ RETIRED = (
     "either size the camera accepts",
     "any update file replaces the photos",
     "whatever flags are given",
+    # a photo another program saved again has a different header too, and the camera writes no DCIM subfolder
+    "a different header proves a different build",
+    "a different header shows a different build",
+    "dcim/100media",
 )
 DATED = re.compile(r"(superseded|corrected) 2026-11-06", re.I)
 
@@ -353,13 +358,25 @@ def test_the_docs_name_backups_reads_as_backup_keeps_them():
     assert re.search(r"single read \(`--reads 1`\) keeps its `\.unverified-read1\.bin` name", t)
 
 
+def test_the_docs_name_the_warning_for_a_read_no_second_read_confirmed():
+    """verify and stage warn about a --stock or --donor named like a read that no second read confirmed (stock-read,
+    donor-read), and the app refuses such a file as its backup. The command reference, Recovery's backup step and the
+    stage page say so with the names verify gives those lines."""
+    checks = verify.verify_update(Path("JH_5408202611061200_00000000.bin"), b"\xff" * 0x1000, b"\xff" * 0x1000,
+                                  stock_name="chip-now_20261106-120000Z.unverified-read1.bin")
+    assert [c.severity for c in checks if c.name == "stock-read"] == ["warn"]
+    for name in ("02-RECOVERY.md", "04-STAGE.md", "07-USAGE.md"):
+        t = text(name)
+        assert "stock-read" in t and "donor-read" in t and ".unverified-read<n>.bin" in t, name
+    for name in ("02-RECOVERY.md", "07-USAGE.md"):
+        assert re.search(r"the app refuses such a file as its backup", text(name), re.I), name
+    assert "refuses a file named like a read that no second read confirmed" in " ".join(
+        APP_README.read_text(encoding="utf-8").split())
+
+
 def test_every_documented_photo_id_line_parses():
-    """photo-id, in Recovery's donor route and in the command reference, runs with the options the command registers.
-    Skipped where photo-id is not registered (the docs describe it before the code that adds it is merged)."""
+    """photo-id, in Recovery's donor route and in the command reference, runs with the options the command registers."""
     parser = cli.build_parser()
-    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
-    if "photo-id" not in sub.choices:
-        pytest.skip("photo-id is not registered in this tree")
     problems, where_found = [], set()
     for where, _command, argv in command_lines("photo-id"):
         where_found.add(where.split(":")[0])

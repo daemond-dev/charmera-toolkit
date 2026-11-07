@@ -37,7 +37,7 @@ Examples for every command are in the [Command reference](docs/07-USAGE.md).
 | `stage` | the card | Re-verify an update file against your backup, copy it to the card root and read it back. |
 | `card-check` / `card-fix` | nothing / the card | Diagnose and fix the exFAT dirty-bit problem that stops phones reading the card. |
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
-| `photo-id` | nothing | Say which kind of firmware wrote a photo, from its header alone: a different header shows a different build. |
+| `photo-id` | nothing | Say what a photo's header shows about the firmware that wrote it, from the header alone; a photo another program saved again says nothing. |
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
 
 On a phone, the [Charmera Card app](android/README.md) does the card part with no computer: it makes the published
@@ -119,17 +119,17 @@ files can be given, and CI's tests workflow downloads both from upstream at fixe
 
 - `CHARMERA_STOCK_IMAGE`: the public stock dump, `dumps/charmera_stock_latest.bin` from benbadio/keychain-camera-plus
   at commit 209c25a (SHA-256 `cc3b4b2f…`). The image tests in `test_core`, `test_stage`, `test_frames`,
-  `test_resources`, `test_exif` and `test_android` run on it and expect what that dump holds (the public build's
-  fingerprints, its frames, resources and stored photos), and all of `test_preflight` rebuilds the candidates and the
-  stock restore file from it, compares them with the hashes in [Flash candidates](docs/03-FLASH-CANDIDATES.md), and
-  checks that padded, cut-off or damaged files are refused before a card. Point it at that dump, not at your own
-  backup: a backup of another build fails them, which is no fault of the toolkit, and a backup read after the camera
-  was flashed with the public restore file passes them, which says only that the camera now runs the public build,
-  not that it fits.
+  `test_resources`, `test_exif`, `test_photo_id` and `test_android` run on it and expect what that dump holds (the
+  public build's fingerprints, its frames, resources, photo header templates and stored photos), and all of
+  `test_preflight` rebuilds the candidates and the stock restore file from it, compares them with the hashes in
+  [Flash candidates](docs/03-FLASH-CANDIDATES.md), and checks that padded, cut-off or damaged files are refused before
+  a card. Point it at that dump, not at your own backup: a backup of another build fails them, which is no fault of the
+  toolkit, and a backup read after the camera was flashed with the public restore file passes them, which says only
+  that the camera now runs the public build, not that it fits.
 - `CHARMERA_FILM_MODS_RESTORE`: the film-mods project's public restore file (release Charmera_Restore,
   `JH_5408202505201029_0852C329.bin`, SHA-256 `5b352e46…`), for the tests that name that build (`test_core`,
-  `test_android` and the app's `UpdateCheckTest` and `CandidatesTest`). CI goes on without it, with a warning, when it
-  cannot be fetched.
+  `test_photo_id`, `test_android` and the app's `UpdateCheckTest` and `CandidatesTest`). CI goes on without it, with a
+  warning, when it cannot be fetched.
 
 No test uses the second public dump (Project-Sirius). The app's tests run on the JVM and read `CHARMERA_UPDATE_FILES`
 as well, which CI does not set ([the app's Build section](android/README.md#build)).

@@ -115,13 +115,18 @@ charmera exif-fix [--source DIR] --out DIR [--video {fix-date,transcode,copy}]
   time and the hash the first 16 hex digits of the SHA-256 of the source file. On a second run every
   source whose hash token already exists in the output directory is skipped, so the output directory
   is its own import record.
-- `--keep-names` keeps the source names instead. The camera numbers files per folder, so a card can hold
-  `DCIM/100MEDIA/PICT0001.JPG` and `DCIM/101MEDIA/PICT0001.JPG`; a name that occurs more than once among
-  the sources gets its folder in front (`100MEDIA_PICT0001.JPG`, `101MEDIA_PICT0001.JPG`). An output
-  that already exists with the source's modification time (within 2 s, FAT's resolution) is an earlier
-  import of the same file and is skipped; one with a different time belongs to a different file, so the
-  new copy gets a numbered name (`PICT0001_1.JPG`) and the line says `name taken by a different file,
-  written as ...`. The summary counts these name collisions separately from the files already imported.
+- `--keep-names` keeps the source names instead. Both known builds write every photo and video straight
+  into the card's `DCIM` folder, with no subfolder, each new file numbered one above the highest of its
+  kind there (VERIFIED by static analysis of the public build; the film-mods build carries the same name
+  formats, VERIFIED by search), so the files of one card never share a name. Names repeat between cards,
+  and on a card that was emptied (INFERRED from that numbering): a folder of earlier copies can hold
+  `card-a/PICT0001.JPG` and `card-b/PICT0001.JPG`. A name that occurs more than once among the sources
+  gets the name of its own folder in front (`card-a_PICT0001.JPG`, `card-b_PICT0001.JPG`), so keep the
+  copies of different cards in folders with different names. An output that already exists with the
+  source's modification time (within 2 s, FAT's resolution) is an earlier import of the same file and is
+  skipped; one with a different time belongs to a different file, so the new copy gets a numbered name
+  (`PICT0001_1.JPG`) and the line says `name taken by a different file, written as ...`. The summary
+  counts these name collisions separately from the files already imported.
 - `--relabel-all` rebuilds the EXIF of every JPEG, including ones that do not look like Charmera
   photos (see "The fix").
 - Files are `.jpg`, `.jpeg` and `.avi`, any case. Names starting with `._` (macOS metadata) are

@@ -118,10 +118,11 @@ keeps the photos stored in the camera. The full sequence, with the backup, stagi
    no flash. It is the input of the recipe and the `--stock` below; the public dump is not a substitute for it.
 2. `verify` the file against your backup (`--stock <backup>`, plus `--allow-modified` for a mod of the code or the
    resources such as B); read every line. `verify` refuses any change to bytes 0..0x170000 unless it is told the change
-   is intended, and then shows it as a WARN. A sensor table that differs from your backup's, or a backup with no
-   sensor table of the kind the known builds use, is a FAIL in `verify` and in `stage` that no flag clears,
-   `--allow-unknown-build` included, which covers only a file without the build marks and, without `--stock`, a table
-   that is not the known builds'. No recipe here changes the table, and the one deliberate way past such a FAIL is the
+   is intended, and then shows it as a WARN. A sensor table that differs from your backup's, a file with no sensor
+   table of the kind the known builds use, and a backup with none are each a FAIL in `verify` and in `stage` that no
+   flag clears, `--allow-unknown-build` included, which covers only a file without all the build marks (with
+   `--stock`, only one that still has a sensor table of the known kind) and, without `--stock`, a table that is not
+   the known builds'. No recipe here changes the table, and the one deliberate way past such a FAIL is the
    donor route ([Recovery, section D](02-RECOVERY.md#the-donor-route)). The same table is a WARN when your backup is
    one of the known builds; with a backup of a build nobody has published, it is a PASS only when the program around
    it is your backup's too, and a WARN otherwise.
