@@ -467,6 +467,34 @@ def test_register_wires_the_flags():
         parser.parse_args(["resources", "frobnicate", "x.bin"])
 
 
+def test_replace_never_writes_an_update_name_or_onto_a_card(tmp_path, capsys):
+    """A logo mod is an image, not an update file: never under a JH_*.bin name, in any case, and never into a
+    folder that holds DCIM or a JH_*.bin (a camera card), dry run or not."""
+    img = synthetic_image()
+    src = tmp_path / "in.bin"
+    src.write_bytes(img)
+    jpg = tmp_path / "logo.jpg"
+    jpg.write_bytes(fake_jpeg(scan=b"\x42" * 100))
+    card = tmp_path / "card"
+    (card / "dcim").mkdir(parents=True)
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "Jh_5408202610261427_0F065D55.bin").write_bytes(b"x")
+    base = dict(action="replace", image=str(src), name="POWER_ON_LOGO.JPG", file=str(jpg))
+    for out in (tmp_path / "JH_5408202611061200_00000000.bin", tmp_path / "jh_logo.BIN", card / "logo.bin",
+                staged / "logo.bin"):
+        for gate in (False, True):
+            assert resources.handler(make_args(**base, out=str(out), gate=gate)) == 2, out
+            text = capsys.readouterr().out
+            assert "named like an update file" in text or "looks like a camera card" in text or "holds an update file" in text
+            assert not out.exists()
+    assert sorted(p.name for p in card.iterdir()) == ["dcim"]
+    assert sorted(p.name for p in staged.iterdir()) == ["Jh_5408202610261427_0F065D55.bin"]
+    assert src.read_bytes() == img
+    assert resources.handler(make_args(**base, out=str(tmp_path / "logo.bin"), gate=True)) == 0
+    assert (tmp_path / "logo.bin").exists()
+
+
 # --- real encoder output (Pillow) -----------------------------------------------------------------------------------------
 
 

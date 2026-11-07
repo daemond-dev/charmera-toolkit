@@ -655,7 +655,8 @@ def register(subparsers) -> None:
     p = subparsers.add_parser("resources", help="list, extract or replace entries of the GP+ resource pack")
     p.add_argument("action", choices=["list", "extract", "replace"])
     p.add_argument("image", metavar="IMAGE", help="a 2 MiB dump or a 0x1E0000 update file")
-    p.add_argument("--out", help="output directory (extract) or output image path (replace)")
+    p.add_argument("--out", help="output directory (extract) or output image path (replace; never named JH_*.bin, "
+                                 "never in a folder that holds DCIM or a JH_*.bin)")
     p.add_argument("--name", help="an entry, e.g. POWER_ON_LOGO.JPG (extract: only that one; replace: the slot to change)")
     p.add_argument("--file", help="replace: the JPEG to put into the slot")
     p.add_argument("--strip-metadata", action="store_true",

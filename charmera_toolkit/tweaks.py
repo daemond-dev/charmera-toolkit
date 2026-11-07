@@ -169,7 +169,7 @@ def register(subparsers) -> None:
     p.add_argument("action", choices=["list", "apply"])
     p.add_argument("file", nargs="?", help="apply: a 2 MiB dump or a 0x1E0000 update file of the original series")
     p.add_argument("--enable", help="apply: comma-separated tweak names from `tweak list`, or 'recommended'")
-    p.add_argument("--out", help="apply: output image path")
+    p.add_argument("--out", help="apply: output image path (never named JH_*.bin, never in a folder that holds DCIM or a JH_*.bin)")
     p.add_argument("--accept-high-risk", action="store_true", help="apply: allow tweaks marked high risk")
     p.add_argument("--overwrite", action="store_true", help="allow --out to replace an existing file (never the input)")
     p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the modified image")
