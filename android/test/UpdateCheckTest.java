@@ -323,10 +323,14 @@ public final class UpdateCheckTest {
 
         expect("the source folder is found by content and shown with the build marks, with what it shows",
                 "v006".equals(marks.sourceTree) && marks.sourceTrees.size() == 1 && marks.sourceTrees.get("v006") == 3
-                        && marks.sourceTreeOffset == 0x3A4C8 && text(r, "series").contains(", source folder v006, stamp")
+                        && text(r, "series").contains(", source folder v006, stamp")
                         && text(r, "series").contains("A different source folder shows a different build, the same one"
                         + " does not show the same build, and neither says whether the file fits your camera.")
-                        && detail(r, "series").contains("source folder named in 3 source paths, the first at 0x3a4c8"), r);
+                        && detail(r, "series").contains("source folder at 0x3a4d3, named in 3 source paths"), r);
+        expect("it is reported where its name begins, as image.py reports it, not where \\2247\\5408\\ does",
+                marks.sourceTreeOffset == 0x3A4D3 && "v006".equals(new String(base, marks.sourceTreeOffset, 4,
+                        StandardCharsets.US_ASCII)) && "\\2247\\5408\\".equals(new String(base,
+                        marks.sourceTreeOffset - 11, 11, StandardCharsets.US_ASCII)), null);
         m = base.clone();
         sourcePath(m, 0x50000, "v007", "host\\init.c");
         m[0x50200] = 0;
@@ -350,6 +354,31 @@ public final class UpdateCheckTest {
                         + " build's.") && !text(r, "build").contains("with changes")
                         && text(r, "series").contains("source folder v007")
                         && detail(r, "build").contains("the source folder is v007, that build's v006"), r);
+        // A folder's name is 1 to 64 bytes from 0x20 to 0x7E other than the backslash, as in image.py; the name
+        // begins 19 bytes after the offset sourcePath is given.
+        m = base.clone();
+        for (int at : new int[]{0x50000, 0x51000, 0x52000, 0x53000}) {
+            sourcePath(m, at, "v 0~6", "host\\init.c");
+        }
+        expect("a space and a tilde may stand in a folder's name", "v 0~6".equals(UpdateCheck.findMarks(m).sourceTree)
+                && UpdateCheck.findMarks(m).sourceTrees.get("v 0~6") == 4
+                && UpdateCheck.findMarks(m).sourceTreeOffset == 0x50000 + 19, null);
+        m = base.clone();
+        sourcePath(m, 0x50000, "v0\u007f6", "host\\init.c");
+        sourcePath(m, 0x51000, "v0\u001f6", "host\\init.c");
+        sourcePath(m, 0x52000, "v0#6", "host\\init.c");
+        m[0x52000 + 19 + 2] = (byte) 0xE9;     // the # as a byte above 0x7E
+        expect("a byte below 0x20 or above 0x7E makes a name no folder", UpdateCheck.findMarks(m).sourceTrees.keySet()
+                .equals(java.util.Collections.singleton("v006")), null);
+        // Each path is looked for after the backslash that ends the one before, as image.py's regular expression is:
+        // here the second \2247\5408\ starts at the backslash that ends v006's path.
+        m = base.clone();
+        String nested = "G:\\code\\2247\\5408\\v006\\2247\\5408\\v007\\init.c";
+        m[0x50000] = 0;
+        put(m, 0x50001, nested);
+        m[0x50001 + nested.length()] = 0;
+        expect("a path that starts inside the one before it is not counted", UpdateCheck.findMarks(m).sourceTrees.get(
+                "v006") == 4 && !UpdateCheck.findMarks(m).sourceTrees.containsKey("v007"), null);
         m = base.clone();
         for (int at : new int[]{0x3A4C8, 0x3C448, 0x46608}) {
             m[at + 1] = '3';                   // \3247\ in place of \2247\: no source path left
@@ -364,9 +393,35 @@ public final class UpdateCheckTest {
         m = base.clone();
         m[0x62B8] ^= 0x08;
         r = check(m, build);
-        expect("a code change keeps the build's layout, stamp, table and folder: that build with changes", r.ok
+        expect("a code change keeps the build's layout, stamp, table, folder and compile date: that build with changes",
+                r.ok && line(r, "build", UpdateCheck.Level.INFO)
+                        && text(r, "build").contains("synthetic test build, with changes")
+                        && detail(r, "build").contains("the stamp, the sensor table, the source folder and the compile"
+                        + " date are that build's"), r);
+
+        // --- the compile date: a build mark like the source folder, where the build records one ----------------
+
+        m = base.clone();
+        put(m, 0xF3978, "Oct 15 2025");
+        r = check(m, build);
+        expect("a file laid out like a known build with another compile date is another build, not a changed copy",
+                r.ok && line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("a build the app does not"
+                        + " know, laid out like synthetic test build: its compile date is not that build's.")
+                        && !text(r, "build").contains("with changes")
+                        && text(r, "series").contains("compiled Oct 15 2025")
+                        && detail(r, "build").contains("the compile date is Oct 15 2025, that build's Oct 14 2025"), r);
+        r = check(m, buildFor(base, null));
+        expect("against a build that records no compile date, the date asks for nothing", r.ok
                 && line(r, "build", UpdateCheck.Level.INFO) && text(r, "build").contains("synthetic test build, with changes")
-                && detail(r, "build").contains("the stamp, the sensor table and the source folder are that build's"), r);
+                && detail(r, "build").contains("and the stamp, the sensor table and the source folder are that"
+                + " build's"), r);
+        m[0xF3983] = 'X';                      // no NUL after the date: no compile date at all
+        put(m, 0x218C4, "202601010000");
+        r = check(m, build);
+        expect("a file with no compile date and another stamp is not that build with changes either", r.ok
+                && line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("laid out like synthetic test"
+                + " build: its stamp and its compile date are not that build's.")
+                && detail(r, "build").contains("the compile date is not found, that build's Oct 14 2025"), r);
 
         // --- the official update size ------------------------------------------------------------------------
 
@@ -437,6 +492,29 @@ public final class UpdateCheckTest {
         Arrays.fill(damaged, slot("LOGOJPG")[0], slot("LOGOJPG")[0] + slot("LOGOJPG")[1], (byte) 0xFF);
         expect("a read with a damaged resource is not a backup", UpdateCheck.backupProblem(damaged, noPublic)
                 .startsWith("1 of its 43 sounds, pictures and menu files are damaged"), null);
+        // The toolkit's backup and restore keep a read no second read agreed with as
+        // <label>_<time>.unverified-read<n>.bin: not a backup, whatever its bytes hold, since a poor clip contact can
+        // leave wrong bytes that look whole.
+        String unverified = UpdateCheck.backupProblem("chip-now_20261106-120000Z.unverified-read1.bin", dump, noPublic);
+        expect("a dump named like a read no second read agreed with is not a backup", unverified != null
+                && unverified.startsWith("its name is one the toolkit's backup and restore give to reads that did not"
+                + " agree and to a single read, and such a read is not a backup until two reads agree.")
+                && unverified.contains("read the chip again with the toolkit's backup command until two reads"
+                + " agree"), null);
+        Locale language = Locale.getDefault();
+        String upper;
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));   // where a capital I is not a lower-case i
+            upper = UpdateCheck.backupProblem("CHIP-NOW_20261106-120000Z.UNVERIFIED-READ2.BIN", dump, noPublic);
+        } finally {
+            Locale.setDefault(language);
+        }
+        expect("in any case, whatever the phone's language", unverified != null && unverified.equals(upper), null);
+        expect("and for its name first, when its bytes are a cut-off read too", unverified != null && unverified.equals(
+                UpdateCheck.backupProblem("chip-now_20261106-120000Z.unverified-read1.bin", cutOff, noPublic)), null);
+        expect("the read the backup command keeps once two reads agree is taken, and so is a dump whose name is not"
+                + " known", UpdateCheck.backupProblem("chip-now_20261106-120000Z.bin", dump, noPublic) == null
+                && UpdateCheck.backupProblem(null, dump, noPublic) == null, null);
         // A near copy of a known build's dump, as a read after a flash with it is once a setting was saved: it is
         // taken, and what it can and cannot show is said with it and on the sensor line.
         byte[] near = dump.clone();
@@ -709,9 +787,11 @@ public final class UpdateCheckTest {
                     && line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("charmera-film-mods")
                     && line(r, "stamp", UpdateCheck.Level.FAIL) && text(r, "series").contains("compiled Nov 19 2025"), r);
             UpdateCheck.Marks fm = UpdateCheck.findMarks(d);
-            expect("its source folder is v008_test, named in all 27 of its source paths", "v008_test".equals(fm.sourceTree)
-                    && fm.sourceTrees.size() == 1 && fm.sourceTrees.get("v008_test") == 27 && fm.sourceTreeOffset == 0x464AF
-                    && text(r, "series").contains("source folder v008_test"), r);
+            expect("its source folder is v008_test, named in all 27 of its source paths, the first name at 0x464ba as"
+                    + " image.py reports it", "v008_test".equals(fm.sourceTree) && fm.sourceTrees.size() == 1
+                    && fm.sourceTrees.get("v008_test") == 27 && fm.sourceTreeOffset == 0x464BA
+                    && text(r, "series").contains("source folder v008_test")
+                    && detail(r, "series").contains("source folder at 0x464ba, named in 27 source paths"), r);
         }
 
         String real = System.getenv("CHARMERA_UPDATE_FILES");
@@ -831,10 +911,15 @@ public final class UpdateCheckTest {
     }
 
     static UpdateCheck.Build buildFor(byte[] d) {
+        return buildFor(d, "Oct 14 2025");
+    }
+
+    /** The synthetic build with the compile date it records, or null for none. */
+    static UpdateCheck.Build buildFor(byte[] d, String compiled) {
         return new UpdateCheck.Build("synthetic test build", "202505201029", UpdateCheck.sha256Hex(d, 0, 0x170000),
                 UpdateCheck.sha256Hex(d, 0, 0x120000), UpdateCheck.sha256Hex(d, 0, UpdateCheck.OFFICIAL_SIZE),
-                UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8), UpdateCheck.sha256Hex(d, 0x200, 0x240), "v006", 0x218C4,
-                0x18964, 0xF5C6C);
+                UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8), UpdateCheck.sha256Hex(d, 0x200, 0x240), compiled, "v006",
+                0x218C4, 0x18964, 0xF5C6C);
     }
 
     /** A 2 MiB read of a chip that holds the image d: d, then the blank 0xFF the rest of the chip is. */

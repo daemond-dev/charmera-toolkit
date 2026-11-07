@@ -11,9 +11,7 @@ import os
 import re
 from pathlib import Path
 
-import pytest
-
-from charmera_toolkit import checksum, image
+from charmera_toolkit import checksum, flash, image
 
 REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "android" / "src" / "io" / "github" / "daemonddev" / "charmera"
@@ -142,18 +140,29 @@ _SOURCE_TREE = re.compile(rb"\\2247\\5408\\([\x20-\x5b\x5d-\x7e]{1,64})\\")
 
 
 def _source_tree(data: bytes):
-    """The source-tree folder by the app's rule (S15): the one named most often after \\2247\\5408\\ in the code area,
-    the first found on a tie, or None."""
-    names = collections.Counter(m.group(1).decode("ascii") for m in _SOURCE_TREE.finditer(data[:image.CODE_AREA_END]))
-    return names.most_common(1)[0][0] if names else None
+    """The source-tree folder by the app's rule (S15), as (folder, offset where its name first begins, how many source
+    paths name it): the folder named most often after \\2247\\5408\\ in the code area, the first found on a tie, or
+    (None, None, 0). A name is 1 to 64 bytes from 0x20 to 0x7E other than the backslash, and each path is looked for
+    after the one before."""
+    found = [(m.group(1).decode("ascii"), m.start(1)) for m in _SOURCE_TREE.finditer(data[:image.CODE_AREA_END])]
+    if not found:
+        return None, None, 0
+    names = collections.Counter(name for name, _ in found)
+    folder = names.most_common(1)[0][0]
+    return folder, next(at for name, at in found if name == folder), names[folder]
 
 
 def test_app_records_each_known_builds_source_folder():
-    """S15: the source-tree folder is a build mark; the app finds it by content and records it for both known builds."""
+    """S15: the source-tree folder is a build mark; the app finds it by content, reports it where its name begins, and
+    records it for both known builds."""
     java = SRC.read_text(encoding="utf-8")
     assert 'SOURCE_TREE_PREFIX = "\\\\2247\\\\5408\\\\".getBytes(' in java
     find = _bodies(java, "public static Marks findMarks(byte[] data)")[0]
     assert "indexOf(data, SOURCE_TREE_PREFIX, 0, end)" in find and "e.getValue() > trees.get(sourceTree)" in find
+    # the name's bytes, the offset kept (where the name begins) and the next search (after the path's backslash)
+    assert "data[q] >= 0x20 && data[q] <= 0x7E && data[q] != '\\\\'" in find and "MAX_FOLDER = 64;" in java
+    assert "int p = at + SOURCE_TREE_PREFIX.length;" in find and "treeAt.put(folder, p);" in find
+    assert "next = q + 1;" in find and "at = indexOf(data, SOURCE_TREE_PREFIX, next, end);" in find
     assert '"v006",' in _build_block(java, "PUBLIC_BUILD") and '"v008_test",' in _build_block(java, "FILM_MODS_BUILD")
     assert "A different source folder shows a different build, the same one does not show the same build, and neither" \
            " says whether the file fits your camera." in _joined(java)
@@ -166,22 +175,46 @@ def _check_body(java: str) -> str:
 
 
 def test_app_source_folders_are_the_files_own(stock_image):
-    """The folders the app records are the ones the files' own source paths name, all 27 of them in each."""
-    assert _source_tree(stock_image) == "v006" and stock_image[:image.CODE_AREA_END].count(b"\\2247\\5408\\v006\\") == 27
+    """The folders the app records are the ones the files' own source paths name, all 27 of them in each. On both
+    files the app's rule and image.py give the same folder, the same offset (where the folder's name begins: 0x3a4d2
+    in the public dump, 0x464ba in the film-mods file) and the same count."""
+    files = [(stock_image, "v006", 0x3A4D2)]
     restore = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
     if restore.is_file():
-        data = restore.read_bytes()
-        assert _source_tree(data) == "v008_test" and data[:image.CODE_AREA_END].count(b"\\2247\\5408\\v008_test\\") == 27
+        files.append((restore.read_bytes(), "v008_test", 0x464BA))
+    for data, folder, at in files:
+        assert _source_tree(data) == (folder, at, 27), folder
+        assert data[:image.CODE_AREA_END].count(b"\\2247\\5408\\" + folder.encode("ascii") + b"\\") == 27
+        assert data[at - 11: at] == b"\\2247\\5408\\" and data[at: at + len(folder)] == folder.encode("ascii")
+        marks = image.find_marks(data)
+        assert (marks.source_tree, marks.source_tree_offset, marks.source_tree_paths) == (folder, at, 27), folder
 
 
 def test_app_source_folders_match_image_py():
     """S15 parity: each known build's folder in the app is image.py's KnownBuild.source_tree."""
-    if "source_tree" not in Path(image.__file__).read_text(encoding="utf-8"):
-        pytest.skip("image.py has no KnownBuild.source_tree yet: the Python side of S15 brings it")
     java = SRC.read_text(encoding="utf-8")
     for name, build in (("PUBLIC_BUILD", image.PUBLIC_BUILD), ("FILM_MODS_BUILD", image.FILM_MODS_BUILD)):
         assert f'"{build.source_tree}",' in _build_block(java, name), name
     assert (image.PUBLIC_BUILD.source_tree, image.FILM_MODS_BUILD.source_tree) == ("v006", "v008_test")
+
+
+def test_app_takes_a_changed_copy_only_with_the_builds_compile_date():
+    """S15 completed: a file laid out like a known build is that build with changes only when it carries that build's
+    stamp, sensor table, source folder and compile date, each where the build records one. The app records image.py's
+    compile date for both known builds; CandidatesTest holds it to the public dump and the film-mods file with another
+    date, and with v007 for v006."""
+    java = SRC.read_text(encoding="utf-8")
+    for name, build in (("PUBLIC_BUILD", image.PUBLIC_BUILD), ("FILM_MODS_BUILD", image.FILM_MODS_BUILD)):
+        assert f'"{build.compiled}",' in _build_block(java, name), name
+    assert (image.PUBLIC_BUILD.compiled, image.FILM_MODS_BUILD.compiled) == ("Oct 14 2025", "Nov 19 2025")
+    check = _check_body(java)
+    made = check[check.index("Build madeFrom = "): check.index(";", check.index("Build madeFrom = "))]
+    for clause in ("marks.stamp.equals(layout.stamp)", "marks.sensorSha256.equals(layout.sensorSha256)",
+                   "sameSourceTree(layout, marks)", "sameCompiled(layout, marks)"):
+        assert clause in made, clause
+    same = _bodies(java, "static boolean sameCompiled(")[0]
+    assert "return b.compiled == null || b.compiled.equals(marks.compiled);" in same
+    assert '"its compile date"' in check and '"the compile date"' in check
 
 
 def test_app_says_what_a_backup_of_a_known_build_proves():
@@ -415,7 +448,7 @@ def test_app_writes_nothing_without_a_backup_of_the_camera():
     assert "volatile String backupSha256" in java and "volatile boolean loadingBackup" in java
     assert "volatile boolean checking" in java
     load = _bodies(java, "private void loadBackup(")[0]
-    assert "UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S)" in load
+    assert "UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S)" in load
     # a new write clears the old removal result, and the other way round; a new drive clears both
     assert 'cleanStatus.setText("")' in _bodies(java, "private void write(")[0]
     assert 'writeStatus.setText("")' in _bodies(java, "private void clean(")[0]
@@ -479,12 +512,31 @@ def test_app_points_to_step_0_only_a_dump_that_step_0_takes():
     gets what UpdateCheck.backupProblem finds wrong with it. Candidates.stockDump's refusal names no step."""
     load = _bodies(ACTIVITY.read_text(encoding="utf-8"), "private void loadFile(")[0]
     dump = load[load.index("} else if (data.length == Candidates.DUMP_SIZE) {"): load.index("result = UpdateCheck.check(name, data")]
-    assert "String problem = UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S);" in dump
+    assert "String problem = UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S);" in dump
     accepted, refused = dump.split("} else {", 1)
     assert "if (problem == null) {" in accepted and "q(BACKUP)" in accepted
     assert "q(BACKUP)" not in refused and "sentence(problem)" in refused and "Candidates.stockDump(" not in dump
     stock = _bodies((PKG / "Candidates.java").read_text(encoding="utf-8"), "public static byte[] stockDump(")[0]
     assert "step 0" not in stock and "Choose this camera's backup" not in stock
+
+
+def test_app_takes_no_read_that_a_second_read_did_not_confirm_as_the_backup():
+    """No backup of your own camera, no flash: step 0 refuses a file whose name holds the mark the toolkit's backup and
+    restore give to reads that did not agree and to a single read (flash.UNVERIFIED_READ, in any case), whatever its
+    bytes, saying such a read is not a backup until two reads agree. Step 1 checks the same name, so it points no such
+    dump to step 0. The rule is plain Java, run in UpdateCheckTest."""
+    java = SRC.read_text(encoding="utf-8")
+    assert f'UNVERIFIED_READ = "{flash.UNVERIFIED_READ}";' in java
+    named = _bodies(java, "public static String backupProblem(String name, byte[] data, String[] publicSha256)")[0]
+    rule = "if (name != null && name.toLowerCase(Locale.ROOT).contains(UNVERIFIED_READ)) {"
+    assert rule in named and named.index(rule) < named.index("return backupProblem(data, publicSha256);")
+    assert "such a read is not a backup until two reads agree" in _joined(named)
+    activity = ACTIVITY.read_text(encoding="utf-8")
+    call = "UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S)"
+    for opener in ("private void loadBackup(", "private void loadFile("):
+        body = _bodies(activity, opener)[0]
+        assert call in body and body.index("String name = displayName(uri);") < body.index(call), opener
+    assert "UpdateCheck.backupProblem(data," not in activity
 
 
 def test_build_runs_every_jvm_test_and_compiles_the_gate():

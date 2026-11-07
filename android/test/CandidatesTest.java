@@ -1,6 +1,7 @@
 import io.github.daemonddev.charmera.Candidates;
 import io.github.daemonddev.charmera.UpdateCheck;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
@@ -80,9 +81,11 @@ public final class CandidatesTest {
                     && mk.resetStart == 0xF5BFC && mk.sensorStart == 0xF5C6C && mk.sensorEnd == 0xF5CE8 && mk.sensorPairs == 61
                     && mk.referencedFrom == 0x7B91C && mk.busAddress == 0x78
                     && "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755".equals(mk.sensorSha256));
-            expect("its source folder is v006, named in all 27 of its source paths", "v006".equals(mk.sourceTree)
-                    && mk.sourceTrees.size() == 1 && mk.sourceTrees.get("v006") == 27 && mk.sourceTreeOffset == 0x3A4C7
-                    && mk.stampConflict.isEmpty());
+            expect("its source folder is v006, named in all 27 of its source paths, the first name at 0x3a4d2 as image.py"
+                    + " reports it", "v006".equals(mk.sourceTree) && mk.sourceTrees.size() == 1
+                    && mk.sourceTrees.get("v006") == 27 && mk.sourceTreeOffset == 0x3A4D2
+                    && "v006".equals(new String(dump, mk.sourceTreeOffset, 4, StandardCharsets.US_ASCII))
+                    && mk.stampConflict.isEmpty() && "Oct 14 2025".equals(mk.compiled) && mk.compiledOffset == 0xF3978);
             UpdateCheck.Result rr = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore, UpdateCheck.PUBLIC_BUILD, dump);
             expect("the restore file against the dump it came from passes, and the sensor line says what a public"
                     + " backup proves", rr.ok && rr.compared && level(rr, "software") == UpdateCheck.Level.PASS
@@ -116,6 +119,28 @@ public final class CandidatesTest {
                     + " with changes", level(sr, "build") == UpdateCheck.Level.WARN && text(sr, "build").contains(
                     "laid out like the public dump's build: its stamp is not that build's")
                     && !text(sr, "build").contains("with changes"));
+            // The compile date and the source folder are build marks too (S15): another one is another build.
+            byte[] redated = restore.clone();
+            put(redated, 0xF3978, "Oct 15 2025");  // the dump's only compile date, a day on
+            UpdateCheck.Result dr = UpdateCheck.check(named(redated), redated);
+            expect("the restore file with another compile date is a build laid out like the public one, not that build"
+                    + " with changes", "Oct 15 2025".equals(UpdateCheck.findMarks(redated).compiled)
+                    && level(dr, "build") == UpdateCheck.Level.WARN && text(dr, "build").contains("a build the app does"
+                    + " not know, laid out like the public dump's build: its compile date is not that build's")
+                    && !text(dr, "build").contains("with changes") && dr.ok);
+            byte[] v007 = replaced(restore, "\\2247\\5408\\v006\\", "\\2247\\5408\\v007\\");
+            UpdateCheck.Result fr7 = UpdateCheck.check(named(v007), v007);
+            expect("and so is the restore file with v007 for v006 in all 27 source paths",
+                    UpdateCheck.findMarks(v007).sourceTrees.equals(java.util.Collections.singletonMap("v007", 27))
+                    && level(fr7, "build") == UpdateCheck.Level.WARN && text(fr7, "build").contains("a build the app"
+                    + " does not know, laid out like the public dump's build: its source folder is not that build's")
+                    && !text(fr7, "build").contains("with changes") && fr7.ok);
+            byte[] changed = restore.clone();
+            changed[0x110000] ^= 1;                 // the zero padding below the resource pack
+            UpdateCheck.Result cr = UpdateCheck.check(named(changed), changed);
+            expect("while a change that keeps every build mark is the public dump's build with changes",
+                    level(cr, "build") == UpdateCheck.Level.INFO && text(cr, "build").contains("the public dump's build"
+                    + " (the one both public dumps hold, and the one the stock restore file is), with changes"));
             byte[] twice = dump.clone();
             put(twice, 0xFFF8, "*.bin\0xx202601010101\0");   // a second stamp after a second *.bin
             UpdateCheck.Marks tm = UpdateCheck.findMarks(twice);
@@ -137,6 +162,19 @@ public final class CandidatesTest {
             UpdateCheck.Result fr = UpdateCheck.check(named(f), f);
             expect("the film-mods build's vector table is compared with its own build's, by its layout",
                     level(fr, "vector-table") == UpdateCheck.Level.PASS && fr.ok);
+            byte[] redated = f.clone();
+            put(redated, 0xF3604, "Nov 20 2025");  // that build's only compile date, a day on
+            UpdateCheck.Result dr = UpdateCheck.check(named(redated), redated);
+            expect("the film-mods file with another compile date is a build laid out like that one, not that build with"
+                    + " changes", level(dr, "build") == UpdateCheck.Level.WARN && text(dr, "build").contains("a build the"
+                    + " app does not know, laid out like the charmera-film-mods author's build: its compile date is not"
+                    + " that build's") && !text(dr, "build").contains("with changes"));
+            byte[] changed = f.clone();
+            changed[0x110000] ^= 1;
+            UpdateCheck.Result cr = UpdateCheck.check(named(changed), changed);
+            expect("while a change that keeps every build mark is that build with changes",
+                    level(cr, "build") == UpdateCheck.Level.WARN && text(cr, "build").startsWith("the charmera-film-mods"
+                    + " author's build (same stamp, different bytes, compiled Nov 19 2025), with changes"));
         }
         if (f != null && given != null && Candidates.isStockDump(given)) {
             // A backup laid out like the other known build: a broken vector table is still caught, by the known
@@ -261,6 +299,18 @@ public final class CandidatesTest {
         for (int i = 0; i < s.length(); i++) {
             d[off + i] = (byte) s.charAt(i);
         }
+    }
+
+    /** A copy of d with every from replaced by to, which has the same length. */
+    static byte[] replaced(byte[] d, String from, String to) {
+        byte[] f = from.getBytes(StandardCharsets.US_ASCII);
+        byte[] out = d.clone();
+        for (int i = 0; i + f.length <= out.length; i++) {
+            if (out[i] == f[0] && Arrays.equals(Arrays.copyOfRange(out, i, i + f.length), f)) {
+                put(out, i, to);
+            }
+        }
+        return out;
     }
 
     static void le32(byte[] d, int off, int v) {

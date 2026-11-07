@@ -109,6 +109,11 @@ public final class UpdateCheck {
         /** sha256 of the ARM vector table, bytes 0x200..0x240. */
         final String vectorSha256;
         /**
+         * The compile date it carries (Marks.compiled, "Oct 14 2025"), or null when not recorded. Another date shows
+         * another build; the same one does not show the same build.
+         */
+        final String compiled;
+        /**
          * The source-tree folder its source paths name (Marks.sourceTree), or null when not recorded. Another folder
          * shows another build; the same one does not show the same build.
          */
@@ -118,8 +123,8 @@ public final class UpdateCheck {
         final int sensorOffset;
 
         public Build(String label, String stamp, String softwareSha256, String codeAreaSha256, String officialSha256,
-                     String sensorSha256, String vectorSha256, String sourceTree, int stampOffset, int buildOffset,
-                     int sensorOffset) {
+                     String sensorSha256, String vectorSha256, String compiled, String sourceTree, int stampOffset,
+                     int buildOffset, int sensorOffset) {
             this.label = label;
             this.stamp = stamp;
             this.softwareSha256 = softwareSha256;
@@ -127,6 +132,7 @@ public final class UpdateCheck {
             this.officialSha256 = officialSha256;
             this.sensorSha256 = sensorSha256;
             this.vectorSha256 = vectorSha256;
+            this.compiled = compiled;
             this.sourceTree = sourceTree;
             this.stampOffset = stampOffset;
             this.buildOffset = buildOffset;
@@ -149,7 +155,8 @@ public final class UpdateCheck {
     /**
      * Values from charmera_toolkit/image.py (PUBLIC_BUILD, hashed from the stock dump itself); keep them in step. The
      * vector table's hash is the same in both known builds (tests/test_android.py checks it against both files). The
-     * source folder, v006, is named by all 27 source paths in the dump.
+     * compile date, Oct 14 2025, is the only one in the dump, and the source folder, v006, is named by all 27 source
+     * paths in it.
      */
     public static final Build PUBLIC_BUILD = new Build(
             "the public dump's build (the one both public dumps hold, and the one the stock restore file is)",
@@ -159,14 +166,15 @@ public final class UpdateCheck {
             "bffddd53d01a42725d63aa08dff5585433604a680a85520b23f3e176ae80f745",
             "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
             "cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",
+            "Oct 14 2025",
             "v006",
             0x218C4, 0x18964, 0xF5C6C);
 
     /**
      * The charmera-film-mods author's build, hashed from that project's public restore file (bytes 0..0x169000 of the
      * author's factory dump; charmera_toolkit/image.py FILM_MODS_BUILD). Same stamp, different bytes, the same sensor
-     * table, another source folder (v008_test, in all 27 source paths). Only 0x169000 bytes are public, so there is
-     * no hash over 0..0x170000.
+     * table, another compile date (Nov 19 2025) and another source folder (v008_test, in all 27 source paths). Only
+     * 0x169000 bytes are public, so there is no hash over 0..0x170000.
      */
     public static final Build FILM_MODS_BUILD = new Build(
             "the charmera-film-mods author's build (same stamp, different bytes, compiled Nov 19 2025)",
@@ -176,6 +184,7 @@ public final class UpdateCheck {
             "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f",
             "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755",
             "cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",
+            "Nov 19 2025",
             "v008_test",
             0x218D0, 0x1897C, 0xF5D34);
 
@@ -184,6 +193,11 @@ public final class UpdateCheck {
 
     /** JH_ + 4-digit product + 12-digit stamp + _ + 8 hex digits, anywhere in the name (copies get " (1)" added). */
     static final Pattern NAME = Pattern.compile("JH_(\\d{4})(\\d{12})_([0-9A-Fa-f]{8})");
+    /**
+     * What the toolkit's backup and restore put in the name of a read no second, identical read confirmed: reads that
+     * did not agree, and a single read (charmera_toolkit/flash.py UNVERIFIED_READ). Such a read is not a backup.
+     */
+    static final String UNVERIFIED_READ = "unverified-read";
 
     public enum Level { PASS, INFO, WARN, FAIL }
 
@@ -282,7 +296,10 @@ public final class UpdateCheck {
          * fits a camera.
          */
         public final String sourceTree;
-        /** Where the first source path that names sourceTree has "\2247\5408\", or -1. */
+        /**
+         * Where the folder's name begins, just after "\2247\5408\", in the first source path that names sourceTree, as
+         * image.py reports it; or -1.
+         */
         public final int sourceTreeOffset;
         /** Every folder named after "\2247\5408\", with how many source paths name it, in the order first found. */
         public final Map<String, Integer> sourceTrees;
@@ -326,13 +343,16 @@ public final class UpdateCheck {
                     + " told";
         }
 
-        /** The source folder for a "Detail:" line: how many paths name it, where the first is, and any other folder. */
+        /**
+         * The source folder for a "Detail:" line: where its name first begins, how many paths name it, and any other
+         * folder.
+         */
         String sourceTreeDetail() {
             if (sourceTree == null) {
                 return "no source folder found";
             }
-            StringBuilder sb = new StringBuilder("source folder named in " + count(sourceTrees.get(sourceTree),
-                    "source path") + ", the first at " + hex(sourceTreeOffset));
+            StringBuilder sb = new StringBuilder("source folder at " + hex(sourceTreeOffset) + ", named in "
+                    + count(sourceTrees.get(sourceTree), "source path"));
             for (Map.Entry<String, Integer> e : sourceTrees.entrySet()) {
                 if (!e.getKey().equals(sourceTree)) {
                     sb.append(", ").append(e.getKey()).append(" in ").append(count(e.getValue(), "path"));
@@ -513,7 +533,8 @@ public final class UpdateCheck {
      * after a non-digit, by preference the one that follows the "*.bin" the updater matches with; when several follow
      * it and they differ, which one the updater compares cannot be told, so there is none), the build string
      * "JH5408  <date>", the compile date, the source-tree folder (the one named most often after "\2247\5408\" in the
-     * source paths, the first found on a tie), and the sensor program: the reset table by its exact bytes, then the
+     * source paths, the first found on a tie: 1 to 64 bytes from 0x20 to 0x7E other than the backslash, then a
+     * backslash, reported where its name begins), and the sensor program: the reset table by its exact bytes, then the
      * first (register, value) table after it that starts with a page select, switches page at least once more, holds
      * 16 writes or more and ends with the ff ff marker. Where several spots fit, the first init table the code points
      * at by address wins (a little-endian literal of RAM address = file offset - 0x200, at a 4-byte-aligned offset, as
@@ -632,24 +653,28 @@ public final class UpdateCheck {
                 compiledOffset = i;
             }
         }
-        // The source-tree folder: printable ASCII up to the next backslash, in each source path.
+        // The source-tree folder: printable ASCII other than the backslash up to the next backslash, in each source
+        // path. As in image.py, each path is looked for after the backslash that ends the one before, and the offset
+        // kept is where the folder's name begins.
         Map<String, Integer> trees = new LinkedHashMap<>();
         Map<String, Integer> treeAt = new LinkedHashMap<>();
-        for (int at = indexOf(data, SOURCE_TREE_PREFIX, 0, end); at >= 0;
-             at = indexOf(data, SOURCE_TREE_PREFIX, at + 1, end)) {
+        for (int at = indexOf(data, SOURCE_TREE_PREFIX, 0, end); at >= 0; ) {
             int p = at + SOURCE_TREE_PREFIX.length;
             int q = p;
             while (q < end && q - p <= MAX_FOLDER && data[q] >= 0x20 && data[q] <= 0x7E && data[q] != '\\') {
                 q++;
             }
+            int next = at + 1;
             if (q > p && q - p <= MAX_FOLDER && q < end && data[q] == '\\') {
                 String folder = new String(data, p, q - p, StandardCharsets.US_ASCII);
                 Integer seen = trees.get(folder);
                 trees.put(folder, seen == null ? 1 : seen + 1);
                 if (seen == null) {
-                    treeAt.put(folder, at);
+                    treeAt.put(folder, p);
                 }
+                next = q + 1;
             }
+            at = indexOf(data, SOURCE_TREE_PREFIX, next, end);
         }
         String sourceTree = null;
         for (Map.Entry<String, Integer> e : trees.entrySet()) {
@@ -862,15 +887,27 @@ public final class UpdateCheck {
             Build unchanged = knownBuildOf(data, known);
             boolean exact = unchanged == build;
             boolean codeStock = n >= CODE_AREA_END && sha256Hex(data, 0, CODE_AREA_END).equals(build.codeAreaSha256);
-            // A changed copy keeps the marks where its build has them, and that build's stamp, sensor table and source
-            // folder, none of which a toolkit mod changes (image.py's made_from asks for the stamp and the table): a
-            // file laid out like a known build with another of them is a build of its own (a donor's, for another
-            // sensor), and another source folder shows another build.
+            // A changed copy keeps the marks where its build has them, and that build's stamp, sensor table, source
+            // folder and compile date (each where the build records one), none of which a toolkit mod changes: a file
+            // laid out like a known build with another of them is a build of its own (a donor's, for another sensor),
+            // and another source folder or compile date shows another build.
             Build layout = layoutOf(marks, known);
             Build madeFrom = codeStock ? build : layout != null && marks.stamp.equals(layout.stamp)
-                    && marks.sensorSha256.equals(layout.sensorSha256) && sameSourceTree(layout, marks) ? layout : null;
-            String kept = madeFrom == null ? "" : "the build marks lie where that build keeps them, and the stamp, the"
-                    + " sensor table" + (madeFrom.sourceTree == null ? "" : " and the source folder") + " are that build's.";
+                    && marks.sensorSha256.equals(layout.sensorSha256) && sameSourceTree(layout, marks)
+                    && sameCompiled(layout, marks) ? layout : null;
+            String kept = "";
+            if (madeFrom != null) {
+                List<String> same = new ArrayList<>();
+                same.add("the stamp");
+                same.add("the sensor table");
+                if (madeFrom.sourceTree != null) {
+                    same.add("the source folder");
+                }
+                if (madeFrom.compiled != null) {
+                    same.add("the compile date");
+                }
+                kept = "the build marks lie where that build keeps them, and " + and(same) + " are that build's.";
+            }
             if (exact) {
                 out.add(new Line(Level.INFO, "build", "Build", build.label + ", unchanged. " + NOT_THE_CAMERA,
                         "bytes 0 to 0x169000 hash to the known build's."));
@@ -901,6 +938,11 @@ public final class UpdateCheck {
                     other.add("its source folder");
                     detail.add("the source folder is " + (marks.sourceTree == null ? "not found" : marks.sourceTree)
                             + ", that build's " + layout.sourceTree);
+                }
+                if (!sameCompiled(layout, marks)) {
+                    other.add("its compile date");
+                    detail.add("the compile date is " + (marks.compiled == null ? "not found" : marks.compiled)
+                            + ", that build's " + layout.compiled);
                 }
                 out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know, laid out like "
                         + layout.name() + ": " + and(other) + (other.size() == 1 ? " is" : " are") + " not that build's."
@@ -1185,8 +1227,8 @@ public final class UpdateCheck {
     }
 
     /**
-     * The known build whose mark offsets the file has, or null: a copy of it, unless its stamp, its sensor table or
-     * its source folder says otherwise.
+     * The known build whose mark offsets the file has, or null: a copy of it, unless its stamp, its sensor table, its
+     * source folder or its compile date says otherwise.
      */
     static Build layoutOf(Marks marks, Build[] known) {
         for (Build b : known) {
@@ -1200,6 +1242,11 @@ public final class UpdateCheck {
     /** True when the file's source folder is the build's, or the build has none on record. */
     static boolean sameSourceTree(Build b, Marks marks) {
         return b.sourceTree == null || b.sourceTree.equals(marks.sourceTree);
+    }
+
+    /** True when the file's compile date is the build's, or the build has none on record. */
+    static boolean sameCompiled(Build b, Marks marks) {
+        return b.compiled == null || b.compiled.equals(marks.compiled);
     }
 
     /** "a", "a and b", "a, b and c". */
@@ -1319,6 +1366,23 @@ public final class UpdateCheck {
                     + " toolkit's backup command, which reads it twice and compares";
         }
         return null;
+    }
+
+    /**
+     * backupProblem for a file chosen under name (null when the name is not known). A name that holds UNVERIFIED_READ,
+     * in any case, is refused whatever the bytes are: the toolkit's backup and restore give it to reads that did not
+     * agree and to a single read, and wrong bytes from a poor clip contact can look like a whole dump. Such a read is
+     * not a backup until two reads agree, and without a backup the app writes nothing.
+     */
+    public static String backupProblem(String name, byte[] data, String[] publicSha256) {
+        if (name != null && name.toLowerCase(Locale.ROOT).contains(UNVERIFIED_READ)) {
+            return "its name is one the toolkit's backup and restore give to reads that did not agree and to a single"
+                    + " read, and such a read is not a backup until two reads agree. A poor clip contact can leave"
+                    + " wrong bytes in it that no check of the file can see: read the chip again with the toolkit's"
+                    + " backup command until two reads agree, and choose the read it then keeps, whose name has no \""
+                    + UNVERIFIED_READ + "\" in it";
+        }
+        return backupProblem(data, publicSha256);
     }
 
     /**

@@ -253,11 +253,12 @@ public class MainActivity extends Activity {
                 + " a flash that does not fit cannot be undone.\n"
                 + "So first read the chip with a CH341A clip on a computer (the toolkit's backup command;"
                 + " docs/02-RECOVERY.md, section B), keep that 2 MB file somewhere safe, copy it to the phone, and tap "
-                + q(BACKUP) + ". The app takes it only if it is a complete dump that is not one of the public copies;"
-                + " which camera it was read from, and when, the app cannot tell. It then compares the update file with"
-                + " it: the two must drive the image sensor the same way, or the app will not write. A dump read after a"
-                + " flash is still the way back to what the camera runs now, but it holds what was flashed, not what"
-                + " fits: when its firmware is a public build, the app says so."));
+                + q(BACKUP) + ". The app takes it only if it is a complete dump that is not one of the public copies,"
+                + " nor a read with \"unverified-read\" in its name: the toolkit names a read so when no second read"
+                + " agreed with it. Which camera it was read from, and when, the app cannot tell. It then compares the"
+                + " update file with it: the two must drive the image sensor the same way, or the app will not write. A"
+                + " dump read after a flash is still the way back to what the camera runs now, but it holds what was"
+                + " flashed, not what fits: when its firmware is a public build, the app says so."));
         backupButton = button(BACKUP, v -> pickBackup());
         col.addView(backupButton);
         backupStatus = body("");
@@ -768,7 +769,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Read the chosen dump and take it as this camera's backup only if UpdateCheck.backupProblem finds nothing wrong. */
+    /**
+     * Read the chosen dump and take it as this camera's backup only if UpdateCheck.backupProblem finds nothing wrong
+     * with it or with its name: a read the toolkit kept as unverified is not a backup.
+     */
     private void loadBackup(Uri uri) {
         loadingBackup = true;
         setStatus(backupStatus, "Reading the backup…");
@@ -781,7 +785,7 @@ public class MainActivity extends Activity {
             try {
                 data = readAll(getContentResolver().openInputStream(uri));
                 sha = UpdateCheck.sha256Hex(data, 0, data.length);
-                String problem = UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S);
+                String problem = UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S);
                 if (problem != null) {
                     boolean isPublic = false;
                     for (String s : Candidates.PUBLIC_DUMP_SHA256S) {
@@ -1250,7 +1254,7 @@ public class MainActivity extends Activity {
                 if (stock != null) {
                     summary = "";
                 } else if (data.length == Candidates.DUMP_SIZE) {
-                    String problem = UpdateCheck.backupProblem(data, Candidates.PUBLIC_DUMP_SHA256S);
+                    String problem = UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S);
                     if (problem == null) {
                         // Most likely the owner's own backup, picked in the wrong step.
                         summary = "\"" + name + "\" looks like a dump of a camera's flash chip, not an update file, and a"
