@@ -49,8 +49,9 @@ public final class Candidates {
     public enum Kind {
         RESTORE(true, "The stock restore file: the first part of the public dump, under its published name. It is a"
                 + " copy of one working camera's memory, with that camera's settings; its two stored photos come along"
-                + " unlisted. Several owners have flashed it back onto cameras that already ran this build. It did not"
-                + " fit every original-series camera: one was left unable to take pictures by it.",
+                + " unlisted. Several owners report working cameras after flashing it; what their cameras ran before is"
+                + " not known. After it was flashed, one original-series camera could no longer take pictures; the"
+                + " likely cause is a sensor it does not drive.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
@@ -118,7 +119,8 @@ public final class Candidates {
         if (!sha.equals(STOCK_DUMP_SHA256)) {
             throw new IllegalArgumentException("the file is not the public stock dump, so the app will not use it. The"
                     + " app makes the stock restore file only from that exact file, charmera_stock_latest.bin,"
-                    + " unchanged. For a backup of your own camera, use the toolkit on a computer.\nDetail: its SHA-256"
+                    + " unchanged. A backup of your own camera is chosen with \"Choose this camera's backup\" in step 0"
+                    + " instead, and charmera pack on a computer makes an update file from it.\nDetail: its SHA-256"
                     + " is " + sha + "; the public stock dump's is " + STOCK_DUMP_SHA256 + ".");
         }
         return dump;

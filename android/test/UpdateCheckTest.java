@@ -83,26 +83,149 @@ public final class UpdateCheckTest {
         r = check(base, build);
         expect("without a backup the sensor line is a warning that names step 0", r.ok
                 && line(r, "sensor-table", UpdateCheck.Level.WARN)
-                && text(r, "sensor-table").contains("Choose this camera's backup"), r);
-        r = UpdateCheck.check(name(base, "202611050001"), base, build, base);
-        expect("against the camera's own backup the same table passes and so does the software", r.ok && r.compared
+                && text(r, "sensor-table").contains("Choose this camera's backup")
+                && text(r, "sensor-table").contains("the likely cause is a sensor it does not drive"), r);
+        // A backup whose firmware is a known build may be a read taken after a flash with it: a match is a warning.
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(base));
+        expect("against a backup of a known build the same table is a warning, and the software passes", r.ok
+                && r.compared && line(r, "sensor-table", UpdateCheck.Level.WARN)
+                && text(r, "sensor-table").contains("only if the backup was read before the camera was ever flashed")
+                && text(r, "sensor-table").contains("That firmware is synthetic test build, unchanged")
+                && line(r, "software", UpdateCheck.Level.PASS) && line(r, "vector-table", UpdateCheck.Level.PASS)
+                && r.verdict().startsWith("OK to put on the card. Read this warning first. Image sensor set-up: the same"
+                + " as in the firmware in your backup."), r);
+        expect("a check names the backup it was made against by SHA-256", chip(base).length == 0x200000
+                && UpdateCheck.sha256Hex(chip(base), 0, 0x200000).equals(r.referenceSha256)
+                && check(base, build).referenceSha256 == null, r);
+        // The camera's own build, which no public image holds: the same table and program pass.
+        byte[] own = base.clone();
+        own[0x62B8] ^= 0x08;
+        r = UpdateCheck.check(name(own, "202611050001"), own, build, chip(own));
+        expect("against a backup of a build the app does not know, the same table and software pass", r.ok && r.compared
                 && line(r, "sensor-table", UpdateCheck.Level.PASS) && line(r, "software", UpdateCheck.Level.PASS)
+                && text(r, "sensor-table").contains("the same as in the firmware in your backup")
+                && !text(r, "sensor-table").contains("your camera's own firmware")
                 && r.verdict().equals("OK to put on the card. Every check passed."), r);
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(own));
+        expect("the same table with another program around it is a warning that says so", r.ok
+                && line(r, "sensor-table", UpdateCheck.Level.WARN)
+                && text(r, "sensor-table").contains("the program around it differs from that firmware")
+                && line(r, "software", UpdateCheck.Level.WARN)
+                && text(r, "software").contains("differs from the firmware in your backup"), r);
         m = base.clone();
         m[0xF5C70] ^= 1;
         r = check(m, build);
         expect("a changed sensor table warns without a backup", r.ok && line(r, "sensor-table", UpdateCheck.Level.WARN)
                 && text(r, "sensor-table").contains("not the public build's program"), r);
-        r = UpdateCheck.check(name(m, "202611050001"), m, build, base);
+        expect("a file laid out like a known build with another sensor table is another build, not a changed copy",
+                line(r, "build", UpdateCheck.Level.WARN) && text(r, "build").contains("a build the app does not know, laid"
+                + " out like synthetic test build") && !text(r, "build").contains("with changes"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(base));
         expect("a changed sensor table fails against the camera's backup", !r.ok && r.compared
                 && line(r, "sensor-table", UpdateCheck.Level.FAIL)
-                && r.verdict().contains("different from your camera's backup"), r);
-        byte[] otherBackup = new byte[0x200000];
-        System.arraycopy(m, 0, otherBackup, 0, m.length);
-        Arrays.fill(otherBackup, m.length, otherBackup.length, (byte) 0xFF);
+                && r.verdict().contains("different from the firmware in your backup")
+                && text(r, "sensor-table").contains("section D"), r);
+        byte[] otherBackup = chip(m);
         r = UpdateCheck.check(name(base, "202611050001"), base, build, otherBackup);
         expect("the public file fails against a backup whose sensor table differs", !r.ok
                 && line(r, "sensor-table", UpdateCheck.Level.FAIL), r);
+        byte[] noTable = chip(own);
+        noTable[0xF5BFC] = 0;   // no reset table: the backup has no sensor table the app can find
+        r = UpdateCheck.check(name(own, "202611050001"), own, build, noTable);
+        expect("a backup without a sensor table fails the comparison", !r.ok && !r.compared
+                && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && text(r, "sensor-table").contains("has no image sensor set-up table"), r);
+
+        // --- which table is the sensor program: the one the code points at by an aligned literal -------------
+
+        m = base.clone();
+        putU32(m, 0x7B91C, 0);                 // the literal gone: no code refers to the table
+        expect("without its literal the table is found but not referenced", UpdateCheck.findMarks(m).sensorStart == 0xF5C6C
+                && UpdateCheck.findMarks(m).referencedFrom == -1, null);
+        r = check(m, build);
+        expect("an unreferenced table warns without a backup and says so", r.ok
+                && line(r, "sensor-table", UpdateCheck.Level.WARN)
+                && text(r, "sensor-table").contains("No code in the file refers to this table"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
+        expect("an unreferenced table fails against a backup whose table is referenced", !r.ok
+                && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && text(r, "sensor-table").contains("no code in the file refers to its image-sensor table"), r);
+        putU32(m, 0x7B91D, 0xF5C6C - 0x200);   // the same literal one byte off: code keeps its literals aligned
+        expect("a literal at an unaligned offset is no code reference", UpdateCheck.findMarks(m).referencedFrom == -1, null);
+        m = base.clone();
+        sensorPair(m, 0xE0000, SENSOR_TABLE, -1);
+        UpdateCheck.Marks decoy = UpdateCheck.findMarks(m);
+        expect("an unreferenced table found first loses to the referenced one", decoy.sensorStart == 0xF5C6C
+                && decoy.referencedFrom == 0x7B91C && decoy.resetStart == 0xF5BFC && !decoy.severalPrograms(), null);
+        m = base.clone();
+        sensorPair(m, 0xE0000, SENSOR_TABLE, 0x7C000);
+        expect("two referenced copies of the same table are one program", !UpdateCheck.findMarks(m).severalPrograms()
+                && UpdateCheck.findMarks(m).referencedTables.size() == 2, null);
+        byte[] secondTable = SENSOR_TABLE.clone();
+        secondTable[3] ^= 1;
+        m = base.clone();
+        sensorPair(m, 0xE0000, secondTable, 0x7C000);
+        r = check(m, build);
+        expect("two referenced tables that differ are several sensor programs, a FAIL", !r.ok
+                && UpdateCheck.findMarks(m).severalPrograms() && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && text(r, "sensor-table").contains("more than one image-sensor program")
+                && detail(r, "sensor-table").contains("several sensor programs"), r);
+        r = UpdateCheck.check(name(own, "202611050001"), own, build, chip(m));
+        expect("a backup with several sensor programs cannot be compared with", !r.ok && !r.compared
+                && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && text(r, "sensor-table").contains("the backup holds more than one"), r);
+
+        // --- the stamp: a *.bin before it is preferred, several runs without one are refused ----------------
+
+        m = base.clone();
+        m[0x30000] = 'x';
+        put(m, 0x30001, "202601010101");
+        m[0x3000D] = 0;                        // a second 12-digit run, before the real stamp
+        expect("two stamp runs and no *.bin before either: no stamp, so not Charmera firmware",
+                UpdateCheck.findMarks(m).stamp == null && !check(m, build).ok
+                        && line(check(m, build), "series", UpdateCheck.Level.FAIL), check(m, build));
+        put(m, 0x218C4 - 8, "*.bin");
+        m[0x218C4 - 3] = 0;
+        UpdateCheck.Marks withBin = UpdateCheck.findMarks(m);
+        expect("the run after *.bin is the stamp, whatever comes before it", "202505201029".equals(withBin.stamp)
+                && withBin.stampOffset == 0x218C4, null);
+
+        // --- the stamp of the firmware in the backup -----------------------------------------------------------
+
+        byte[] stamped = own.clone();
+        put(stamped, 0x218C4, "202509300000");   // a camera on another stamp, from an update
+        r = UpdateCheck.check(name(own, "202509300000"), own, build, chip(stamped));
+        expect("a name with the stamp of the firmware in the backup fails: that camera would skip the file", !r.ok
+                && line(r, "stamp-camera", UpdateCheck.Level.FAIL) && line(r, "stamp", UpdateCheck.Level.PASS), r);
+        r = UpdateCheck.check(name(own, "202611050001"), own, build, chip(stamped));
+        expect("a name with another stamp passes against it", line(r, "stamp-camera", UpdateCheck.Level.PASS), r);
+        r = UpdateCheck.check(name(own, "202611050001"), own, build, chip(own));
+        expect("a backup with the known builds' stamp adds no line: the stamp line covers it",
+                detail(r, "stamp-camera").isEmpty() && text(r, "stamp-camera").isEmpty(), r);
+
+        // --- the program's start: the ARM vector table ------------------------------------------------------
+
+        m = base.clone();
+        for (int i = 0x200; i < 0x240; i++) {
+            m[i] ^= (byte) 0xFF;
+        }
+        r = check(m, build);
+        expect("a destroyed vector table fails without a backup, against the build whose layout the file has", !r.ok
+                && line(r, "vector-table", UpdateCheck.Level.FAIL) && text(r, "vector-table").contains("synthetic test"
+                + " build") && text(r, "vector-table").contains("only a chip programmer"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
+        expect("and against the backup", !r.ok && line(r, "vector-table", UpdateCheck.Level.FAIL), r);
+        m = base.clone();
+        m[0x18964] = 'X';
+        put(m, 0x18A00, "JH5408  20250520");
+        m[0x18A10] = 0;                        // the build string elsewhere: another build's layout
+        r = check(m, build);
+        expect("a file laid out like no known build: the vector table is not compared, a warning", r.ok
+                && line(r, "vector-table", UpdateCheck.Level.WARN) && line(r, "build", UpdateCheck.Level.WARN)
+                && text(r, "build").contains("a build the app does not know: not the public dump's"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
+        expect("nor against a backup laid out otherwise", line(r, "vector-table", UpdateCheck.Level.WARN)
+                && text(r, "vector-table").contains("not laid out like the firmware in your backup"), r);
         m = base.clone();
         m[0xF5C6C] = 0;   // the init table no longer starts with a page select: no table found
         r = check(m, build);
@@ -136,15 +259,22 @@ public final class UpdateCheckTest {
                 && text(r, "final-erase").contains("factory settings") && line(r, "own-area", UpdateCheck.Level.INFO)
                 && line(r, "resource-slots", UpdateCheck.Level.PASS) && line(r, "build", UpdateCheck.Level.INFO)
                 && text(r, "build").contains("unchanged") && line(r, "software", UpdateCheck.Level.PASS), r);
-        r = UpdateCheck.check(name(official, "202611050001"), official, build, base);
-        expect("an official-size file against the backup passes the software and sensor lines", r.ok
-                && line(r, "software", UpdateCheck.Level.PASS) && line(r, "sensor-table", UpdateCheck.Level.PASS), r);
+        r = UpdateCheck.check(name(official, "202611050001"), official, build, chip(base));
+        expect("an official-size file against a backup of its known build: software passes, the sensor line warns", r.ok
+                && line(r, "software", UpdateCheck.Level.PASS) && line(r, "sensor-table", UpdateCheck.Level.WARN), r);
+        byte[] ownOfficial = Arrays.copyOf(own, UpdateCheck.OFFICIAL_SIZE);
+        r = UpdateCheck.check(name(ownOfficial, "202611050001"), ownOfficial, build, chip(own));
+        expect("an official-size file of the camera's own build against its backup passes the software and sensor"
+                + " lines", r.ok && line(r, "software", UpdateCheck.Level.PASS)
+                && line(r, "sensor-table", UpdateCheck.Level.PASS) && line(r, "vector-table", UpdateCheck.Level.PASS), r);
         byte[] shorter = Arrays.copyOf(base, 0x160000);
         r = UpdateCheck.check(name(shorter, "202611050001"), shorter, build);
         expect("a file shorter than the official size fails", !r.ok && line(r, "size", UpdateCheck.Level.FAIL), r);
         byte[] between = Arrays.copyOf(base, 0x170000);
         r = UpdateCheck.check(name(between, "202611050001"), between, build);
-        expect("a file between the two sizes fails", !r.ok && line(r, "size", UpdateCheck.Level.FAIL), r);
+        expect("a software-only image fails as one, with the way to an update file", !r.ok
+                && line(r, "size", UpdateCheck.Level.FAIL) && text(r, "size").contains("software-only image")
+                && text(r, "size").contains("charmera pack"), r);
 
         // --- what the app takes as a backup of the camera ----------------------------------------------------
 
@@ -162,11 +292,47 @@ public final class UpdateCheckTest {
         expect("a blank read is not a backup", UpdateCheck.backupProblem(blank, noPublic).contains("does not begin"), null);
         byte[] noMarks = dump.clone();
         noMarks[0xF5C6C] = 0;
-        expect("a dump without the marks is not a backup", UpdateCheck.backupProblem(noMarks, noPublic).contains("set-up table"), null);
+        expect("a dump without a sensor table the app knows is not a backup, and may be another build's",
+                UpdateCheck.backupProblem(noMarks, noPublic).contains("set-up table")
+                        && UpdateCheck.backupProblem(noMarks, noPublic).contains("charmera inspect"), null);
+        byte[] noString = dump.clone();
+        noString[0x18964] = 'X';
+        expect("a dump without the build string is not a complete dump", UpdateCheck.backupProblem(noString, noPublic)
+                .contains("not a complete dump of the chip"), null);
         expect("nothing is not a backup", UpdateCheck.backupProblem(null, noPublic) != null, null);
         String publicProblem = UpdateCheck.backupProblem(dump, new String[]{UpdateCheck.sha256Hex(dump, 0, dump.length)});
         expect("a read identical to the public dump is refused, and the reason allows that it is this camera's", publicProblem
                 .contains("flashed with the public restore file") && publicProblem.contains("not firmware known to fit"), null);
+        byte[] cutOff = dump.clone();
+        Arrays.fill(cutOff, 0x100000, cutOff.length, (byte) 0xFF);   // a clip that lost contact half way
+        expect("a read that is blank from half way is not a backup: it could not put the camera back",
+                UpdateCheck.backupProblem(cutOff, noPublic).contains("resource pack")
+                        && UpdateCheck.backupProblem(cutOff, noPublic).contains("could not put the camera back"), null);
+        byte[] damaged = dump.clone();
+        Arrays.fill(damaged, slot("LOGOJPG")[0], slot("LOGOJPG")[0] + slot("LOGOJPG")[1], (byte) 0xFF);
+        expect("a read with a damaged resource is not a backup", UpdateCheck.backupProblem(damaged, noPublic)
+                .startsWith("1 of its 43 sounds, pictures and menu files are damaged"), null);
+        // A near copy of a known build's dump, as a read after a flash with it is once a setting was saved: it is
+        // taken, and what it can and cannot show is said with it and on the sensor line.
+        byte[] near = dump.clone();
+        putRecord(near, 0x170000, 1);
+        Arrays.fill(near, 0x17F000, 0x17F200, (byte) 0);
+        expect("a near copy of the public dump is taken as a backup",
+                UpdateCheck.backupProblem(near, new String[]{UpdateCheck.sha256Hex(dump, 0, dump.length)}) == null, null);
+        List<String> notes = UpdateCheck.backupNotes(near, build);
+        expect("and noted as a known, public build that shows a fit only if read before any flash", notes.size() == 1
+                && notes.get(0).contains("synthetic test build, unchanged")
+                && notes.get(0).contains("only if it was read before the camera was ever flashed"), null);
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, near);
+        expect("against it, the same table is a warning", r.ok && line(r, "sensor-table", UpdateCheck.Level.WARN), r);
+        expect("a backup of a build no public image holds gets no note", UpdateCheck.backupNotes(chip(own), build)
+                .isEmpty() && UpdateCheck.backupNotes(dump, UpdateCheck.PUBLIC_BUILD).isEmpty(), null);
+        byte[] zeroTail = dump.clone();
+        Arrays.fill(zeroTail, UpdateCheck.UPDATE_SIZE, zeroTail.length, (byte) 0);   // padded with 0x00, not 0xFF
+        List<String> tail = UpdateCheck.backupNotes(zeroTail, UpdateCheck.PUBLIC_BUILD);
+        expect("a read whose last 128 KiB are not blank is taken, with a warning, not refused",
+                UpdateCheck.backupProblem(zeroTail, noPublic) == null && tail.size() == 1
+                        && tail.get(0).contains("not blank") && tail.get(0).contains("original firmware left"), null);
 
         // --- what kind of mod: bytes 0..0x120000 (header, code, data) against the resources -------------------
 
@@ -177,10 +343,10 @@ public final class UpdateCheckTest {
                 && line(r, "software", UpdateCheck.Level.WARN)
                 && text(r, "software").contains("The program itself is the public dump's")
                 && detail(r, "software").contains("(boot header, code and data) match the public dump"), r);
-        r = UpdateCheck.check(name(m, "202611050001"), m, build, base);
-        expect("against the backup a resource mod says the program is the camera's own", r.ok
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(base));
+        expect("against the backup a resource mod says the program is the one in the backup", r.ok
                 && line(r, "software", UpdateCheck.Level.WARN)
-                && text(r, "software").contains("The program itself is your camera's own"), r);
+                && text(r, "software").contains("The program itself is the one in your backup"), r);
 
         m = base.clone();
         m[0x62B8] ^= 0x08;
@@ -340,11 +506,16 @@ public final class UpdateCheckTest {
         r = check(m, build);
         expect("stored photo warns", r.ok && line(r, "photos", UpdateCheck.Level.WARN)
                 && text(r, "photos").contains("1 photo from the camera it was made from"), r);
-        expect("the verdict passes it and points at the warnings", r.verdict().startsWith("OK to put on the card.")
-                && r.verdict().contains("Read these 2 warnings first.")
+        expect("without a backup the verdict is not OK yet, and points at the warnings",
+                r.verdict().startsWith("Not OK to put on the card yet: it has not been compared with a backup")
+                && r.verdict().contains("The file's own checks passed, with these 2 warnings:")
                 && r.verdict().contains("Stored photos: the file carries 1 photo from the camera it was made from, but its"
                 + " photo list is empty, so your camera will not show it.")
                 && r.verdict().contains("copy the SPIDCIM folder off the card"), r);
+        r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(own));
+        expect("compared with a backup, the verdict passes it and points at the warnings", r.ok
+                && r.verdict().startsWith("OK to put on the card. Read these ")
+                && r.verdict().contains("Stored photos: the file carries 1 photo"), r);
         m[0x17F002] = 1;        // directory entry 0: used
         putU32(m, 0x17F004, 38478);
         r = check(m, build);
@@ -353,8 +524,13 @@ public final class UpdateCheckTest {
         // --- the verdict at the top of the report -------------------------------------------------------------
 
         r = check(base, build);
-        expect("a clean file's verdict without a backup is OK with the sensor warning", r.verdict().startsWith("OK to put"
-                + " on the card. Read this warning first. Image sensor set-up: the same program as the public build's"), r);
+        expect("a clean file's verdict without a backup is not OK yet: it was compared with no backup", r.ok
+                && !r.compared && r.verdict().startsWith("Not OK to put on the card yet: it has not been compared with a"
+                + " backup of this camera's own chip, and without one no file goes on the card. The file's own checks"
+                + " passed, with this warning: Image sensor set-up: the same program as the public build's"), r);
+        r = UpdateCheck.check(name(own, "202611050001"), own, build, chip(own));
+        expect("the same file compared with a backup is OK", r.ok && r.compared
+                && r.verdict().startsWith("OK to put on the card."), r);
         r = UpdateCheck.check("JH_5408202611050001_00000000.bin", base, build);
         expect("a failed file's verdict is Not OK with the first reason", r.verdict().startsWith("Not OK to put on the"
                 + " card. The app will not write this file. Sum: the file's bytes do not add up"), r);
@@ -364,9 +540,26 @@ public final class UpdateCheckTest {
         expect("the verdict counts the other problems", r.verdict().startsWith("Not OK to put on the card. The app will"
                 + " not write this file. Sum: ") && r.verdict().endsWith(" 2 more problems are listed below."), r);
         r = UpdateCheck.check("firmware.bin", base, build);
-        expect("a nameless file's verdict says what to do", r.verdict().contains("Name: this is not an update file's"
-                + " name") && r.verdict().contains("Do not make up a name")
-                && r.verdict().contains("tap \"Download the stock restore file\" instead."), r);
+        expect("a nameless file's verdict says what to do, and that the stock restore file is not everyone's",
+                r.verdict().contains("Name: this is not an update file's name") && r.verdict().contains("Do not make up a"
+                + " name") && r.verdict().contains("The stock restore file is only for a camera whose backup shows the"
+                + " public build") && r.verdict().contains("make the update file from its own backup with charmera"
+                + " pack on a computer") && !r.verdict().contains("To restore the camera, tap"), r);
+
+        // --- a refused stock restore file: only a name problem is reported as one -----------------------------
+
+        r = UpdateCheck.check("JH_5408202611050001_00000000.bin", base, build);
+        expect("a wrong sum is a name problem", UpdateCheck.nameIsTheOnlyProblem(r), r);
+        r = UpdateCheck.check("firmware.bin", base, build);
+        expect("no update file's name is a name problem", UpdateCheck.nameIsTheOnlyProblem(r), r);
+        r = UpdateCheck.check(name(base, "202505201029"), base, build);
+        expect("the known builds' stamp in the name is a name problem", UpdateCheck.nameIsTheOnlyProblem(r), r);
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, otherBackup);
+        expect("a sensor table that differs from the backup's is not a name problem", !r.ok
+                && !UpdateCheck.nameIsTheOnlyProblem(r), r);
+        r = UpdateCheck.check("JH_5408202611050001_00000000.bin", base, build, otherBackup);
+        expect("nor is it one with a wrong sum besides", !r.ok && !UpdateCheck.nameIsTheOnlyProblem(r), r);
+        expect("a file that passed has no name problem", !UpdateCheck.nameIsTheOnlyProblem(check(base, build)), null);
 
         // --- the write gate: Write uses exactly the checked bytes ---------------------------------------------
 
@@ -507,7 +700,25 @@ public final class UpdateCheckTest {
     static UpdateCheck.Build buildFor(byte[] d) {
         return new UpdateCheck.Build("synthetic test build", "202505201029", UpdateCheck.sha256Hex(d, 0, 0x170000),
                 UpdateCheck.sha256Hex(d, 0, 0x120000), UpdateCheck.sha256Hex(d, 0, UpdateCheck.OFFICIAL_SIZE),
-                UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8), 0x218C4, 0x18964, 0xF5C6C);
+                UpdateCheck.sha256Hex(d, 0xF5C6C, 0xF5CE8), UpdateCheck.sha256Hex(d, 0x200, 0x240), 0x218C4, 0x18964,
+                0xF5C6C);
+    }
+
+    /** A 2 MiB read of a chip that holds the image d: d, then the blank 0xFF the rest of the chip is. */
+    static byte[] chip(byte[] d) {
+        byte[] c = new byte[0x200000];
+        System.arraycopy(d, 0, c, 0, d.length);
+        Arrays.fill(c, d.length, c.length, (byte) 0xFF);
+        return c;
+    }
+
+    /** A second reset table and init table (the given one) at off, with a code literal for it at literal, or none. */
+    static void sensorPair(byte[] d, int off, byte[] table, int literal) {
+        System.arraycopy(UpdateCheck.SENSOR_RESET_TABLE, 0, d, off, 6);
+        System.arraycopy(table, 0, d, off + 6, table.length);
+        if (literal >= 0) {
+            putU32(d, literal, off + 6 - 0x200);
+        }
     }
 
     static int[] slot(String name) {

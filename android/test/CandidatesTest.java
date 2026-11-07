@@ -78,10 +78,43 @@ public final class CandidatesTest {
                     && mk.referencedFrom == 0x7B91C && mk.busAddress == 0x78
                     && "aea3976bdf7ba2e747d8b56141f7ef0b4e3262481540dc2869457bc814fcb755".equals(mk.sensorSha256));
             UpdateCheck.Result rr = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore, UpdateCheck.PUBLIC_BUILD, dump);
-            expect("the restore file against the dump it came from passes every line", rr.ok && rr.compared
-                    && rr.verdict().startsWith("OK to put on the card. Read this warning first. Stored photos:"));
+            expect("the restore file against the dump it came from passes, and the sensor line says what a public"
+                    + " backup proves", rr.ok && rr.compared && level(rr, "software") == UpdateCheck.Level.PASS
+                    && level(rr, "vector-table") == UpdateCheck.Level.PASS
+                    && level(rr, "sensor-table") == UpdateCheck.Level.WARN
+                    && rr.verdict().startsWith("OK to put on the card. Read these 2 warnings first. Image sensor set-up:"
+                    + " the same as in the firmware in your backup. That firmware is the public dump's build, unchanged")
+                    && rr.verdict().contains("Stored photos:"));
             expect("the public dump is refused as a backup of your camera",
                     UpdateCheck.backupProblem(dump, new String[]{Candidates.STOCK_DUMP_SHA256}) != null);
+            // A read of a camera flashed with the restore file, once one setting was saved: taken, with the note.
+            byte[] read = dump.clone();
+            read[0x170100] ^= 1;
+            expect("a near copy of the public dump is taken, and noted as the public build",
+                    UpdateCheck.backupProblem(read, Candidates.PUBLIC_DUMP_SHA256S) == null
+                            && UpdateCheck.backupNotes(read, UpdateCheck.PUBLIC_BUILD).size() == 1
+                            && UpdateCheck.backupNotes(read, UpdateCheck.PUBLIC_BUILD).get(0).contains("the public dump's"
+                            + " build, unchanged"));
+            UpdateCheck.Result plain = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore);
+            expect("without a backup the restore file's own checks pass, its vector table is the public build's, and"
+                    + " it is not OK yet", plain.ok && !plain.compared && level(plain, "vector-table") == UpdateCheck.Level.PASS
+                    && plain.verdict().startsWith("Not OK to put on the card yet:"));
+            byte[] broken = restore.clone();
+            for (int i = 0x200; i < 0x240; i++) {
+                broken[i] ^= (byte) 0xFF;
+            }
+            UpdateCheck.Result vr = UpdateCheck.check(String.format(Locale.ROOT, "JH_5408202611061300_%08X.bin",
+                    UpdateCheck.byteSum(broken)), broken);
+            expect("the restore file with its vector table destroyed is refused", !vr.ok
+                    && level(vr, "vector-table") == UpdateCheck.Level.FAIL);
+        }
+        String film = System.getenv("CHARMERA_FILM_MODS_RESTORE");
+        if (film != null && !film.isEmpty() && Files.isRegularFile(Paths.get(film))) {
+            byte[] f = Files.readAllBytes(Paths.get(film));
+            UpdateCheck.Result fr = UpdateCheck.check("JH_5408202611061300_" + String.format(Locale.ROOT, "%08X",
+                    UpdateCheck.byteSum(f)) + ".bin", f);
+            expect("the film-mods build's vector table is compared with its own build's, by its layout",
+                    level(fr, "vector-table") == UpdateCheck.Level.PASS && fr.ok);
         }
         System.out.printf(Locale.ROOT, "CandidatesTest: %d passed, %d failed%n", passes, failures);
         if (failures > 0) {
@@ -183,6 +216,16 @@ public final class CandidatesTest {
 
     interface Call {
         void run() throws Exception;
+    }
+
+    /** The level of the first line with that check name, or null. */
+    static UpdateCheck.Level level(UpdateCheck.Result r, String name) {
+        for (UpdateCheck.Line l : r.lines) {
+            if (l.name.equals(name)) {
+                return l.level;
+            }
+        }
+        return null;
     }
 
     static boolean refused(Call c, String message) {
