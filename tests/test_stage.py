@@ -20,12 +20,12 @@ from charmera_toolkit import checksum, frames, image, pack, settings, stage
 
 STAMP = "202611041200"
 # Synthetic images carry no firmware bytes, so they hold stand-ins for the build marks, placed where the public
-# build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL,
-# and a sensor program (the reset table, a 61-write init table that starts with a page select, switches page
-# once more and ends with ff ff, and the code literal that points at it). The init table's hash is not a known
-# build's, and neither is the vector table's (one ARM instruction, then 0xFF), so the synthetic_build fixture
-# registers both as the public build's where a test wants a file accepted without --stock. Tests on the real
-# dump use the real identity.
+# build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL, a
+# source path that names the public build's folder, and a sensor program (the reset table, a 61-write init table
+# that starts with a page select, switches page once more and ends with ff ff, and the code literal that points at
+# it). The init table's hash is not a known build's, and neither is the vector table's (one ARM instruction, then
+# 0xFF), so the synthetic_build fixture registers both as the public build's where a test wants a file accepted
+# without --stock. Tests on the real dump use the real identity.
 SENSOR_RESET_OFFSET = 0xF5BFC
 SENSOR_START, SENSOR_END = 0xF5C6C, 0xF5CE8
 SENSOR_POINTER = 0x7B91C
@@ -42,6 +42,8 @@ def put_build_marks(img: bytearray) -> None:
     img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
     img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
     img[0xF3978: 0xF3978 + 12] = b"Oct 14 2025\x00"
+    path = b"G:\\code\\2247\\5408\\" + b.source_tree.encode() + b"\\host\\init.c\x00"   # where the dump's first source path is
+    img[0x3A4C0: 0x3A4C0 + len(path)] = path
     img[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = image.SENSOR_RESET_TABLE
     img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
     img[SENSOR_POINTER: SENSOR_POINTER + 4] = struct.pack("<I", SENSOR_START - image.VA_OFFSET)

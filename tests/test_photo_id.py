@@ -91,7 +91,7 @@ def conclusion(text: str) -> str:
 
 def test_the_owners_photo_has_the_bare_header_neither_known_build_writes_for_a_photo(tmp_path, capsys):
     """The owner's camera, on its original firmware, wrote this photo with the bare template, which both known builds
-    use only for thumbnails and video frames: that camera ran another build."""
+    use only for thumbnails, video frames and a Wi-Fi stream: that camera ran another build."""
     data = FIXTURE.read_bytes()
     assert len(data) == 624 and data[-14:-12] == b"\xff\xda"      # the header and nothing after its SOS
     h = header_of(data)
@@ -135,36 +135,87 @@ def test_the_still_and_the_bare_header(tmp_path):
         assert header_of(bare_header(quality)).kind == "bare"
 
 
-def test_a_re_saved_photo_says_nothing_about_the_camera(tmp_path):
-    resaved = "re-saved by another program: says nothing about the camera"
-    jfif = header_of(still_header(before=JFIF))
-    assert jfif.kind == "resave" and "a JFIF APP0 segment" in jfif.reasons
+RESAVED = "re-saved by another program: says nothing about the camera"
+EITHER = ("neither known build writes this header as it is; another program saved it again, or another build wrote it; "
+          "nothing here tells which")
+
+
+def test_a_mark_of_an_editor_or_a_re_encode_shows_a_re_saved_photo(tmp_path):
+    """Only what names an editor or a re-encode makes a re-save: XMP, APP2, APP13, APP14, a progressive frame, a size
+    taller than wide. The camera's encoder writes none of it, in either known build."""
     rotated = header_of(bare_header(width=1080, height=1440))
-    assert rotated.kind == "resave" and "a rotated size (1080x1440, taller than wide)" in rotated.reasons
-    stripped = header_of(still_header(app1=b""))          # an editor took the EXIF block out
-    assert stripped.kind == "resave" and "the still template's comment without its EXIF block" in stripped.reasons
+    assert rotated.kind == "resave" and rotated.reasons == ["a rotated size (1080x1440, taller than wide)"]
+    progressive = header_of(bare_header().replace(sof(), sof(marker=0xC2)))
+    assert progressive.kind == "resave" and "a progressive frame (SOF2)" in progressive.reasons
+    for marker, payload, why in ((0xE1, b"http://ns.adobe.com/xap/1.0/\x00<x:xmpmeta/>", "an XMP block"),
+                                 (0xE2, b"ICC_PROFILE\x00\x01\x01", "an ICC profile or MPF APP2 segment"),
+                                 (0xED, b"Photoshop 3.0\x00", "a Photoshop APP13 segment"),
+                                 (0xEE, b"Adobe\x00\x64\x00\x00\x00\x00\x01", "an Adobe APP14 segment")):
+        h = header_of(b"\xff\xd8" + seg(marker, payload) + bare_header()[2:])
+        assert h.kind == "resave" and h.reasons == [why], why
+    phone = (b"\xff\xd8" + JFIF + exif_app1(make="Apple", model="iPhone 15", software="17.1", size=200)
+             + seg(0xE2, b"ICC_PROFILE\x00\x01\x01") + seg(0xDB, b"\x00" + bytes(range(2, 66))) + sof(4032, 3024) + DHT + SOS)
+    h = header_of(phone)
+    assert h.kind == "resave" and h.reasons == ["an ICC profile or MPF APP2 segment"] and h.qualities == []
+    text = report(tmp_path, phone)
+    assert "written by another program" in text and "not IJG" in text and conclusion(text) == RESAVED
+
+
+def test_what_another_program_or_another_build_could_write_tells_neither(tmp_path):
+    """An EXIF Make other than Generalplus, a JFIF APP0, the still comment without its EXIF block and tables the camera's
+    encoder never writes: neither known build writes such a header, but another build could as well as another
+    program, so nothing here tells which (the round-two review's cases among them)."""
+    kodak = header_of(still_header(app1=exif_app1(make="KODAK")))            # the still template exactly, Make KODAK
+    assert kodak.kind == "resave-or-build" and kodak.reasons == ["EXIF Make 'KODAK'"]
+    jfif = header_of(b"\xff\xd8" + JFIF + bare_header()[2:])                  # the bare template and a JFIF APP0
+    assert jfif.kind == "resave-or-build" and jfif.reasons[0] == "a JFIF APP0 segment"
+    alone = ["the still template's comment without its EXIF block"]
+    still_comment = header_of(b"\xff\xd8" + sof() + seg(0xFE, b"GPEncoder      ") + dqt(80) + DRI + DHT + SOS)
+    assert still_comment.kind == "resave-or-build" and still_comment.reasons == alone
+    assert header_of(still_header(app1=b"")).reasons == alone
+    assert header_of(still_header(before=JFIF)).kind == "resave-or-build"
+    # what the toolkit's own exif-fix writes, a phone photo with no editor's mark, and tables the encoder never writes,
+    # with the GPEncoder comment or without it
+    exif_fix = header_of(still_header(app1=exif_app1(make="Kodak", model="Charmera")))
+    assert exif_fix.kind == "resave-or-build" and "EXIF Make 'Kodak'" in exif_fix.reasons
     phone = (b"\xff\xd8" + JFIF + exif_app1(make="Apple", model="iPhone 15", software="17.1", size=200)
              + seg(0xDB, b"\x00" + bytes(range(2, 66))) + sof(4032, 3024) + DHT + SOS)
-    h = header_of(phone)
-    assert h.kind == "resave" and "EXIF Make 'Apple'" in h.reasons and h.qualities == []
-    text = report(tmp_path, phone)
-    assert "written by another program" in text and "not IJG" in text and conclusion(text) == resaved
-    # what the toolkit's own exif-fix writes is another program too
-    assert header_of(still_header(app1=exif_app1(make="Kodak", model="Charmera"))).kind == "resave"
-    # no metadata at all, but no GPEncoder comment and tables the camera's encoder never writes: another encoder
+    assert header_of(phone).kind == "resave-or-build"
+    not_ijg = bare_header().replace(dqt(80), seg(0xDB, b"\x00" + bytes([2] * 64)) + seg(0xDB, b"\x01" + bytes([3] * 64)))
+    h = header_of(not_ijg)
+    assert h.kind == "resave-or-build" and h.qualities == [] and h.reasons == ["quantisation tables no IJG quality reproduces"]
     stripped_bare = b"\xff\xd8" + seg(0xDB, b"\x00" + bytes(range(2, 66))) + sof() + DHT + SOS
     h = header_of(stripped_bare)
-    assert h.kind == "resave" and "no GPEncoder comment, and quantisation tables no IJG quality reproduces" in h.reasons
+    assert h.kind == "resave-or-build" and "quantisation tables no IJG quality reproduces" in h.reasons
+    assert "no GPEncoder comment" in h.reasons
+    text = report(tmp_path, still_header(app1=exif_app1(make="KODAK")))
+    assert "header:      neither template as it is, 0x590 bytes" in text and "differs:     EXIF Make 'KODAK'" in text
+    assert conclusion(text) == EITHER and photo_id.CONCLUSIONS["resave-or-build"] == EITHER
+
+
+def test_a_header_without_tables_is_cut_short_or_not_a_cameras(tmp_path):
+    """A header without its DQT or its DHT segments is no camera's as it is: nothing to conclude from it (the round-two
+    review's SOI SOF0 SOS, and SOI APP1 with a truncated TIFF then SOS, among them)."""
+    no_tables = ("a header without its quantisation tables (DQT) or its Huffman tables (DHT) is cut short or not a camera's: "
+                 "nothing to conclude from it")
+    for data, missing in ((b"\xff\xd8" + sof() + SOS, ["no DQT segment", "no DHT segment"]),
+                          (b"\xff\xd8" + seg(0xE1, b"Exif\x00\x00II") + SOS, ["no DQT segment", "no DHT segment"]),
+                          (b"\xff\xd8" + sof() + dqt(80) + SOS, ["no DHT segment"])):
+        h = header_of(data)
+        assert h.kind == "no-tables" and h.reasons == missing, data
+        text = report(tmp_path, data)
+        assert "header:      tables missing" in text and conclusion(text) == no_tables
+    assert "quality:     none (no quantisation tables)" in report(tmp_path, b"\xff\xd8" + sof() + SOS)
 
 
 def test_a_header_neither_template_and_no_program_named_is_unknown(tmp_path):
     other_model = header_of(still_header(model="CBB4         "))
-    assert other_model.kind == "unknown" and "EXIF Model 'CBB4' and Software '20150615'" in other_model.reasons
-    not_ijg = bare_header().replace(dqt(80), seg(0xDB, b"\x00" + bytes([2] * 64)) + seg(0xDB, b"\x01" + bytes([3] * 64)))
-    h = header_of(not_ijg)
-    assert h.kind == "unknown" and h.qualities == [] and "quantisation tables no IJG quality reproduces" in h.reasons
-    text = report(tmp_path, not_ijg)
-    assert "not IJG" in text and conclusion(text).startswith("a header neither known build writes")
+    assert other_model.kind == "unknown" and other_model.reasons == ["EXIF Model 'CBB4' and Software '20150615'"]
+    no_dri = bare_header().replace(DRI, b"")
+    h = header_of(no_dri)
+    assert h.kind == "unknown" and "no DRI 0" in h.reasons and h.qualities == [80]
+    text = report(tmp_path, no_dri)
+    assert "header:      neither template, " in text and conclusion(text).startswith("a header neither known build writes")
 
 
 def test_ijg_qualities_are_found_exactly():
@@ -233,11 +284,21 @@ def test_help_explains_what_the_conclusions_mean():
     sub = next(a for a in parser._actions if a.dest == "command").choices["photo-id"]
     text = " ".join(sub.format_help().split()).replace("- ", "-")     # argparse may wrap a line after a hyphen
     for words in ("only the header", "never more than the first 64 KiB", "Make Generalplus, Model CBB3 and Software 20150615",
-                  "only for thumbnails, video frames and the USB-camera and Wi-Fi streams",
+                  "only for thumbnails, video frames and a Wi-Fi stream",
                   "a camera whose photos look like this runs another build", "says nothing about the camera",
+                  "an XMP block, an APP2, APP13 or APP14 segment, a progressive frame or a size taller than wide",
+                  "'Neither known build writes this header as it is': an EXIF Make other than Generalplus, a JFIF segment, "
+                  "the still comment without its EXIF block, or tables the camera's encoder never writes",
+                  "another program may have saved the file again, or another build may have written it, and nothing here "
+                  "tells which", "A header without its quantisation tables or its Huffman tables is cut short or not a camera's",
+                  "the frame header does not tell the known builds apart (INFERRED)",
+                  "a JUNK text other than 'GP$322 Generalplus AviPackerV3 20140916', the packer text both carry, shows that "
+                  "other code wrote the file",
                   "does not show which build it runs", "a frame taken out of a video without re-encoding has the bare header too",
                   "Nothing here says whether a firmware fits a camera"):
         assert words in text, words
+    assert "USB" not in text                                   # the bare template's USB-camera role is not shown
+    assert "USB" not in photo_id.__doc__
 
 
 # --- AVI ------------------------------------------------------------------------------------------------------------
@@ -263,22 +324,43 @@ def avi(frame: bytes) -> bytes:
     return b"RIFF" + struct.pack("<I", len(body)) + body
 
 
-def test_a_video_says_nothing_about_which_build_made_it(tmp_path, reads):
+def test_the_frame_header_of_a_video_does_not_tell_the_known_builds_apart(tmp_path, reads):
     frame = bare_header(quality=50, width=1280, height=720, y=0x21)
     data = avi(frame)
     text = report(tmp_path, data, "MOVI0001.avi")
     assert "an AVI, 1280x720, 'MJPG', 30.00 frames per second" in text and "GP$322 Generalplus AviPackerV3 20140916" in text
     assert "  header:      the bare template" in text
-    video = "the header both known builds write for video frames: a video says nothing about which build made it"
-    assert conclusion(text) == video
+    video = "the frame header both known builds write for video: it does not tell the known builds apart (INFERRED)"
+    assert conclusion(text) == video == photo_id.VIDEO
     frame_at = data.index(b"00dc") + 8
     assert max(o + n for o, n in reads) == frame_at + len(frame)     # nothing of the frame's image data is read
     # an 'AVI1' APP0, which MJPEG writers may put in each frame, names no other program
     marked = b"\xff\xd8" + seg(0xE0, b"AVI1\x00" + b"\x00" * 9) + frame[2:]
     assert conclusion(report(tmp_path, avi(marked), "MOVI0002.avi")) == video
-    # frames another program wrote again are not the camera's
-    resaved = b"\xff\xd8" + JFIF + frame[2:]
-    assert conclusion(report(tmp_path, avi(resaved), "MOVI0003.avi")) == "re-saved by another program: says nothing about the camera"
+    # frames with an editor's mark were written again by another program; a JFIF frame tells neither apart
+    edited = b"\xff\xd8" + seg(0xED, b"Photoshop 3.0\x00") + frame[2:]
+    assert conclusion(report(tmp_path, avi(edited), "MOVI0003.avi")) == RESAVED
+    jfif = b"\xff\xd8" + JFIF + frame[2:]
+    assert conclusion(report(tmp_path, avi(jfif), "MOVI0004.avi")) == EITHER
+
+
+def test_a_junk_text_other_than_the_packers_shows_other_code_wrote_the_video(tmp_path):
+    """Both known builds carry the packer text the JUNK chunk holds; another text shows other code, whatever the frames."""
+    frame = bare_header(quality=50, width=1280, height=720, y=0x21)
+    other = avi(frame).replace(photo_id.AVI_PACKER, b"Lavf58.29.100".ljust(len(photo_id.AVI_PACKER), b"\x00"))
+    text = report(tmp_path, other, "MOVI0005.avi")
+    assert "junk text:   'Lavf58.29.100'" in text and "  header:      the bare template" in text
+    assert conclusion(text) == ("other code wrote this file: its JUNK text is not 'GP$322 Generalplus AviPackerV3 20140916', "
+                                "the packer text both known builds carry")
+    # a JUNK chunk that holds no text says nothing either way
+    blank = avi(frame).replace(photo_id.AVI_PACKER, bytes(len(photo_id.AVI_PACKER)))
+    assert conclusion(report(tmp_path, blank, "MOVI0006.avi")) == photo_id.VIDEO
+
+
+def test_the_packer_text_is_in_both_known_builds(stock_image):
+    assert stock_image.count(photo_id.AVI_PACKER) == 1
+    if FILM_MODS_RESTORE.is_file():
+        assert FILM_MODS_RESTORE.read_bytes().count(photo_id.AVI_PACKER) == 1
 
 
 # --- the real files --------------------------------------------------------------------------------------------------

@@ -197,8 +197,10 @@ _BUILD_STRING_RE = re.compile(rb"JH5408 +[0-9]{8}")
 _COMPILED_RE = re.compile(rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ 0-9][0-9] 20[0-9]{2}(?=\x00)")
 _UPDATE_PATTERN = b"*.bin\x00"
 # The folder after "\2247\5408\" in the source file paths compiled into the code, with the backslashes of the
-# factory's Windows paths: VERIFIED 27 times in each known build, all in the code area.
-_SOURCE_TREE_RE = re.compile(rb"\\2247\\5408\\([^\\\x00-\x20\x7f-\xff]{1,64})\\")
+# factory's Windows paths: VERIFIED 27 times in each known build, all in the code area. Its name is 1 to 64 bytes
+# of printable ASCII (0x20..0x7E) other than the backslash that ends it, the rule the app follows too.
+_SOURCE_TREE_PREFIX = b"\\2247\\5408\\"
+_SOURCE_TREE_FOLDER = re.compile(rb"[\x20-\x5b\x5d-\x7e]{1,64}(?=\\)")
 
 
 @dataclass(frozen=True)
@@ -338,10 +340,17 @@ def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
 
 
 def source_tree_marks(code: bytes) -> Tuple[Optional[str], Optional[int], int]:
-    """(folder, offset of its first use, how many source paths name it) for the folder after "\\2247\\5408\\" in
-    the source paths of the code area, or (None, None, 0). When paths name several folders, the one most of
-    them name wins (the first found, on a tie)."""
-    found = [(m.group(1).decode("ascii"), m.start(1)) for m in _SOURCE_TREE_RE.finditer(code)]
+    """(folder, offset where its name first begins, how many source paths name it) for the folder after
+    "\\2247\\5408\\" in the source paths of the code area, or (None, None, 0). Every place the prefix starts is
+    looked at, as the app does. When paths name several folders, the one most of them name wins (the first found,
+    on a tie)."""
+    found = []
+    at = code.find(_SOURCE_TREE_PREFIX)
+    while at >= 0:
+        m = _SOURCE_TREE_FOLDER.match(code, at + len(_SOURCE_TREE_PREFIX))
+        if m:
+            found.append((m.group(0).decode("ascii"), m.start()))
+        at = code.find(_SOURCE_TREE_PREFIX, at + 1)
     if not found:
         return None, None, 0
     counts = Counter(folder for folder, _ in found)
@@ -389,12 +398,17 @@ def find_marks(image: bytes) -> BuildMarks:
 # --- Build identity -----------------------------------------------------------------------------------
 
 
+def _listed(words: List[str]) -> str:
+    """'a', 'a and b', 'a, b and c'."""
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+
 @dataclass
 class BuildMatch:
     marks: BuildMarks
     # The known build this image is, or whose marks (stamp, build string, sensor table offsets and the stamp itself)
     # a changed copy keeps. The mod commands go by it, since they need that build's layout; whether the image was
-    # made from that build is made_from.
+    # made from that build (its sensor table, source tree and compile date too) is made_from.
     build: Optional[KnownBuild]
     modified: bool                     # True when it is that build with changes (a mod, or another camera's state)
     checks: Dict[str, bool] = field(default_factory=dict)
@@ -409,7 +423,8 @@ class BuildMatch:
     def identity(self) -> str:
         """The key pack, inspect and the backup and restore manifests show: '<build>' or '<build>-modified' for the
         build the image is or was made from (made_from), 'charmera-unknown-build' for any other Charmera firmware,
-        one laid out like a known build with another sensor table included, else 'not-charmera'."""
+        one laid out like a known build with another stamp, sensor table, source tree or compile date included, else
+        'not-charmera'."""
         known = self.made_from
         if known is not None:
             return known.key + ("-modified" if self.modified else "")
@@ -417,14 +432,30 @@ class BuildMatch:
 
     @property
     def made_from(self) -> Optional[KnownBuild]:
-        """The known build this image is or was made from: an exact fingerprint, or that build's marks with the same
-        sensor table. A copy whose sensor table differs is another build laid out like it (no toolkit mod changes
-        the table), not that build with changes."""
+        """The known build this image is or was made from: an exact fingerprint, or that build's marks where it keeps
+        them with its stamp, its sensor table, its source-tree folder and its compile date (the last two where the build
+        records one). A copy with another of them is another build laid out like it (no toolkit mod changes any of
+        them), not that build with changes."""
         if self.build is None:
             return None
-        if self.modified and (self.marks.sensor is None or self.marks.sensor.sha256 != self.build.sensor_table_sha256):
+        if self.modified and self.other_marks(self.build):
             return None
         return self.build
+
+    def other_marks(self, build: KnownBuild) -> List[str]:
+        """The marks of this image that are not those of `build`: its stamp, its sensor table, and its source-tree
+        folder and compile date where the build records them. Empty when all of them are that build's."""
+        m = self.marks
+        out = []
+        if m.stamp != build.stamp:
+            out.append("stamp")
+        if m.sensor is None or m.sensor.sha256 != build.sensor_table_sha256:
+            out.append("sensor table")
+        if build.source_tree is not None and m.source_tree != build.source_tree:
+            out.append("source tree")
+        if build.compiled is not None and (m.compiled is None or m.compiled.decode("ascii", "replace") != build.compiled):
+            out.append("compile date")
+        return out
 
     @property
     def label(self) -> str:
@@ -433,7 +464,9 @@ class BuildMatch:
             return known.label + (" with changes" if self.modified else "")
         if self.charmera:
             if self.layout is not None:
-                return f"Charmera firmware of a build this toolkit does not know, laid out like {self.layout.label}"
+                other = self.other_marks(self.layout)
+                return (f"Charmera firmware of a build this toolkit does not know, laid out like {self.layout.label}"
+                        + (f": its {_listed(other)} {'is' if len(other) == 1 else 'are'} not that build's" if other else ""))
             return "Charmera firmware of a build this toolkit does not know (no public image has this fingerprint)"
         return "not a known Charmera build (build marks missing)"
 
@@ -473,9 +506,9 @@ def detect_build(image: bytes) -> BuildMatch:
 
     An exact fingerprint over bytes 0..0x169000 names a known build. Failing that, the marks' offsets name
     the known build a modified image was made from (a mod keeps the stamp, the build string and the sensor
-    table where they were, and the table itself: BuildMatch.made_from). Images with marks at other offsets are
-    Charmera firmware of an unknown build; images without marks are not Charmera firmware. The stamp alone
-    never identifies a build.
+    table where they were, and the table, the source tree and the compile date themselves: BuildMatch.made_from).
+    Images with marks at other offsets are Charmera firmware of an unknown build; images without marks are not
+    Charmera firmware. The stamp alone never identifies a build.
     """
     marks = find_marks(image)
     exact = match_known_build(image)

@@ -645,6 +645,10 @@ def test_restore_refuses_missing_build_marks_without_flag(fake_flashrom, tmp_pat
     err = capsys.readouterr().err
     assert "no Charmera build marks" in err and "stamp missing" in err
     assert "--allow-unknown-build" in err
+    # the freeze was seen on one camera; its cause is inferred, as public_image_note says
+    assert ("After a flash, one camera started but froze in photo and video mode; the likely cause is a sensor the firmware "
+            "does not drive (INFERRED)") in flat(err)
+    assert "seen on hardware" not in err
     assert not fake_flashrom.wrote_anything()
     # another stamp at the same place is still a Charmera build mark: the stamp is not an identity
     data = bytearray(make_image())
@@ -865,6 +869,73 @@ def test_restore_compares_nothing_when_neither_side_has_a_sensor_table(fake_flas
     assert len(prompts) == 1
 
 
+def with_a_second_sensor_program(data: bytes) -> bytes:
+    """The image with a second reset and init table at 0xF7000, one value of the init table changed, and an aligned
+    code literal at 0x7B000 that refers to it: two sensor programs the code refers to, with different tables."""
+    out = bytearray(data)
+    table = bytearray(SYNTHETIC_SENSOR_TABLE)
+    table[3] ^= 0x01
+    out[0xF7000: 0xF7006] = image.SENSOR_RESET_TABLE
+    out[0xF7006: 0xF7006 + len(table)] = table
+    out[0x7B000: 0x7B004] = (0xF7006 - 0x200).to_bytes(4, "little")
+    return bytes(out)
+
+
+def test_restore_refuses_an_image_with_several_sensor_programs(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """S6, as verify: which of several programs sets up the sensor cannot be told, so the image cannot be compared with
+    the chip's table. Refused before flashrom runs, whatever the flags."""
+    data = with_a_second_sensor_program(make_image())
+    assert len(image.find_marks(data).several_sensor_programs) == 2
+    path = tmp_path / "two.bin"
+    path.write_bytes(data)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask: the image is refused"))
+    for flags in ((), ("--allow-unknown-build",)):
+        assert restore(path, tmp_path / "r", *flags) == 2
+        err = flat(capsys.readouterr().err)
+        assert "refusing: the code in two.bin refers to 2 image-sensor set-up tables with different contents" in err
+        assert "61 writes at 0xF5C6C" in err and "referred to from code at 0x7B91C" in err
+        assert "61 writes at 0xF7006" in err and "referred to from code at 0x7B000" in err
+        assert "cannot be compared with the table on the chip, and verify refuses such a file too. No flag accepts it" in err
+        assert "Nothing was written." in err
+    assert fake_flashrom.calls() == [] and not fake_flashrom.wrote_anything()
+    assert not (tmp_path / "r").exists()
+
+
+def test_restore_asks_a_second_time_when_the_chip_has_several_sensor_programs(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A chip whose code refers to several programs with different tables does not hold the image's table, whichever of
+    them it runs: restore asks for DIFFERENT and says why, even though the first of them is the image's."""
+    data = make_image()
+    image_path = tmp_path / "stock.bin"
+    image_path.write_bytes(data)
+    chip = with_a_second_sensor_program(make_image(0x00))
+    assert image.find_marks(chip).sensor.sha256 == image.find_marks(data).sensor.sha256      # the one picked is the same
+    prompts = []
+    answers = []
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    fake_flashrom.set_chip(chip)
+    answers[:] = ["RESTORE", "RESTORE"]
+    assert restore(image_path, tmp_path / "r1") == 1
+    out = capsys.readouterr().out
+    text = flat(out)
+    assert "chip 2 sensor programs the code refers to, with different tables: 61 writes at 0xF5C6C" in text
+    assert "61 writes at 0xF7006" in text and "referred to from code at 0x7B000" in text
+    assert ("DIFFERENT: the code on the chip refers to 2 image-sensor set-up tables with different contents, so which one "
+            "sets up this camera's sensor cannot be told, and the image's table is not the same as the chip's") in text
+    assert "The same table" not in text
+    assert "The code on the chip refers to several image-sensor set-up tables with different contents" in text
+    assert len(prompts) == 2 and "Type DIFFERENT" in prompts[1]
+    assert "Stopped. Nothing was written." in out and not fake_flashrom.wrote_anything()
+    prompts.clear()
+    answers[:] = ["RESTORE", "DIFFERENT"]
+    assert restore(image_path, tmp_path / "r2") == 0
+    assert len(prompts) == 2 and fake_flashrom.written() == data
+
+
 def test_restore_writes_a_private_copy_of_the_checked_bytes(fake_flashrom, tmp_path, monkeypatch, capsys):
     """flashrom gets a private copy of what was checked, never the file named in --image: a file that changes
     while the plan waits for RESTORE cannot reach the chip."""
@@ -1033,6 +1104,11 @@ def test_restore_help_names_the_read_it_keeps():
     assert "a private copy of the checked image" in help_text
     # a backup file from elsewhere is not taken: it could not prove it came from this chip, now
     assert "--backup" not in help_text and "your own backup" not in help_text
+    # --allow-unknown-build: the freeze was seen on one camera, its cause is inferred; several programs are never written
+    assert ("After a flash, one camera started but froze in photo and video mode; the likely cause, a sensor the firmware "
+            "does not drive, is INFERRED") in help_text
+    assert "It never writes an image whose code refers to several sensor programs" in help_text
+    assert "freezes capture" not in help_text
     backup_help = flat(sub.choices["backup"].format_help())
     assert "keep the name <label>_<UTC time>.unverified-read<n>.bin: they are not a backup" in backup_help
 

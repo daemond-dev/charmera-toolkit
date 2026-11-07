@@ -8,8 +8,10 @@ What the camera gets wrong, as verified by two community projects whose logic th
 - PixelXDimension/PixelYDimension say 640x480 while the frame is 1440x1080.
 - The MakerNote offset points past the end of the EXIF block, so editors refuse to write the file.
 - Make/Model are "Generalplus"/"CBB3": the chip, not the camera.
-- Every AVI carries the same recording date, 2010-06-29, in its text date chunks (IDIT in the header list,
-  ICRD in the INFO list). The file's modification time on the card is the real recording time.
+- Every AVI carries the same recording date, 2010-06-29. The public build writes an INFO list with ICRD
+  '2010-06-29' and no IDIT chunk (VERIFIED, static analysis of the public dump; no video from a camera was
+  examined). The community tools expect an IDIT chunk in the header list as well, and the repair handles one
+  too when a file has it. The file's modification time on the card is the real recording time.
 
 The repair never edits the camera's EXIF block in place because its offsets cannot be trusted. It reads the
 true dimensions from the JPEG frame header, salvages orientation, YCbCr positioning, make, model and the

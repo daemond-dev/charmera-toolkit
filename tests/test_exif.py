@@ -213,8 +213,9 @@ BOGUS_ICRD = b"2010-06-29\x00"
 
 
 def minimal_avi(idit: bytes = BOGUS_IDIT, icrd: bytes = BOGUS_ICRD) -> bytes:
-    """The shape of a Charmera video: MJPG 1440x1080 + PCM, IDIT in hdrl (asctime) and ICRD in INFO (ISO),
-    exactly as the C# importer's sample builder lays it out."""
+    """A video shaped as the C# importer's sample builder lays one out: MJPG 1440x1080 + PCM, IDIT in hdrl (asctime)
+    and ICRD in INFO (ISO). The public build writes the INFO list with ICRD '2010-06-29' and no IDIT (VERIFIED,
+    static analysis); exif-fix also handles IDIT when a file has it, so both are built here."""
     avih = bytearray(56)
     struct.pack_into("<I", avih, 0, 33_333)
     struct.pack_into("<I", avih, 16, 90)
@@ -246,8 +247,8 @@ def minimal_avi(idit: bytes = BOGUS_IDIT, icrd: bytes = BOGUS_ICRD) -> bytes:
 
 
 def inject_dates(avi: bytes, idit: bytes = BOGUS_IDIT, icrd: bytes = BOGUS_ICRD) -> bytes:
-    """Add the camera's date chunks to an AVI that has none: IDIT at the end of LIST hdrl, a LIST INFO with
-    ICRD at the end of the RIFF, with the list and RIFF sizes updated."""
+    """Add the date chunks exif-fix rewrites to an AVI that has none: IDIT at the end of LIST hdrl, a LIST INFO
+    with ICRD at the end of the RIFF, with the list and RIFF sizes updated."""
     assert ex.is_avi(avi[:12])
     end = min(len(avi), 8 + struct.unpack("<I", avi[4:8])[0])
     out = bytearray(avi[:12])

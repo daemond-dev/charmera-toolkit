@@ -14,14 +14,16 @@ Safety rules:
   backup.
 - `restore` refuses an image that is not exactly 2 MiB, does not start with the "SPII" magic, or carries no
   Charmera build marks (build string, 12-digit stamp, sensor table, each found by content; unless
-  --allow-unknown-build). No backup of the chip on the clip, no write: restore reads the chip twice itself,
-  keeps that read in --out as backup does (with its SHA-256 and a manifest), and writes nothing when the two
-  reads differ. A backup file given from elsewhere could not prove that it came from this chip, now. It
-  prints a 64 KiB block diff of the image against that read, the image's sensor table against the chip's,
+  --allow-unknown-build), and, whatever the flags, one whose code refers to several sensor programs with
+  different tables, as verify does. No backup of the chip on the clip, no write: restore reads the chip twice
+  itself, keeps that read in --out as backup does (with its SHA-256 and a manifest), and writes nothing when
+  the two reads differ. A backup file given from elsewhere could not prove that it came from this chip, now.
+  It prints a 64 KiB block diff of the image against that read, the image's sensor table against the chip's,
   the SHA-256 and the exact plan, and only runs `flashrom -w` after the owner types RESTORE, and a second
-  word when the two sensor tables are not the same, a chip with none of the known kind and an image with one
-  included. flashrom writes a private copy of the checked bytes, hashed again just before it runs, never the
-  owner's file in place. Afterwards it reads the chip back and compares.
+  word when the two sensor tables are not the same: a chip with none of the known kind and an image with one,
+  and a chip whose code refers to several programs, included. flashrom writes a private copy of the checked
+  bytes, hashed again just before it runs, never the owner's file in place. Afterwards it reads the chip back
+  and compares.
 - The tool never interrupts `flashrom -w` or the read-back after it: those run without a timeout.
   Probe and backup reads keep a generous timeout, since stopping them cannot damage anything.
 - Electrical warning that software cannot enforce: the "H" in PY25D16HB means a 2.3 to 3.6 V part
@@ -395,6 +397,11 @@ def analyze_image(data: bytes) -> dict:
         "magic_ok": data[: len(MAGIC)] == MAGIC,
         "build_marks": marks,
         "build_marks_ok": all(marks[k] is not None for k in BUILD_MARKS),
+        # The sensor programs the code refers to when they are more than one with different init tables, else empty:
+        # which of them sets up the sensor cannot be told, so such an image's table cannot be compared (verify refuses it).
+        "several_sensor_programs": [{"offset": f"0x{t.init[0]:X}", "writes": t.pairs, "sha256": t.sha256,
+                                     "referenced_from": f"0x{t.referenced_from:X}"}
+                                    for t in match.marks.several_sensor_programs],
         "build": match.identity,
         "build_label": match.label,
         "tail_blank": len(data) == FLASH_SIZE and tail == b"\xff" * len(tail),
@@ -767,14 +774,27 @@ def cmd_restore(args: argparse.Namespace) -> int:
             print("Be sure this image is a dump of this camera's own chip.")
         else:
             refusals.append(
-                text + ". A firmware that does not fit the camera boots but freezes photo and video mode\n"
-                "(seen on hardware). Pass --allow-unknown-build only if you know this image is this camera's own."
+                text + ". After a flash, one camera started but froze in photo and video mode; the likely\n"
+                "cause is a sensor the firmware does not drive (INFERRED). Pass --allow-unknown-build only if you\n"
+                "know this image is this camera's own."
             )
     if refusals:
         for r in refusals:
             print(f"refusing: {r}", file=sys.stderr)
         print("Nothing was written.", file=sys.stderr)
         return 1
+    several = info["several_sensor_programs"]
+    if several:
+        # As in verify, whatever the flags: which program sets up the sensor cannot be told, so nothing can compare the
+        # image's table with the chip's.
+        print(f"refusing: the code in {image_path.name} refers to {len(several)} image-sensor set-up tables with different "
+              "contents:", file=sys.stderr)
+        for t in several:
+            print(f"  {_table_text(t)}, referred to from code at {t['referenced_from']}", file=sys.stderr)
+        print("Which one sets up the camera's sensor cannot be told from the image, so it cannot be compared with the\n"
+              "table on the chip, and verify refuses such a file too. No flag accepts it.", file=sys.stderr)
+        print("Nothing was written.", file=sys.stderr)
+        return 2
 
     print(f"image:    {image_path}")
     print(f"size:     {info['size']:,} bytes")
@@ -828,7 +848,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
     if kept.data == image:
         print("The chip already holds this image, byte for byte: nothing to write.")
         return 0
-    second_word = print_sensor_comparison(info["build_marks"]["sensor_table"], kept.info["build_marks"]["sensor_table"])
+    second_word = print_sensor_comparison(info["build_marks"]["sensor_table"], kept.info["build_marks"]["sensor_table"],
+                                          kept.info["several_sensor_programs"])
 
     work = Path(tempfile.mkdtemp(prefix="charmera-restore-"))
     copy_path = work / "image.bin"
@@ -852,23 +873,39 @@ def _table_text(table: Optional[dict]) -> str:
     return f"{table['writes']} writes at {table['offset']}, sha256 {table['sha256'][:16]}..."
 
 
-def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[dict]) -> Optional[List[str]]:
-    """The image's sensor table against the one on the chip now (build_marks_found's entries). When the two are not
-    the same, one of them missing included, restore asks a second word before it writes: the lines it prints then are
-    returned. None when the tables are the same, or when neither side has one and nothing can be compared."""
+def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[dict],
+                            chip_several: Sequence[dict] = ()) -> Optional[List[str]]:
+    """The image's sensor table against the one on the chip now (build_marks_found's entries; chip_several is
+    analyze_image's several_sensor_programs of the chip). When the two are not the same, one of them missing included,
+    and when the chip's code refers to several programs with different tables, restore asks a second word before it
+    writes: the lines it prints then are returned. None when the tables are the same, or when neither side has one and
+    nothing can be compared."""
     print(f"sensor:   image {_table_text(image_table)}")
-    print(f"          chip  {_table_text(chip_table)}")
+    if chip_several:
+        print(f"          chip  {len(chip_several)} sensor programs the code refers to, with different tables:")
+        for t in chip_several:
+            print(f"                {_table_text(t)}, referred to from code at {t['referenced_from']}")
+    else:
+        print(f"          chip  {_table_text(chip_table)}")
     indent = " " * 10
-    if chip_table is None and image_table is None:
+    if chip_several:
+        # Which of them sets up the sensor cannot be told, so the image's table is not the same as the chip's, whichever
+        # it is (verify refuses such a --stock).
+        first = [f"DIFFERENT: the code on the chip refers to {len(chip_several)} image-sensor set-up tables with different",
+                 "contents, so which one sets up this camera's sensor cannot be told, and the image's table is not the",
+                 "same as the chip's."]
+        ask = ["The code on the chip refers to several image-sensor set-up tables with different contents (the sensor",
+               "lines above): nothing here can tell whether that firmware fits this camera."]
+    elif chip_table is None and image_table is None:
         _note(["Neither the image nor the chip holds a sensor table of the kind the known builds use, so nothing",
                "here can compare the two."], indent)
         return None
-    if image_table is not None and chip_table is not None and image_table["sha256"] == chip_table["sha256"]:
+    elif image_table is not None and chip_table is not None and image_table["sha256"] == chip_table["sha256"]:
         _note(["The same table: the image sets up the image sensor as the firmware on the chip does. That",
                "firmware fits this camera only if it is the one the camera came with, not one flashed onto it since."],
               indent)
         return None
-    if chip_table is None:
+    elif chip_table is None:
         # A blank or damaged chip, or one running another kind of firmware: not the same as an image with a table.
         first = ["DIFFERENT: the chip holds no sensor table of the kind the known builds use (it is blank or",
                  "damaged, or holds another kind of firmware), the image has one, so the two are not the same."]
@@ -1042,11 +1079,12 @@ def register(subparsers) -> None:
     restore = subparsers.add_parser(
         "restore",
         help="read the chip twice, then write a full 2 MiB image to it through flashrom (asks for a typed RESTORE)",
-        description="Check the image (2 MiB, SPII magic, Charmera build marks found by content), read the chip twice "
-        "and keep that read in --out as backup does (nothing is written when the reads differ), show a 64 KiB block "
-        "diff against it, the two sensor tables, the SHA-256 and the plan, wait for the word RESTORE (and DIFFERENT "
-        "when the sensor tables differ or only one of the two has one), then run flashrom -w (erase, write, verify) on "
-        "a private copy of the checked image and read the chip back to compare.",
+        description="Check the image (2 MiB, SPII magic, Charmera build marks found by content, not several sensor "
+        "programs), read the chip twice and keep that read in --out as backup does (nothing is written when the reads "
+        "differ), show a 64 KiB block diff against it, the two sensor tables, the SHA-256 and the plan, wait for the "
+        "word RESTORE (and DIFFERENT when the sensor tables differ, only one of the two has one, or the chip's code refers "
+        "to several), then run flashrom -w (erase, write, verify) on a private copy of the checked image and read the "
+        "chip back to compare.",
     )
     _add_common(restore)
     restore.add_argument("--image", required=True, metavar="FILE", help="full 2 MiB image to write")
@@ -1062,6 +1100,8 @@ def register(subparsers) -> None:
     restore.add_argument(
         "--allow-unknown-build",
         action="store_true",
-        help="write an image that carries no Charmera build marks (a firmware that does not fit the camera boots but freezes capture)",
+        help="write an image that carries no Charmera build marks. After a flash, one camera started but froze in photo and "
+        "video mode; the likely cause, a sensor the firmware does not drive, is INFERRED. It never writes an image whose "
+        "code refers to several sensor programs",
     )
     restore.set_defaults(func=cmd_restore)
