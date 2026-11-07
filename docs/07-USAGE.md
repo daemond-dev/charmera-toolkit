@@ -37,6 +37,9 @@ needs it. Settings-only files pass without it. `stage` always uses it.
 Two things it does not accept. A sensor table that differs from `--stock`'s (`sensor-table`), or, without `--stock`,
 from the known builds', fails unless `--allow-unknown-build` is given, and `stage` never gives it: no toolkit mod
 changes that table, and a firmware that drives a sensor the camera does not have leaves it unable to take pictures.
+The one way past it is the donor route, `--donor <a read of another, working camera's chip>`, for a camera whose own
+firmware is gone and does not fit it; it needs `--stock`, takes only the donor's firmware unchanged, and says that the
+fit to this camera is unknown ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 A damaged resource entry (`resource-slots`) always fails: every entry's slot must lie inside the
 resource area and the file, must not be erased, and must hold the kind its name says (a WAV with fmt and data chunks that fits its slot, a JPEG
 with an FF D9 end marker inside its slot, a GPZP stream that inflates, matches its CRC and length trailer and uses only

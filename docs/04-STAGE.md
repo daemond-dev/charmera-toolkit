@@ -7,7 +7,7 @@ SD card and proves the copy is good, so that the first time the camera sees the 
 anything could go wrong, and not before.
 
 ```
-charmera stage UPDATE.bin --card <mount point or drive letter> [--stock my_backup.bin] [--plan-only] [--i-know-what-i-am-doing]
+charmera stage UPDATE.bin --card <mount point or drive letter> [--stock my_backup.bin] [--donor donor.bin] [--plan-only] [--i-know-what-i-am-doing]
 ```
 
 ## Why a command for a file copy
@@ -36,7 +36,13 @@ guarantee.
    size, a wrong checksum, the shared stamp, a 2 MiB file are FAIL. Any FAIL refuses with exit 1. WARN lines are
    shown and do not block. Always give `--stock my_backup.bin`, a dump of the camera this card goes into: it is what
    the sensor table is compared with, and it makes the software-region line list the 64 KiB blocks that differ from
-   your own dump. No backup, no flash.
+   your own dump. No backup, no flash. Without `--stock`, `stage` prints that rule and still writes a file that passes
+   (the owner's decision of 2026-11-06); with `--donor` it does not write at all.
+   `--donor donor.bin` is the donor route for a camera whose own firmware is gone and does not fit it
+   ([Recovery, section D](02-RECOVERY.md#the-donor-route)): it needs `--stock`, the file must be the donor's firmware
+   unchanged, and its sensor table may then differ from `--stock`'s. The output says that nothing checks whether the
+   donor's camera has the same sensor and wiring, and that only a chip programmer can put `--stock` back if the
+   donor's firmware does not start.
 2. **The card.** `--card` must exist, be a directory, and be a mount point (Linux) or a drive root
    (Windows: `E:` or `E:\`). On Linux the device behind the mount and its filesystem type are read from
    `/proc/mounts`, and the whole disk's removable flag from sysfs (a card in a built-in slot counts as
@@ -99,7 +105,9 @@ or flashed with a toolkit-built file still runs `202505201029`, and `verify` ref
 | Message | Meaning | What to do |
 |---|---|---|
 | `FAIL ...` then `RESULT: verify failed` | The file itself is wrong: name checksum, stamp, size, build. | Rebuild it with `pack`; never rename an update file by hand. |
-| `FAIL sensor-table` | The image-sensor set-up table differs from your `--stock` dump's (or, without `--stock`, from the known builds'). No toolkit mod changes it, and that difference is what leaves a camera unable to take pictures. | Do not use the file on this camera. Without `--stock`, give it: your backup is the only reference that says anything about your camera. |
+| `FAIL sensor-table` | The image-sensor set-up table differs from your `--stock` dump's (or, without `--stock`, from the known builds'). No toolkit mod changes it, and that difference is what leaves a camera unable to take pictures. | Do not use the file on this camera. Without `--stock`, give it: your backup is the only reference that says anything about your camera. If the camera's own firmware is already gone and the file is a donor's, see the donor route ([Recovery, section D](02-RECOVERY.md#the-donor-route)). |
+| `--donor needs --stock` | The donor route was asked for without a read of this camera's own chip. | Read the chip first ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)) and give it as `--stock`. |
+| `FAIL from-donor` | The file is not the donor's firmware unchanged. | Build it from `--donor` with `pack`, and change nothing in it. |
 | `FAIL series` | The build marks (build string, stamp, sensor table) were not found. | Not Charmera firmware, or a damaged copy. Rebuild from a complete dump. |
 | `FAIL resource-slots` | A resource entry is erased, cut off or not the kind its name says, typically from a truncated download or a damaged dump. | Rebuilding from the same input does not help: get a complete dump (check its SHA-256) and build again. |
 | `... is not a mount point or drive root` | You gave a folder on the card, or the card is not mounted. | Give the mount point itself (`/run/media/deck/<label>`, `E:`). For a test on a plain folder add `--i-know-what-i-am-doing`. |

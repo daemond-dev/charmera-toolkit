@@ -290,16 +290,23 @@ What is known and what is not:
   freeze; the shutter clicks and the camera locks up until it switches itself off. The firmware drives exactly one
   image sensor, never reads which one is fitted, and carries on when its writes fail (VERIFIED in the public dump),
   so a camera with another sensor behaves exactly like this. A loose or damaged sensor ribbon looks the same from
-  the firmware's side.
+  the firmware's side, but a camera that took photos on its own firmware and was not opened or dropped since points
+  at the firmware, not the ribbon. If such a camera's sensor marking turns out to be the one the public firmware is
+  said to drive, the difference lies elsewhere between the builds (how the sensor is wired, powered or clocked, or
+  its register values for that module), still not in the ribbon (INFERRED).
 - Known cases: the Millennium Edition (blue boot screen) and the CLOT edition flashed with the original-series image
   (REPORTED by two owners), and an original-series camera of the 1987 blind-box design, bought in Japan in November
   2026, flashed with the public dump on 2026-11-06 ([the incident notes](FIRST-FLASH-INCIDENT.md)). So the body and
   the boot screen do not say which firmware a camera needs.
 - The version stamp does not either: the public dump and the build on the charmera-film-mods author's camera both
-  carry `202505201029` with different bytes (the author confirmed it from their own dump). The toolkit therefore
-  names a build by a fingerprint over its bytes, finds the build marks by their content rather than at fixed offsets,
-  and says plainly that a build match tells which public image a file was made from, not whether it fits a camera.
-  The one check that does is `verify --stock <a dump of that camera>`: the file's sensor table against the camera's own.
+  carry `202505201029` with different bytes (VERIFIED: that build's code and resources are public as the project's
+  restore file). Their compile dates differ, `Oct 14 2025` and `Nov 19 2025`, so the factory rebuilt the firmware
+  under one stamp, and a camera bought later may run a later build. The toolkit names a build by a fingerprint over
+  its bytes, finds the build marks (compile date included) by their content rather than at fixed offsets, and says
+  plainly that a build match tells which image a file was made from, not whether it fits a camera. The one check
+  that does is `verify --stock <a dump of that camera>`, the file's sensor table against the camera's own, and only
+  when that dump was read before the camera's first flash: a read taken after one shows what the camera runs now,
+  not what fits it.
 - Do not flash an image from another camera, your own backup of another camera or a public dump included, onto a
   camera whose own chip has not been read. `restore` cannot know which camera is on the clip.
 - If it has already been done: the camera boots, so the SD updater still runs. The way back is the camera's own
@@ -307,6 +314,38 @@ What is known and what is not:
   dump from a working camera with the same sensor can help; identify the sensor from the marking on its module (the
   firmware never reads an ID, so the marking is the way), and ask owners of the same batch or edition for a dump. The
   two known builds carry the same sensor table, byte for byte, so neither helps a camera with another sensor.
+
+### The donor route
+
+For a camera whose own firmware is gone and does not fit it, a dump of another, working camera (the donor) is the
+only firmware that can help. The toolkit's sensor check compares a file with the camera's own read, which after a
+flash holds the firmware that fails, so it refuses every donor file; `--donor` is the deliberate way past it.
+
+What it needs, and what it does not prove:
+
+- A read of this camera's chip as it is now, with a CH341A clip ([section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)):
+  no backup of your own camera, no flash, on this route as on every other. It is the only way back if the donor's
+  firmware does not suit this camera.
+- A complete read of the donor's chip (2 MiB, with the build marks). Ideally the donor is the same edition, bought at
+  the same time and place, and its sensor module carries the same marking as this camera's.
+- Whether the donor's firmware fits this camera is not checked by anything here. Matching sensor markings make it
+  likely; nothing short of the flash proves it, and other board differences can remain.
+- If the donor's firmware starts far enough to run the card updater, this camera's own read can be flashed back from
+  a card ([section A](#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card)). If it does not start,
+  only a chip programmer can put it back, so have the clip ready before you flash.
+
+```
+python -m charmera_toolkit pack --input donor.bin --official-size --out out/donor/ --i-understand-this-file-flashes-a-camera
+python -m charmera_toolkit verify out/donor/JH_5408<stamp>_<sum>.bin --stock this-camera-now.bin --donor donor.bin
+python -m charmera_toolkit stage out/donor/JH_5408<stamp>_<sum>.bin --card E: --stock this-camera-now.bin --donor donor.bin
+```
+
+`--official-size` keeps the donor's settings and stored photos out of this camera; the final erase then gives it
+factory settings and an empty photo list. If `pack` says the donor carries no sensor table of the kind the known
+builds use (a camera with another kind of sensor may keep its table in another form), add `--allow-unknown-build` to
+`pack`; `verify` and `stage` accept such a donor with `--donor` and say so. `verify` checks that the file is the
+donor's firmware unchanged, shows how its sensor table compares with this camera's, and names the way back. The
+app does not take this route: a computer does.
 - If you own a camera that works, make a backup now ([section B](#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)'s
   `backup`, with the camera opened the same way). That backup is the only thing that can restore it later, and if its
   build is one nobody has published, it is what other owners with the same parts will need.
@@ -320,6 +359,7 @@ The image (VERIFIED in both public dumps):
 | `0x000000` | magic `SPII`, start of the code |
 | `0x018964` | build string `JH5408  20250520` (in the public dump; another build keeps it elsewhere, so the toolkit finds it by content) |
 | `0x0218C4` | version stamp `202505201029` (shared by two different builds; identifies neither) |
+| `0x0F3978` | compile date `Oct 14 2025` (public dump; `Nov 19 2025` at `0xF3604` in the film-mods build) |
 | `0x0F5C6C` | the 61-write image-sensor set-up table (public dump; `0xF5D34` in the film-mods build) |
 | `0x170000` | settings store (records appended as settings change) |
 | `0x180000`, `0x1A5800` | internally stored photos in the public dumps |
