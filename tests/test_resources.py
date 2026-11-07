@@ -19,7 +19,7 @@ from charmera_toolkit import image, resources
 # build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL,
 # and a sensor program (the reset table, a 61-write init table that starts with a page select, switches page
 # once more and ends with ff ff, and the code literal that points at it). The init table's hash is not a known
-# build's, so resources replace needs only the identity, not the table's hash.
+# build's, so resources replace needs only the layout the marks give (BuildMatch.build), not the table's hash.
 SENSOR_RESET_OFFSET = 0xF5BFC
 SENSOR_START, SENSOR_END = 0xF5C6C, 0xF5CE8
 SENSOR_POINTER = 0x7B91C
@@ -29,7 +29,8 @@ assert len(SYNTHETIC_SENSOR_TABLE) == SENSOR_END - SENSOR_START == 124
 
 
 def put_build_marks(img: bytearray) -> None:
-    """The public build's marks at its offsets, so detect_build reads 'public-dump-modified'."""
+    """The public build's marks at its offsets, so detect_build gives the public build's layout (BuildMatch.build); with
+    this synthetic sensor table the identity is 'charmera-unknown-build'."""
     b = image.PUBLIC_BUILD
     img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
     img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"

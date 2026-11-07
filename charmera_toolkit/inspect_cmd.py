@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import settings as settings_mod
 from .checksum import OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, parse_update_name
-from .image import SOUND_SLOTS, summarize
+from .image import SOUND_SLOTS, SOURCE_TREE_PROVES, known_source_trees, summarize
 from .stage import looks_like_update_file
 
 
@@ -47,6 +47,12 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         print(f"stamp:           {m.stamp or '(not found)'}" + (f"  at {m.stamp_offset:#x}" if m.stamp else "") + "  (found by content, not at a fixed offset)")
     print(f"build string:    {m.build_string.decode('ascii', 'replace') if m.build_string else '(not found)'}" + (f"  at {m.build_offset:#x}" if m.build_string else ""))
     print(f"compiled:        {m.compiled.decode('ascii', 'replace') if m.compiled else '(not found)'}" + (f"  at {m.compiled_offset:#x}" if m.compiled else ""))
+    if m.source_tree:
+        print(f"source tree:     {m.source_tree}  at {m.source_tree_offset:#x}, named by {m.source_tree_paths} source paths  (found by "
+              f"content: the folder after \\2247\\5408\\; {known_source_trees()})")
+        print(f"                 {SOURCE_TREE_PROVES}")
+    else:
+        print("source tree:     (not found: no source path names the folder the firmware was built in)")
     if m.sensor:
         t = m.sensor
         print(f"sensor table:    {_program(t)}")
@@ -142,6 +148,7 @@ def handler(args) -> int:
             "stamp": m.stamp, "stamp_offset": m.stamp_offset,
             "build_string": m.build_string.decode("ascii", "replace") if m.build_string else None, "build_offset": m.build_offset,
             "compiled": m.compiled.decode("ascii", "replace") if m.compiled else None, "compiled_offset": m.compiled_offset,
+            "source_tree": m.source_tree, "source_tree_offset": m.source_tree_offset, "source_tree_paths": m.source_tree_paths,
             "sensor_table": None if not m.sensor else {"reset": list(m.sensor.reset), "init": list(m.sensor.init), "pairs": m.sensor.pairs,
                                                        "sha256": m.sensor.sha256, "bus_address": m.sensor.bus_address,
                                                        "referenced_from": m.sensor.referenced_from},

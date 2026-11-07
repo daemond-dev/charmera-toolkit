@@ -11,23 +11,29 @@ camera. A file identical to the public dump matches a camera only if that camera
 public build drives; two builds carry the same stamp, and the public build does not fit every
 original-series camera (after it was flashed, one could no longer take pictures). The only reference that
 does say something about a particular camera is a dump of that camera's own flash chip read before it was
-ever flashed, given as --stock. --stock must be a complete read of a chip. When it carries a known build's
-fingerprint, a sensor table that matches it is a warning, not a pass: it is that public build's table, and a
-read taken after a flash shows what the camera runs now, not what fits it. Without --stock a warning says
-that nothing compares the file with the camera's own firmware.
+ever flashed, given as --stock. --stock must be a complete read of a chip; one named like a read that no
+second read confirmed (<label>_<time>.unverified-read<n>.bin) is warned about. When --stock carries a known
+build's fingerprint, a sensor table that matches it is a warning, not a pass: it is that public build's table,
+and a read taken after a flash shows what the camera runs now, not what fits it. When --stock is of a build
+nobody has published, a matching table is a pass only when the program around it (bytes 0..0x120000) is
+--stock's too; otherwise it is a warning, since a different program can drive the same sensor differently.
+Without --stock a warning says that nothing compares the file with the camera's own firmware.
 
 --allow-modified accepts a software region that differs from the reference, shown as a warning (any mod of
 the code or the resources needs it; settings-only files pass without it; stage always passes it). It never
-accepts an ARM vector table (0x200..0x240) that differs from the reference's in a file laid out like it. It
-does not accept a sensor table that differs from the reference or a damaged resource entry: the first needs
---allow-unknown-build, which stage never passes, or the donor route below; the second has no override. No
-flag accepts several sensor programs, a sensor table no code refers to where --stock's is referred to, or
-one of the withdrawn candidates C, A and B.
+accepts an ARM vector table (0x200..0x240) that differs from --stock's in a file laid out like --stock, or
+from that of the known build whose layout the file has, and it does not accept a damaged resource entry.
+--allow-unknown-build accepts a file without build marks and, without --stock, a sensor table that is not
+the known builds'; stage never passes it. No flag accepts a sensor table that differs from --stock's, a
+--stock without a sensor table of the known kind (outside the donor route below, the one deliberate way past
+both), several sensor programs in the file or in --stock, a sensor table no code refers to where --stock's
+is referred to, or one of the withdrawn candidates C, A and B.
 
 --donor <a read of another, working camera's chip> is the donor route, for a camera whose own firmware is
 gone and does not fit it (one flashed with the public dump that can no longer take pictures). It needs
 --stock, this camera's own read as it is now, and the file must be the donor's firmware unchanged; its
-sensor table may then differ from --stock's, as a donor's must to change anything. Nothing here can tell
+sensor table may then differ from --stock's, as a donor's must to change anything. Its vector table is
+checked as on the normal route, and several sensor programs are refused there too. Nothing here can tell
 whether the donor's camera has the same sensor and wiring as this one, and the output says so, with the
 way back. A backup read after a flash shows what the camera runs now, not what fits it.
 """
@@ -43,8 +49,8 @@ from . import frames as frames_mod
 from . import settings as settings_mod
 from .checksum import (BLOCK_SIZE, FLASH_SIZE, OFFICIAL_UPDATE_SIZE, PAGE_SIZE, STOCK_TIMESTAMP, UPDATE_FILE_SIZE, byte_sum,
                        parse_update_name)
-from .image import (KNOWN_BUILDS, RESOURCE_BASE, RESOURCE_LIMIT, SETTINGS_BASE, SOFTWARE_END, SPII_MAGIC, VECTOR_TABLE,
-                    BuildMarks, BuildMatch, ResourceEntry, SensorTables, chip_read_problem, describe_erase_target,
+from .image import (CODE_AREA_END, KNOWN_BUILDS, RESOURCE_BASE, RESOURCE_LIMIT, SETTINGS_BASE, SOFTWARE_END, SPII_MAGIC,
+                    VECTOR_TABLE, BuildMarks, BuildMatch, ResourceEntry, SensorTables, chip_read_problem, describe_erase_target,
                     detect_build, find_marks, match_known_build, photos_whose, public_dump_name, resource_directory,
                     sound_slots, stored_photos, updater_extra_erase, vector_table_sha256)
 
@@ -206,6 +212,10 @@ NO_BACKUP = ("no backup of this camera was given (--stock), so nothing here comp
 VECTOR_BROKEN = ("a camera whose reset vector is broken does not start, so the card updater can never run on it again, and "
                  "only a chip programmer brings it back (refusing; no flag accepts it)")
 
+# The name backup and restore keep a read under until a second, identical read confirms it (flash.UNVERIFIED_READ):
+# reads that did not agree, and a single read, keep it. Such a read is not a backup.
+UNVERIFIED_READ = "unverified-read"
+
 
 def _table(t: SensorTables) -> str:
     return f"{t.pairs} writes at {t.init[0]:#x}, sha256 {t.sha256[:8]}..."
@@ -215,11 +225,29 @@ def _compiled(marks) -> str:
     return f", compiled {marks.compiled.decode('ascii')} at {marks.compiled_offset:#x}" if marks.compiled else ", no compile date found"
 
 
-def _several_programs(several: List[SensorTables]) -> Check:
+def _source_tree(marks) -> str:
+    return (f", source tree {marks.source_tree} at {marks.source_tree_offset:#x}" if marks.source_tree
+            else ", no source tree found")
+
+
+def _several_programs(several: List[SensorTables], in_stock: bool = False) -> Check:
+    tables = "; ".join(f"{_table(t)}, referred to from {t.referenced_from:#x}" for t in several)
+    if in_stock:
+        return Check("sensor-table", False, f"several sensor programs in --stock: its code refers to {len(several)} image-sensor "
+                     f"set-up tables with different contents ({tables}). Which one sets up this camera's sensor cannot be told from "
+                     "that read, so the file cannot be compared with it (refusing; no flag accepts it)")
     return Check("sensor-table", False, f"several sensor programs: the code refers to {len(several)} image-sensor set-up tables "
-                 "with different contents (" + "; ".join(f"{_table(t)}, referred to from {t.referenced_from:#x}" for t in several)
-                 + "). Which one sets up the sensor cannot be told from the file, so it cannot be compared with a camera's "
-                 "(refusing; no flag accepts it)")
+                 f"with different contents ({tables}). Which one sets up the sensor cannot be told from the file, so it cannot be "
+                 "compared with a camera's (refusing; no flag accepts it)")
+
+
+def _unverified_read(name: str, flag: str, file_name: Optional[str]) -> List[Check]:
+    """A warning when the file given as --stock or --donor has the name of a read that no second read confirmed."""
+    if not file_name or UNVERIFIED_READ not in file_name.lower():
+        return []
+    return [Check(name, True, f"{flag} is {file_name}, a name backup and restore give to reads that did not agree and to a single "
+                  "read: such a read is not a backup. A poor clip contact can leave wrong bytes in it that nothing here can see: "
+                  "read that chip again until two reads agree (charmera backup) and give that read instead", "warn")]
 
 
 def _stamp_camera(name_stamp: Optional[str], stock_stamp: Optional[str]) -> List[Check]:
@@ -242,8 +270,9 @@ def _data_in(data: bytes, start: int, end: int) -> Optional[Tuple[int, int]]:
     return start + len(chunk) - len(rest), start + len(chunk.rstrip(b"\xff"))
 
 
-def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor: bytes, name_stamp: Optional[str]) -> List[Check]:
-    """The build, sensor and software lines of the donor route, in place of the usual ones."""
+def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor: bytes, name_stamp: Optional[str],
+                  stock_name: Optional[str] = None, donor_name: Optional[str] = None) -> List[Check]:
+    """The build, sensor, vector-table and software lines of the donor route, in place of the usual ones."""
     out: List[Check] = []
     n = len(image)
     if stock is None:
@@ -254,6 +283,7 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
     if problem:
         out.append(Check("backup", False, f"--stock is not a complete read of this camera's chip: {problem}. The donor route needs one"))
         return out
+    out.extend(_unverified_read("stock-read", "--stock", stock_name))
     problem = chip_read_problem(donor, need_sensor_table=False)
     if problem:
         out.append(Check("donor", False, f"--donor is not a complete read of a camera's chip: {problem}"))
@@ -266,9 +296,10 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
     dm = donor_match.marks
     donor_public = public_dump_name(donor)
     out.append(Check("donor", True, f"--donor: {donor_match.label}; build string {dm.build_string.decode('ascii', 'replace').strip()!r}, "
-                     f"stamp {dm.stamp}{_compiled(dm)}"
+                     f"stamp {dm.stamp}{_compiled(dm)}{_source_tree(dm)}"
                      + (f"; it is {donor_public} byte for byte, the firmware this camera's trouble started with" if donor_public else ""),
                      "warn" if donor_public else "info"))
+    out.extend(_unverified_read("donor-read", "--donor", donor_name))
 
     span = min(n, SOFTWARE_END)
     if n < OFFICIAL_UPDATE_SIZE:
@@ -280,12 +311,14 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
                          f"blocks {blocks}. The donor route takes the donor's firmware as it is: build the file from --donor with pack"))
         return out
     out.append(Check("from-donor", True, f"bytes 0..{span:#x} are byte-identical to --donor: the file is the donor's firmware unchanged"))
+    # The donor's vector table is the file's, so it is compared with --stock's and the known builds', as on the normal route.
+    stock_marks = find_marks(stock)
+    out.append(_vector_check(image, match, stock, stock_marks))
 
     marks = match.marks
     out.append(Check("series", True, f"Charmera firmware: build string {marks.build_string.decode('ascii', 'replace').strip()!r} at "
-                     f"{marks.build_offset:#x}{_compiled(marks)}, stamp {marks.stamp} at {marks.stamp_offset:#x}"))
+                     f"{marks.build_offset:#x}{_compiled(marks)}{_source_tree(marks)}, stamp {marks.stamp} at {marks.stamp_offset:#x}"))
     out.append(Check("build", True, f"{match.label}; {NOT_THE_CAMERA}", "info" if match.made_from is not None else "warn"))
-    stock_marks = find_marks(stock)
     out.extend(_stamp_camera(name_stamp, stock_marks.stamp))
 
     ref = stock_marks.sensor
@@ -293,6 +326,8 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
     several = marks.several_sensor_programs
     if several:
         out.append(_several_programs(several))
+    elif stock_marks.several_sensor_programs:
+        out.append(_several_programs(stock_marks.several_sensor_programs, in_stock=True))
     elif sensor is None:
         out.append(Check("sensor-table", True, "the file (the donor's firmware) has no sensor table of the kind the known builds use: it sets "
                          "up its image sensor some other way, perhaps for another kind of sensor. Nothing here can compare it with this "
@@ -310,9 +345,10 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
                          "same image sensor and wiring as this one: compare the markings on the two cameras' sensor modules, and even "
                          "matching markings leave other board differences possible", "warn"))
 
+    # A difference the route accepts is a warning, as --allow-modified's is on the normal route.
     blocks = [hex(b) for b in range(0, span, BLOCK_SIZE) if image[b: min(b + BLOCK_SIZE, span)] != stock[b: min(b + BLOCK_SIZE, span)]]
     out.append(Check("software-region", True, f"bytes 0..{span:#x} differ from --stock (this camera now) in 64 KiB blocks {blocks}: the "
-                     "donor's firmware replaces this camera's", "info"))
+                     "donor's firmware replaces this camera's", "warn"))
     stock_public = public_dump_name(stock)
     out.append(Check("way-back", True, "the way back is --stock, this camera's chip as it is now"
                      + (f" (byte-identical to {stock_public}, as a camera flashed with the public restore file reads while its "
@@ -355,13 +391,16 @@ def _size_check(n: int, allow_odd_size: bool) -> Check:
                  "warn" if allow_odd_size else "fail")
 
 
-def _sensor_checks(marks: BuildMarks, stock: Optional[bytes], stock_marks: Optional[BuildMarks],
+def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stock_marks: Optional[BuildMarks],
                    allow_unknown_build: bool) -> List[Check]:
-    """The file's image-sensor program against --stock's when given, else against the known builds'."""
+    """The file's image-sensor program against --stock's when given, else against the known builds'. Outside the
+    donor route a table that differs from --stock's, or a --stock without one, is refused whatever the flags."""
     sensor = marks.sensor
     several = marks.several_sensor_programs
     if several:
         return [_several_programs(several)]
+    if stock is not None and stock_marks is not None and stock_marks.several_sensor_programs:
+        return [_several_programs(stock_marks.several_sensor_programs, in_stock=True)]
     if sensor is None:
         return [Check("sensor-table", True, "the file has no image-sensor set-up table of the kind the known builds use, so no sensor "
                       "comparison was possible" + (" with --stock" if stock is not None else "") + ": nothing here can tell how it sets "
@@ -375,32 +414,38 @@ def _sensor_checks(marks: BuildMarks, stock: Optional[bytes], stock_marks: Optio
     if stock is not None:
         ref = stock_marks.sensor if stock_marks is not None else None
         if ref is None:
-            return [Check("sensor-table", allow_unknown_build, f"the image-sensor set-up table: {table_where}; --stock has no sensor table to "
-                          "compare it with, so the file cannot be matched to that camera"
-                          + (" (accepted because of --allow-unknown-build)" if allow_unknown_build else " (refusing; stage never accepts this)"),
-                          "warn" if allow_unknown_build else "fail")]
+            return [Check("sensor-table", False, f"the image-sensor set-up table: {table_where}; --stock has none of the kind the known "
+                          "builds use to compare it with, so the file cannot be matched to that camera (refusing; no flag accepts it. If "
+                          "this camera's own firmware is gone and the file is another, working camera's firmware, that is the donor "
+                          "route, --donor)")]
         if sensor.referenced_from is None and ref.referenced_from is not None:
             return [Check("sensor-table", False, f"the file's image-sensor set-up table ({table_where}) is referred to by no code, while "
                           f"--stock's is (from {ref.referenced_from:#x}): the file's code may set the sensor up from a table this check "
                           "does not see (refusing; no flag accepts it)")]
         if ref.sha256 == sensor.sha256:
+            same_program = image[:CODE_AREA_END] == stock[:CODE_AREA_END]
             stock_build = match_known_build(stock)
             if stock_build is not None:
+                drives = ("the file drives the sensor as the firmware in --stock does, which proves a fit only if --stock was read "
+                          "before the camera was ever flashed" if same_program else
+                          f"the program around it differs from --stock's (bytes 0..{CODE_AREA_END:#x}), and a different program can "
+                          "drive the same sensor differently; even the same program would show a fit only if --stock was read "
+                          "before the camera was ever flashed")
                 return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock: {table_where}. --stock carries "
-                              f"{stock_build.label}, a public build, so this is that build's table: the file drives the sensor as the "
-                              "firmware in --stock does, which proves a fit only if --stock was read before the camera was ever flashed. "
-                              "A read taken after a flash with a file made from a public dump shows what the camera runs now, not what "
-                              "fits it", "warn")]
-            return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock: {table_where}; the file drives "
-                          "the image sensor as the firmware in --stock does")]
-        return [Check("sensor-table", allow_unknown_build, f"the image-sensor set-up table DIFFERS from --stock's: {table_where}; "
+                              f"{stock_build.label}, a public build, so this is that build's table: {drives}. A read taken after a "
+                              "flash with a file made from a public dump shows what the camera runs now, not what fits it", "warn")]
+            if same_program:
+                return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock: {table_where}, and so is the "
+                              f"program around it (bytes 0..{CODE_AREA_END:#x}): the file drives the image sensor as the firmware in "
+                              "--stock does")]
+            return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock: {table_where}, but the program "
+                          f"around it differs from --stock's (bytes 0..{CODE_AREA_END:#x}), and a different program can drive the same "
+                          "sensor differently: this does not show that the file drives the sensor as the firmware in --stock does", "warn")]
+        return [Check("sensor-table", False, f"the image-sensor set-up table DIFFERS from --stock's: {table_where}; "
                       f"--stock has {ref.pairs} writes at {ref.init[0]:#x}, sha256 {ref.sha256[:8]}... The file drives the sensor "
                       "differently from the firmware in --stock, and a camera whose sensor is not the one a table drives can be expected "
-                      "to freeze in photo and video mode after the flash. If this camera's own firmware is gone and the file is another, "
-                      "working camera's firmware, that is the donor route (--donor)"
-                      + (" (accepted because of --allow-unknown-build)" if allow_unknown_build
-                         else " (refusing; --allow-unknown-build accepts it, stage never does)"),
-                      "warn" if allow_unknown_build else "fail")]
+                      "to freeze in photo and video mode after the flash (refusing; no flag accepts it). If this camera's own firmware "
+                      "is gone and the file is another, working camera's firmware, that is the donor route (--donor)")]
     if sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()}:
         return [Check("sensor-table", True, f"the image-sensor set-up table is the one both known builds carry: {table_where}, sha256 "
                       f"{sensor.sha256[:8]}... It fits a camera only if that camera's sensor is the one this table drives, which "
@@ -417,8 +462,9 @@ def _sensor_checks(marks: BuildMarks, stock: Optional[bytes], stock_marks: Optio
 
 
 def _vector_check(image: bytes, match: BuildMatch, stock: Optional[bytes], stock_marks: Optional[BuildMarks]) -> Check:
-    """The ARM vector table against the reference's, when the file is laid out like it: --stock when given, else the
-    known build whose layout the file has (by the hash each known build carries)."""
+    """The ARM vector table, on every route: byte-identical to --stock's passes; laid out like --stock but different
+    fails; otherwise it is compared with the known build whose layout the file has (by the hash each known build
+    carries), and only a file laid out like none of them is a warning. No flag overrides a failure."""
     lo, hi = VECTOR_TABLE
     where = f"the ARM vector table ({lo:#x}..{hi:#x}, where the camera starts)"
     if len(image) < hi:
@@ -475,7 +521,7 @@ def _software_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], al
 
 
 def _reference_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], name_stamp: Optional[str], allow_modified: bool,
-                      allow_unknown_build: bool) -> List[Check]:
+                      allow_unknown_build: bool, stock_name: Optional[str] = None) -> List[Check]:
     """The backup, build, sensor, vector-table and software lines outside the donor route."""
     out: List[Check] = []
     marks = match.marks
@@ -494,6 +540,7 @@ def _reference_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], n
                              "file reads exactly like this while its settings are unchanged; if this is not a read of the camera the "
                              "file goes into, the comparisons below say nothing about that camera. And a read taken after a flash "
                              "shows what the camera runs now, not what fits it", "warn"))
+        out.extend(_unverified_read("stock-read", "--stock", stock_name))
         stock_marks = find_marks(stock)
         out.extend(_stamp_camera(name_stamp, stock_marks.stamp))
     if not match.charmera:
@@ -506,8 +553,10 @@ def _reference_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], n
             return out
     else:
         out.append(Check("series", True, f"Charmera firmware: build string {marks.build_string.decode('ascii', 'replace').strip()!r} at "
-                         f"{marks.build_offset:#x}{_compiled(marks)}, stamp {marks.stamp} at {marks.stamp_offset:#x} (the stamp is "
-                         "shared by two different builds, so it identifies neither; their compile dates differ)"))
+                         f"{marks.build_offset:#x}{_compiled(marks)}{_source_tree(marks)}, stamp {marks.stamp} at {marks.stamp_offset:#x} "
+                         "(the stamp is shared by two different builds, so it identifies neither; their compile dates differ, and so do "
+                         "their source trees. A different date or tree shows a different build, the same one does not show the same "
+                         "build, and none of these marks says whether the file fits a camera)"))
         known = match.made_from
         if known is not None:
             status = f"{known.status} fingerprint" + (", exact" if not match.modified else ", with changes")
@@ -515,7 +564,7 @@ def _reference_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], n
         else:
             out.append(Check("build", True, f"{match.label}; it belongs only in the camera it was dumped from, or in one with the same "
                              "parts; " + NOT_THE_CAMERA, "warn"))
-    out.extend(_sensor_checks(marks, stock, stock_marks, allow_unknown_build))
+    out.extend(_sensor_checks(image, marks, stock, stock_marks, allow_unknown_build))
     out.append(_vector_check(image, match, stock, stock_marks))
     out.extend(_software_checks(image, match, stock, allow_modified))
     return out
@@ -523,7 +572,10 @@ def _reference_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], n
 
 def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow_modified: bool = False,
                   allow_unknown_build: bool = False, allow_odd_size: bool = False,
-                  donor: Optional[bytes] = None) -> List[Check]:
+                  donor: Optional[bytes] = None, stock_name: Optional[str] = None,
+                  donor_name: Optional[str] = None) -> List[Check]:
+    """Every check, in the order printed. stock_name and donor_name are the file names --stock and --donor were read from,
+    for the warning about a read that no second read confirmed."""
     checks: List[Check] = []
     n = len(image)
     match = detect_build(image)
@@ -581,9 +633,9 @@ def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow
     # 4. Build identity, read from the content, and the comparisons with the reference. The stamp is not an
     # identity: two builds share it.
     if donor is not None:
-        checks.extend(_donor_checks(image, match, stock, donor, name_stamp))
+        checks.extend(_donor_checks(image, match, stock, donor, name_stamp, stock_name, donor_name))
     else:
-        checks.extend(_reference_checks(image, match, stock, name_stamp, allow_modified, allow_unknown_build))
+        checks.extend(_reference_checks(image, match, stock, name_stamp, allow_modified, allow_unknown_build, stock_name))
 
     # 5. What the file carries into the camera's own area, as the camera holds it afterwards: the updater erases the
     # block a file ends in and programs it only up to the file's end, so the rest of that block reads 0xFF.
@@ -663,7 +715,9 @@ def handler(args) -> int:
             print(f"error: --donor {args.donor} is not a file")
             return 2
         donor = Path(args.donor).read_bytes()
-    checks = verify_update(path, image, stock, args.allow_modified, args.allow_unknown_build, args.allow_odd_size, donor=donor)
+    checks = verify_update(path, image, stock, args.allow_modified, args.allow_unknown_build, args.allow_odd_size, donor=donor,
+                           stock_name=Path(args.stock).name if args.stock else None,
+                           donor_name=Path(args.donor).name if donor is not None else None)
     failed = False
     for c in checks:
         if c.severity == "warn":
@@ -698,7 +752,9 @@ def register(subparsers) -> None:
     p.add_argument("--allow-modified", action="store_true",
                    help="accept a software region that differs from the reference (that line then shows WARN); never a changed vector table")
     p.add_argument("--allow-unknown-build", action="store_true",
-                   help="accept a file without build marks, or one whose image-sensor table differs from the reference (that line then shows WARN); stage never accepts either")
+                   help="accept a file without build marks, or, without --stock, one whose image-sensor table is not the known builds' "
+                        "(that line then shows WARN); stage never accepts either. It never accepts a table that differs from --stock's "
+                        "or a --stock without one: only the donor route (--donor) takes those")
     p.add_argument("--allow-odd-size", action="store_true",
                    help="accept a size other than 0x1E0000 and 0x169000 bytes, the two the camera is known to take (shown as WARN); stage never accepts one")
     p.add_argument("--donor", help="the donor route: a read of another, working camera's chip whose firmware the file is, for a camera whose "

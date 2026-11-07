@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import re
 import struct
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -48,10 +49,13 @@ SPII_MAGIC = b"SPII"
 # The build string `JH5408  20250520`, the yellow boot screen and the "original series" body do not tell
 # them apart. The compile date does: `Oct 14 2025` in the public dump, `Nov 19 2025` in the film-mods
 # build, so the factory rebuilt the firmware under one stamp. A different compile date shows a different
-# build; the same date would not show the same build. A fingerprint over the software names a build exactly,
-# and even that says which image a file was made from, not whether it fits the camera it goes into: the two
-# known builds drive the same sensor with the same 61-write table, and a camera fitted with another sensor
-# needs a build nobody has shared.
+# build; the same date would not show the same build. The folder the firmware was built in is another such
+# mark: the source paths compiled into the code ("G:\code\2247\5408\v006\host\...") name it, v006 in the
+# public dump and v008_test in the film-mods build (27 paths in each, VERIFIED). A different folder shows a
+# different build; the same folder does not show the same build. A fingerprint over the software names a
+# build exactly, and even that says which image a file was made from, not whether it fits the camera it goes
+# into: the two known builds drive the same sensor with the same 61-write table, and a camera fitted with
+# another sensor needs a build nobody has shared. None of these marks says whether a file fits a camera.
 
 CODE_AREA_END = 0x120000          # boot header, code, read-only and initialised data, and the padding below the pack
 
@@ -76,6 +80,7 @@ class KnownBuild:
     sensor_table_offset: Optional[int] = None
     compiled: Optional[str] = None          # the compile date the build carries (it differs between the known builds)
     vector_table_sha256: Optional[str] = None   # SHA-256 of bytes 0x200..0x240 (VECTOR_TABLE)
+    source_tree: Optional[str] = None       # the folder its source paths name (it differs between the known builds)
 
     @property
     def layout(self) -> Optional[Tuple[int, int, int]]:
@@ -102,6 +107,7 @@ PUBLIC_BUILD = KnownBuild(
     sensor_table_offset=0xF5C6C,
     compiled="Oct 14 2025",
     vector_table_sha256="cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",
+    source_tree="v006",
 )
 
 FILM_MODS_BUILD = KnownBuild(
@@ -121,6 +127,7 @@ FILM_MODS_BUILD = KnownBuild(
     sensor_table_offset=0xF5D34,
     compiled="Nov 19 2025",
     vector_table_sha256="cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",   # the same bytes as the public build's
+    source_tree="v008_test",
 )
 
 KNOWN_BUILDS = {b.key: b for b in (PUBLIC_BUILD, FILM_MODS_BUILD)}
@@ -189,6 +196,9 @@ _STAMP_RE = re.compile(rb"(?<![0-9])([0-9]{12})\x00")
 _BUILD_STRING_RE = re.compile(rb"JH5408 +[0-9]{8}")
 _COMPILED_RE = re.compile(rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ 0-9][0-9] 20[0-9]{2}(?=\x00)")
 _UPDATE_PATTERN = b"*.bin\x00"
+# The folder after "\2247\5408\" in the source file paths compiled into the code, with the backslashes of the
+# factory's Windows paths: VERIFIED 27 times in each known build, all in the code area.
+_SOURCE_TREE_RE = re.compile(rb"\\2247\\5408\\([^\\\x00-\x20\x7f-\xff]{1,64})\\")
 
 
 @dataclass(frozen=True)
@@ -216,6 +226,10 @@ class BuildMarks:
     sensor: Optional[SensorTables] = None
     sensor_programs: Tuple[SensorTables, ...] = ()   # every reset and init table pair found, in file order
     stamp_conflict: Tuple[str, ...] = ()             # the different stamps that follow '*.bin', when they disagree
+    # The folder the firmware was built in (source_tree_marks); not one of the marks `complete` asks for.
+    source_tree: Optional[str] = None
+    source_tree_offset: Optional[int] = None         # where that folder name first appears
+    source_tree_paths: int = 0                       # how many source paths name it
 
     @property
     def complete(self) -> bool:
@@ -323,6 +337,28 @@ def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
     return _pick_sensor_program(sensor_programs(image))
 
 
+def source_tree_marks(code: bytes) -> Tuple[Optional[str], Optional[int], int]:
+    """(folder, offset of its first use, how many source paths name it) for the folder after "\\2247\\5408\\" in
+    the source paths of the code area, or (None, None, 0). When paths name several folders, the one most of
+    them name wins (the first found, on a tie)."""
+    found = [(m.group(1).decode("ascii"), m.start(1)) for m in _SOURCE_TREE_RE.finditer(code)]
+    if not found:
+        return None, None, 0
+    counts = Counter(folder for folder, _ in found)
+    folder = counts.most_common(1)[0][0]
+    return folder, next(at for name, at in found if name == folder), counts[folder]
+
+
+# What the source-tree folder proves, in the words inspect and pack print under it.
+SOURCE_TREE_PROVES = ("a different folder shows a different build; the same folder does not show the same build, and neither "
+                      "says whether a file fits a camera")
+
+
+def known_source_trees() -> str:
+    """The known builds' source-tree folders, as 'public-dump: v006, film-mods: v008_test'."""
+    return ", ".join(f"{b.key}: {b.source_tree}" for b in KNOWN_BUILDS.values() if b.source_tree)
+
+
 def find_marks(image: bytes) -> BuildMarks:
     """The build marks, each found by its content in the code area. Any of them may be missing.
 
@@ -340,11 +376,13 @@ def find_marks(image: bytes) -> BuildMarks:
     b = _BUILD_STRING_RE.search(code)
     c = _COMPILED_RE.search(code)
     programs = sensor_programs(image)
+    tree, tree_off, tree_paths = source_tree_marks(code)
     return BuildMarks(
         stamp=stamp, stamp_offset=stamp_off,
         build_string=b.group(0) if b else None, build_offset=b.start() if b else None,
         compiled=c.group(0) if c else None, compiled_offset=c.start() if c else None,
         sensor=_pick_sensor_program(programs), sensor_programs=tuple(programs), stamp_conflict=conflict,
+        source_tree=tree, source_tree_offset=tree_off, source_tree_paths=tree_paths,
     )
 
 
@@ -369,8 +407,12 @@ class BuildMatch:
 
     @property
     def identity(self) -> str:
-        if self.build is not None:
-            return self.build.key + ("-modified" if self.modified else "")
+        """The key pack, inspect and the backup and restore manifests show: '<build>' or '<build>-modified' for the
+        build the image is or was made from (made_from), 'charmera-unknown-build' for any other Charmera firmware,
+        one laid out like a known build with another sensor table included, else 'not-charmera'."""
+        known = self.made_from
+        if known is not None:
+            return known.key + ("-modified" if self.modified else "")
         return "charmera-unknown-build" if self.charmera else "not-charmera"
 
     @property

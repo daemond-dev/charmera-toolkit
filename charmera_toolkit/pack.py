@@ -31,8 +31,9 @@ from typing import List, Optional, Sequence
 
 from . import settings as settings_mod
 from .checksum import BLOCK_SIZE, FLASH_SIZE, OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, build_update_name, now_stamp
-from .image import (PHOTO_INDEX, RESOURCE_LIMIT, SETTINGS_BASE, SOFTWARE_END, USER_AREA_END, describe_erase_target, detect_build,
-                    find_resources_end, image_kind, photos_whose, resource_directory, stored_photos, updater_extra_erase)
+from .image import (PHOTO_INDEX, RESOURCE_LIMIT, SETTINGS_BASE, SOFTWARE_END, SOURCE_TREE_PROVES, USER_AREA_END, describe_erase_target,
+                    detect_build, find_resources_end, image_kind, known_source_trees, photos_whose, resource_directory, stored_photos,
+                    updater_extra_erase)
 from .stage import is_drive_root, linux_mount_entry, linux_removable, list_update_files, normalize_card, windows_volume_info
 from .verify import resource_problems
 
@@ -73,7 +74,8 @@ def prepare_payload(image: bytes, blank_settings: bool = False, blank_photos: bo
         if not official_size and last != b"\xff" * len(last):
             raise ValueError(f"bytes {LAST_BLOCK:#x}..0x200000 are not blank in this dump, and the final erase of a 0x1E0000-byte "
                              "file erases that block on the camera: refusing to build a file that destroys them. An official-size "
-                             "file (--official-size) leaves everything above 0x170000 as it is")
+                             "file (--official-size) leaves everything from 0x180000 on as it is; its final erase resets the settings "
+                             "bank and the photo directory, in the block at 0x170000")
         payload = bytearray(image[:UPDATE_FILE_SIZE])
     elif kind == "update":
         payload = bytearray(image)
@@ -122,7 +124,8 @@ def payload_notes(image: bytes, official_size: bool = False) -> List[str]:
     if official_size:
         if image[USER_AREA_END:] != b"\xff" * (FLASH_SIZE - USER_AREA_END):
             return [f"bytes {USER_AREA_END:#x}..0x200000 of this dump are not blank. An official-size file does not carry them and "
-                    "its flash touches nothing above 0x170000, so the camera keeps its own as they are."]
+                    "leaves everything from 0x180000 on as it is (its final erase resets the settings bank and the photo directory, "
+                    "in the block at 0x170000), so the camera keeps its own as they are."]
         return []
     if image[USER_AREA_END:LAST_BLOCK] != b"\xff" * (LAST_BLOCK - USER_AREA_END):
         return [f"bytes {USER_AREA_END:#x}..{LAST_BLOCK:#x} of this dump are not blank. The update file does not carry them, and a "
@@ -165,6 +168,14 @@ def _sensor_line(build) -> str:
             + ("" if t.referenced_from is not None else "; no code reference found"))
 
 
+def _source_tree_lines(marks) -> List[str]:
+    if not marks.source_tree:
+        return ["source tree:     NOT FOUND (no source path names the folder the firmware was built in)"]
+    return [f"source tree:     {marks.source_tree} at {marks.source_tree_offset:#x}, named by {marks.source_tree_paths} source paths "
+            f"({known_source_trees()})",
+            f"                 {SOURCE_TREE_PROVES}"]
+
+
 def describe(payload: bytes, stamp: str, input_len: Optional[int] = None, notes: Sequence[str] = (), tail_blank: bool = True) -> str:
     name = build_update_name(payload, stamp)
     build = detect_build(payload)
@@ -180,6 +191,7 @@ def describe(payload: bytes, stamp: str, input_len: Optional[int] = None, notes:
         f"sha256:          {hashlib.sha256(payload).hexdigest()}",
         f"build:           {build.identity} ({build.label})",
         "                 a build match says which public image this file was made from, not whether it fits the camera it goes into",
+        *_source_tree_lines(build.marks),
         f"sensor table:    {_sensor_line(build)}",
         f"software region: {'identical to the public dump' if build.exact and build.build is not None and build.build.key == 'public-dump' else ('identical to ' + build.build.label if build.exact else 'MODIFIED or unknown')}",
     ]
@@ -341,7 +353,7 @@ def register(subparsers) -> None:
     p.add_argument("--blank-photos", action="store_true", help="erase the internally stored photos and their index")
     p.add_argument("--allow-unknown-build", action="store_true",
                    help="pack an image that carries no Charmera build marks: only a dump read from the camera it goes back into "
-                        "(stage refuses such a file)")
+                        "(stage refuses such a file outside the donor route (--donor))")
     p.add_argument("--overwrite", action="store_true", help="replace an existing output file of the same name")
     p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the update file")
     p.set_defaults(func=handler)

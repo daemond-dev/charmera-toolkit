@@ -36,7 +36,8 @@ SYNTHETIC_VECTORS = b"\x18\xf0\x9f\xe5" + b"\xff" * 60      # bytes 0x200..0x240
 
 
 def put_build_marks(img: bytearray) -> None:
-    """The public build's marks at its offsets, so detect_build reads 'public-dump-modified'."""
+    """The public build's marks at its offsets: detect_build reads 'public-dump-modified' where the synthetic_build
+    fixture registers the synthetic sensor table as that build's, 'charmera-unknown-build' elsewhere."""
     b = image.PUBLIC_BUILD
     img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
     img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
@@ -187,6 +188,10 @@ def test_happy_path_copies_and_verifies(update_file, backup, card, confirmed, ca
     assert "delete the update file" in low and "every power-on" in low          # the camera steps are printed
     assert low.index("take the card out first") < low.index("hold the power key about a second")
     assert "millennium" in low and "photos it stored there" in low
+    # a backup fits its camera only when it was read before the camera was ever flashed
+    flat = " ".join(out.split())
+    assert "A backup of a camera read before it was ever flashed, packed with pack, fits that camera whatever its edition." in flat
+    assert "A camera's own backup" not in flat
     # Tags mirror verify: no FAIL line anywhere.
     assert not any(line.startswith("FAIL") for line in out.splitlines())
 
@@ -612,8 +617,38 @@ def test_stage_donor_route_writes_and_says_the_fit_is_unknown(donor_case, card, 
     assert run(str(src), "--card", str(card), OVERRIDE, "--stock", str(backup_path), "--donor", str(donor_path)) == 0
     out = capsys.readouterr().out
     assert "WARN sensor-table" in out and "WARN way-back" in out and "PASS from-donor" in out
+    assert "PASS vector-table" in out and "WARN software-region" in out
     assert "Donor route:" in out and "only a chip programmer can put --stock back" in out
     assert (card / src.name).read_bytes() == src.read_bytes() and confirmed == [str(card)]
+
+
+def test_stage_donor_route_refuses_a_donor_with_a_broken_vector_table(donor_case, card, confirmed, tmp_path, capsys):
+    """The donor's firmware goes on unchanged, so a donor whose reset vector is broken never reaches a card, whether it is
+    laid out like --stock or only like a known build."""
+    src, backup_path, donor_path = donor_case
+    donor = bytearray(donor_path.read_bytes())
+    donor[0x200:0x240] = bytes(b ^ 0xFF for b in donor[0x200:0x240])
+    donor_path.write_bytes(bytes(donor))
+    payload = pack.prepare_payload(bytes(donor), official_size=True)
+    broken = _renamed(src, payload, "202611041230")
+    moved = bytearray(backup_path.read_bytes())
+    moved[0x218C3: 0x218D1] = b"\x00" * 14
+    moved[0x218D0: 0x218DD] = b"202505201029\x00"              # this camera's read laid out like no known build
+    moved_path = tmp_path / "moved-backup.bin"
+    moved_path.write_bytes(bytes(moved))
+    for stock, said in ((backup_path, "differs from --stock's"), (moved_path, "whose layout the file has")):
+        assert run(str(broken), "--card", str(card), OVERRIDE, "--stock", str(stock), "--donor", str(donor_path), "--plan-only") == 1
+        out = capsys.readouterr().out
+        assert "FAIL vector-table" in out and said in out and "verify failed" in out and "Plan" not in out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_warns_about_a_stock_named_like_an_unverified_read(update_file, backup, card, confirmed, capsys):
+    read = backup.with_name("charmera_20261106-120000Z.unverified-read1.bin")
+    read.write_bytes(backup.read_bytes())
+    assert run(str(update_file), "--card", str(card), OVERRIDE, "--stock", str(read), "--plan-only") == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert "WARN stock-read" in out and "such a read is not a backup" in out and "plan only: nothing written." in out
 
 
 # --- the gates stage inherits from verify ------------------------------------------------------------------------

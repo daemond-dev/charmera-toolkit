@@ -11,7 +11,7 @@ import zlib
 import pytest
 
 from charmera_toolkit import cli, image, settings
-from charmera_toolkit.sounds import GATE_FLAG, _check_output
+from charmera_toolkit.sounds import GATE_FLAG, _check_output, created_name
 
 UPDATE_NAMES = ["JH_5408202611061200_00000000.bin", "jh_5408202611061200_1121E2C8.BIN", "Jh_anything.Bin", "JH_.bin"]
 
@@ -80,6 +80,18 @@ def test_check_output_refuses_a_folder_that_looks_like_a_card(src, card, tmp_pat
     (other / "JH_folder.bin").mkdir(parents=True)
     assert _check_output(src, other / "muted.bin", overwrite=False) is None
     assert _check_output(src, card / "dcim" / "100MEDIA" / "muted.bin", overwrite=False) is None
+
+
+def test_check_output_refuses_the_name_windows_would_create(src):
+    """Windows drops trailing dots and spaces when it creates a file, and "name:stream" or "name::$DATA" writes a stream of
+    the file before the colon, so each of these lands as an update file's name there."""
+    for name in ("JH_5408202611061200_1121E2C8.bin.", "JH_5408202611061200_1121E2C8.bin ", "jh_x.BIN. .",
+                 "JH_x.bin::$DATA", "JH_x.bin:stream"):
+        assert created_name(name).upper().endswith(".BIN"), name
+        why = _check_output(src, src.parent / name, overwrite=True)
+        assert why and "named like an update file (JH_*.bin)" in why, name
+    for name in ("muted.bin.", "JH_5408.bin.txt ", "notes:JH_x.bin"):
+        assert _check_output(src, src.parent / name, overwrite=False) is None, name
 
 
 def test_the_input_check_still_comes_first(src):

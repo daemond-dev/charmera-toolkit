@@ -381,6 +381,7 @@ def test_write_and_readback_have_no_timeout_and_reads_keep_theirs(fake_flashrom,
 
     monkeypatch.setattr(flash, "run_flashrom", recording)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
+    fake_flashrom.set_chip(make_image(0x00))     # the same sensor table as the image: RESTORE is the only word asked
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
 
@@ -452,7 +453,8 @@ def test_backup_happy_path(fake_flashrom, tmp_path, capsys):
     assert manifest["build_marks"]["stamp"] == {"offset": "0x218C4", "value": "202505201029"}
     assert manifest["build_marks"]["sensor_table"]["offset"] == "0xF5C6C" and manifest["build_marks"]["sensor_table"]["writes"] == 61
     assert manifest["build_marks_ok"] is True
-    assert manifest["build"] == "public-dump-modified"
+    # laid out like the public build but with a sensor table no known build has: another build, not a changed copy
+    assert manifest["build"] == "charmera-unknown-build"
     assert manifest["tail_blank"] is True
     assert manifest["public_dump"] is None
     assert manifest["reads"] == 2
@@ -821,16 +823,45 @@ def test_restore_asks_a_second_time_when_the_sensor_tables_differ(fake_flashrom,
     assert not fake_flashrom.wrote_anything()
 
 
-def test_restore_on_a_chip_without_a_sensor_table_compares_nothing(fake_flashrom, tmp_path, monkeypatch, capsys):
-    """A chip that no longer boots may hold anything: there is nothing to compare, and restore says so."""
+def test_restore_on_a_chip_without_a_sensor_table_asks_a_second_time(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A chip that no longer boots may hold anything, or firmware with another kind of table: a chip without a table of
+    the known kind and an image with one are not the same, so restore asks for DIFFERENT too."""
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())          # the fake chip holds no marks at all
     prompts = []
-    monkeypatch.setattr("builtins.input", lambda prompt="": prompts.append(prompt) or "RESTORE")
-    assert restore(image, tmp_path / "r") == 0
-    text = flat(capsys.readouterr().out)
+    answers = []
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    answers[:] = ["RESTORE", "RESTORE"]
+    assert restore(image, tmp_path / "r1") == 1
+    out = capsys.readouterr().out
+    text = flat(out)
     assert "chip none of the kind the known builds use" in text
-    assert "so nothing here can compare the image's with it" in text
+    assert "DIFFERENT: the chip holds no sensor table of the kind the known builds use" in text
+    assert "the image has one, so the two are not the same" in text
+    assert "Nothing here can tell whether that firmware fits this camera" in text
+    assert "nothing here can tell whether that firmware fits this camera" in text      # said again before the word is asked
+    assert len(prompts) == 2 and "Type DIFFERENT" in prompts[1]
+    assert "Stopped. Nothing was written." in out and not fake_flashrom.wrote_anything()
+    prompts.clear()
+    answers[:] = ["RESTORE", "DIFFERENT"]
+    assert restore(image, tmp_path / "r2") == 0
+    assert len(prompts) == 2 and fake_flashrom.written() == make_image()
+
+
+def test_restore_compares_nothing_when_neither_side_has_a_sensor_table(fake_flashrom, tmp_path, monkeypatch, capsys):
+    data = bytearray(make_image())
+    data[0xF5BFC: 0xF5C02] = bytes.fromhex("fe0080ffffff")    # not the known builds' reset table
+    image = tmp_path / "other.bin"
+    image.write_bytes(bytes(data))
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompts.append(prompt) or "RESTORE")
+    assert restore(image, tmp_path / "r", "--allow-unknown-build") == 0
+    assert "Neither the image nor the chip holds a sensor table of the kind the known builds use" in flat(capsys.readouterr().out)
     assert len(prompts) == 1
 
 
@@ -895,6 +926,7 @@ def test_restore_readback_mismatch_exits_nonzero(fake_flashrom, tmp_path, monkey
     data = make_image()
     image = tmp_path / "stock.bin"
     image.write_bytes(data)
+    fake_flashrom.set_chip(make_image(0x00))
     fake_flashrom.set_mode("writecorrupt", monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
     assert restore(image, tmp_path / "r") == 1
@@ -910,6 +942,7 @@ def test_restore_readback_mismatch_exits_nonzero(fake_flashrom, tmp_path, monkey
 def test_restore_write_failure_exits_nonzero(fake_flashrom, tmp_path, monkeypatch, capsys):
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
+    fake_flashrom.set_chip(make_image(0x00))
     fake_flashrom.set_mode("writefail", monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
     assert restore(image, tmp_path / "r") == 1
@@ -927,6 +960,7 @@ def test_restore_write_failure_before_the_chip_was_touched(fake_flashrom, tmp_pa
     'mix of old and new data' warning."""
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
+    fake_flashrom.set_chip(make_image(0x00))
     fake_flashrom.set_mode("writenochip", monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
     assert restore(image, tmp_path / "r") == 1
@@ -1014,9 +1048,12 @@ def test_restore_notes_public_dump(fake_flashrom, tmp_path, monkeypatch, capsys)
     assert restore(image, tmp_path / "r") == 1
     text = flat(capsys.readouterr().out)
     assert "this image is byte-identical to the public dump from example/public-dump" in text
-    assert "such as this camera after the stock restore flash, and then the way back to that state" in text
+    # it cannot know this camera's history, and the cause of the frozen camera is inferred, not seen
+    assert "such as a camera after the stock restore flash, and then the way back to that state" in text
+    assert "such as this camera after" not in text and "seen on hardware" not in text
     assert "Either way it is not firmware known to fit this camera" in text
-    assert "freezes in photo and video mode" in text
+    assert ("after it was flashed, one camera could no longer take pictures; the likely cause is a sensor it does not drive "
+            "(INFERRED)") in text
     assert "last resort" not in text
 
 

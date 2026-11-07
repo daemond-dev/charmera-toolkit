@@ -451,7 +451,8 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route:
         print("only a chip programmer can put --stock back (docs/02-RECOVERY.md, sections B and D).")
     print("A file made from a public dump is never for a Millennium or CLOT edition, and on an original 2025 series camera")
     print("(matte body, yellow Kodak boot screen) it fits only one whose image sensor its table drives. The body alone")
-    print("proves nothing. A camera's own backup, packed with pack, fits that camera whatever its edition.")
+    print("proves nothing. A backup of a camera read before it was ever flashed, packed with pack, fits that camera")
+    print("whatever its edition.")
     print("Charge the camera first: a power loss during programming leaves a camera that only a chip programmer can")
     print("recover (docs/02-RECOVERY.md). A 0x1E0000-byte file replaces everything in the camera's own memory, including the")
     print("photos it stored there without a card; a 0x169000-byte file leaves them but the camera empties its photo list.")
@@ -515,7 +516,9 @@ def handler(args) -> int:
     # --stock and a file that is the donor's firmware unchanged, and says that the fit to this camera is unknown.
     # Without --stock verify adds its WARN that nothing compares the file with this camera, and stage still writes.
     print(f"verify {src.name}:")
-    checks = verify_update(src, image, stock=stock, allow_modified=True, allow_unknown_build=False, allow_odd_size=False, donor=donor)
+    checks = verify_update(src, image, stock=stock, allow_modified=True, allow_unknown_build=False, allow_odd_size=False, donor=donor,
+                           stock_name=stock_path.name if stock_path is not None else None,
+                           donor_name=Path(args.donor).name if donor is not None else None)
     if print_checks(checks):
         print()
         print("RESULT: verify failed; this file does not go on a card.")

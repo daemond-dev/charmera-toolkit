@@ -32,7 +32,8 @@ SYNTHETIC_VECTORS = b"\x18\xf0\x9f\xe5" + b"\xff" * 60      # bytes 0x200..0x240
 
 
 def put_build_marks(img: bytearray) -> None:
-    """The public build's marks at its offsets, so detect_build reads 'public-dump-modified'."""
+    """The public build's marks at its offsets: detect_build reads 'public-dump-modified' where the synthetic_build
+    fixture registers the synthetic sensor table as that build's, 'charmera-unknown-build' elsewhere."""
     b = image.PUBLIC_BUILD
     img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
     img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
@@ -83,7 +84,7 @@ def synthetic_image(records=(), with_sounds=True):
     img = bytearray(b"\xff" * checksum.FLASH_SIZE)
     img[0:4] = b"SPII"
     img[0x200:0x240] = SYNTHETIC_VECTORS
-    put_build_marks(img)   # detect_build then reads 'public-dump-modified' (the software hash cannot match)
+    put_build_marks(img)   # a changed copy of the public build to detect_build (the software hash cannot match)
     if with_sounds:
         base = image.RESOURCE_BASE
         img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
@@ -858,6 +859,54 @@ def test_the_compile_date_is_read_and_shown(tmp_path, synthetic_build):
     assert image.PUBLIC_BUILD.compiled == "Oct 14 2025" and image.FILM_MODS_BUILD.compiled == "Nov 19 2025"
 
 
+def _with_source_paths(img, folders, at=0x3A4C0):
+    """The image with one source path per folder, shaped like the firmware's ("G:\\code\\2247\\5408\\v006\\host\\...")."""
+    out = bytearray(img)
+    for i, folder in enumerate(folders):
+        raw = b"G:\\code\\2247\\5408\\" + folder + b"\\host\\init.c\x00"
+        out[at + 0x40 * i: at + 0x40 * i + len(raw)] = raw
+    return bytes(out)
+
+
+def test_the_source_tree_folder_is_a_build_mark_and_is_shown(tmp_path, capsys, synthetic_build):
+    """S15: the folder after \\2247\\5408\\ in the source paths, the one most of them name; a different folder shows a
+    different build, the same one does not show the same build, and neither shows a fit."""
+    import json
+    from charmera_toolkit import cli
+    assert (image.PUBLIC_BUILD.source_tree, image.FILM_MODS_BUILD.source_tree) == ("v006", "v008_test")
+    plain = pack.prepare_payload(synthetic_image([make_record()]))
+    m = image.find_marks(plain)
+    assert (m.source_tree, m.source_tree_offset, m.source_tree_paths) == (None, None, 0)
+    assert "no source tree found" in _checks(_named(tmp_path, plain), plain, allow_modified=True)["series"].detail
+    assert "source tree:     NOT FOUND" in pack.describe(plain, "202611061430")
+    payload = _with_source_paths(plain, [b"v009", b"v006", b"v006"])
+    m = image.find_marks(payload)
+    assert (m.source_tree, m.source_tree_offset, m.source_tree_paths) == ("v006", 0x3A500 + 18, 2)
+    assert m.complete == image.find_marks(plain).complete           # not one of the marks a Charmera build must carry
+    series = _checks(_named(tmp_path, payload, "202611061431"), payload, allow_modified=True)["series"].detail
+    assert "source tree v006 at 0x3a512" in series and "so do their source trees" in series
+    assert "the same one does not show the same build" in series and "says whether the file fits a camera" in series
+    text = pack.describe(payload, "202611061431")
+    assert "source tree:     v006 at 0x3a512, named by 2 source paths (public-dump: v006, film-mods: v008_test)" in text
+    assert image.SOURCE_TREE_PROVES in text
+    (tmp_path / "tree.bin").write_bytes(payload)
+    assert cli.main(["inspect", str(tmp_path / "tree.bin")]) == 0
+    out = capsys.readouterr().out
+    assert "source tree:     v006  at 0x3a512, named by 2 source paths" in out and image.SOURCE_TREE_PROVES in out
+    assert cli.main(["inspect", "--json", str(tmp_path / "tree.bin")]) == 0
+    marks = json.loads(capsys.readouterr().out)["marks"]
+    assert (marks["source_tree"], marks["source_tree_offset"], marks["source_tree_paths"]) == ("v006", 0x3A512, 2)
+
+
+def test_stock_image_source_tree(stock_image, tmp_path):
+    m = image.find_marks(stock_image)
+    assert (m.source_tree, m.source_tree_paths) == (image.PUBLIC_BUILD.source_tree, 27) == ("v006", 27)
+    assert stock_image[m.source_tree_offset - 11: m.source_tree_offset] == b"\\2247\\5408\\"
+    restore = stock_image[: checksum.UPDATE_FILE_SIZE]
+    by = _checks(_named(tmp_path, restore, "202611061432"), restore)
+    assert f"source tree v006 at {m.source_tree_offset:#x}" in by["series"].detail
+
+
 def test_pack_official_size_refuses_data_it_would_drop(synthetic_build):
     img = bytearray(synthetic_image([make_record()]))
     img[0x16E000: 0x16E004] = b"JHCM"       # a factory self-test sector that is not blank
@@ -916,7 +965,9 @@ def test_the_donor_route_takes_the_donors_firmware_and_says_the_fit_is_unknown(t
     assert by["from-donor"].ok and "unchanged" in by["from-donor"].detail
     assert by["sensor-table"].severity == "warn" and "Nothing here can tell" in by["sensor-table"].detail
     assert by["way-back"].severity == "warn" and "chip programmer" in by["way-back"].detail
-    assert by["software-region"].severity == "info" and "0xf0000" in by["software-region"].detail
+    # the software region the route accepts is a warning, as --allow-modified's is; the vector table is --stock's
+    assert by["software-region"].severity == "warn" and "0xf0000" in by["software-region"].detail
+    assert by["vector-table"].ok and by["vector-table"].severity == "fail" and "--stock's" in by["vector-table"].detail
     backup_path, donor_path = tmp_path / "backup.bin", tmp_path / "donor.bin"
     backup_path.write_bytes(backup)
     donor_path.write_bytes(donor)
@@ -956,6 +1007,71 @@ def test_the_donor_route_takes_a_donor_with_another_kind_of_sensor_table(tmp_pat
     assert "no sensor table of the kind" in next(c for c in checks if c.name == "sensor-table").detail
 
 
+def _moved_stamp(img):
+    """The image with its stamp moved to 0x218D0, so its marks lie where no known build has them."""
+    out = bytearray(img)
+    out[0x218C3: 0x218D1] = b"\x00" * 14
+    out[0x218D0: 0x218DD] = b"202505201029\x00"
+    return bytes(out)
+
+
+def _broken_vectors(img):
+    out = bytearray(img)
+    out[0x200:0x240] = bytes(b ^ 0xFF for b in out[0x200:0x240])
+    return bytes(out)
+
+
+def test_the_donor_route_refuses_a_donor_with_a_broken_vector_table(tmp_path, synthetic_build):
+    """S5 on the donor route: the file is the donor's firmware unchanged, so a donor whose reset vector is broken would
+    leave a camera the card updater cannot reach. Its vector table is compared as on the normal route."""
+    backup = synthetic_image([make_record()])
+    donor = _broken_vectors(_donor(backup))
+    payload = pack.prepare_payload(donor, official_size=True)
+    p = _named(tmp_path, payload, "202611061310")
+    # laid out like --stock: compared with --stock's
+    by = _checks(p, payload, stock=backup, donor=donor)
+    assert by["from-donor"].ok
+    v = by["vector-table"]
+    assert not v.ok and v.severity == "fail" and "differs from --stock's" in v.detail and "no flag accepts it" in v.detail
+    # --stock laid out otherwise: compared with the known build whose layout the file has
+    moved = _moved_stamp(backup)
+    assert image.find_marks(moved).layout != image.find_marks(donor).layout
+    v = _checks(p, payload, stock=moved, donor=donor)["vector-table"]
+    assert not v.ok and v.severity == "fail" and "that of the public dump's build" in v.detail and "whose layout the file has" in v.detail
+    # an intact donor passes that line either way
+    good = _donor(backup)
+    good_payload = pack.prepare_payload(good, official_size=True)
+    q = _named(tmp_path, good_payload, "202611061311")
+    for stock in (backup, moved):
+        checks = verify.verify_update(q, good_payload, stock=stock, donor=good)
+        assert _failed(checks) == [] and next(c for c in checks if c.name == "vector-table").ok
+
+
+def test_several_sensor_programs_in_stock_are_refused(tmp_path, synthetic_build):
+    """S6: when --stock's code refers to several sensor programs, which one sets this camera's sensor up cannot be told,
+    so nothing can be compared with it, on either route and whatever the flags."""
+    backup = synthetic_image([make_record()])
+    stock = _second_program(backup)
+    assert len(image.find_marks(stock).several_sensor_programs) == 2
+    payload = pack.prepare_payload(backup)
+    p = _named(tmp_path, payload, "202611061415")
+    for kw in ({}, {"allow_unknown_build": True}):
+        s = _checks(p, payload, stock=stock, allow_modified=True, **kw)["sensor-table"]
+        assert not s.ok and s.severity == "fail" and "several sensor programs in --stock" in s.detail and "no flag accepts it" in s.detail
+        assert "referred to from 0x7b91c" in s.detail and "referred to from 0x7b000" in s.detail       # which programs
+    donor = _donor(backup)
+    official = pack.prepare_payload(donor, official_size=True)
+    checks = verify.verify_update(_named(tmp_path, official, "202611061416"), official, stock=stock, donor=donor)
+    assert "sensor-table" in _failed(checks)
+    assert "several sensor programs in --stock" in next(c for c in checks if c.name == "sensor-table").detail
+    # a file without a sensor table of the known kind is refused against such a --stock too
+    no_table = bytearray(backup)
+    no_table[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = bytes.fromhex("fe0080ffffff")
+    none = pack.prepare_payload(bytes(no_table))
+    s = _checks(_named(tmp_path, none, "202611061417"), none, stock=stock, allow_modified=True, allow_unknown_build=True)["sensor-table"]
+    assert not s.ok and "several sensor programs in --stock" in s.detail
+
+
 def test_stock_image_donor_route(stock_image, tmp_path):
     """The real dump as this camera's read, and the real dump with one sensor register changed as a donor's."""
     sensor = image.find_sensor_tables(stock_image)
@@ -971,6 +1087,12 @@ def test_stock_image_donor_route(stock_image, tmp_path):
     assert _failed(checks) == []
     by = {c.name: c for c in checks}
     assert "byte-identical to benbadio/keychain-camera-plus" in by["way-back"].detail
+    assert by["vector-table"].ok and by["software-region"].severity == "warn"
+    # the same donor with its reset vector destroyed never passes (the round-one review's probe)
+    broken = _broken_vectors(donor)
+    payload = pack.prepare_payload(broken, official_size=True)
+    checks = verify.verify_update(_named(tmp_path, payload, "202611061312"), payload, stock=stock_image, donor=broken)
+    assert _failed(checks) == ["vector-table"]
 
 
 def test_stock_image_as_stock_is_named_a_public_dump(stock_image, tmp_path):
@@ -998,6 +1120,18 @@ def test_film_mods_restore_file_is_named_by_its_fingerprint(tmp_path):
     assert by["vector-table"].ok and by["vector-table"].severity == "fail"     # a plain PASS
     assert m.marks.sensor.referenced_from == 0x7B5A8 and m.marks.sensor.referenced_from % 4 == 0
     assert m.layout is image.FILM_MODS_BUILD
+
+
+@pytest.mark.skipif(not FILM_MODS_RESTORE.is_file(), reason="set CHARMERA_FILM_MODS_RESTORE to the film-mods Charmera_Restore file")
+def test_film_mods_restore_file_source_tree(tmp_path):
+    """S15 on the second known build: another folder than the public build's, which shows another build."""
+    data = FILM_MODS_RESTORE.read_bytes()
+    m = image.find_marks(data)
+    assert (m.source_tree, m.source_tree_paths) == (image.FILM_MODS_BUILD.source_tree, 27) == ("v008_test", 27)
+    assert data[m.source_tree_offset - 11: m.source_tree_offset] == b"\\2247\\5408\\"
+    assert f"source tree:     v008_test at {m.source_tree_offset:#x}, named by 27 source paths" in pack.describe(data, "202611061433")
+    by = _checks(tmp_path / FILM_MODS_RESTORE.name, data)
+    assert "source tree v008_test" in by["series"].detail
 
 
 # --- the gates: backup, sizes, sensor programs, vector table, withdrawn files ------------------------------------------
@@ -1043,6 +1177,30 @@ def test_stock_must_be_a_complete_read_of_a_chip(tmp_path, capsys, synthetic_bui
     assert "FAIL stock" in capsys.readouterr().out
 
 
+def test_a_stock_named_like_an_unverified_read_is_warned_about(tmp_path, capsys, synthetic_build):
+    """backup and restore keep a read under <label>_<time>.unverified-read<n>.bin until a second read agrees with it:
+    reads that did not agree, or a single read. Such a read is not a backup."""
+    from charmera_toolkit import flash
+    assert verify.UNVERIFIED_READ == flash.UNVERIFIED_READ
+    backup = synthetic_image([make_record()])
+    payload = pack.prepare_payload(backup)
+    p = _named(tmp_path, payload)
+    w = _checks(p, payload, stock=backup, stock_name="charmera_20261106-120000Z.unverified-read1.bin")["stock-read"]
+    assert w.ok and w.severity == "warn" and "such a read is not a backup" in w.detail and "until two reads agree" in w.detail
+    assert "stock-read" not in _checks(p, payload, stock=backup, stock_name="charmera_20261106-120000Z.bin")
+    read = tmp_path / "before-restore_20261106-120000Z.Unverified-Read2.bin"
+    read.write_bytes(backup)
+    args = type("A", (), {"file": str(p), "stock": str(read), "allow_modified": False, "allow_unknown_build": False,
+                          "allow_odd_size": False})
+    assert verify.handler(args) == 0
+    assert "WARN stock-read" in capsys.readouterr().out
+    # the donor route warns about both reads
+    backup_, donor, official, q = _donor_case(tmp_path)
+    by = _checks(q, official, stock=backup_, donor=donor, stock_name="x.unverified-read1.bin", donor_name="d.unverified-read1.bin")
+    assert by["stock-read"].severity == "warn" and by["donor-read"].severity == "warn" and "--donor is d.unverified" in by["donor-read"].detail
+    assert _failed(by.values()) == []
+
+
 def test_sizes_other_than_the_two_the_camera_takes_are_refused(tmp_path, synthetic_build):
     payload = pack.prepare_payload(synthetic_image([make_record()]))
     for n in (0x160000, 0x16A000, 0x16F000, 0x170000, 0x175000, 0x17F000, 0x180000, 0x1C0000, 0x1D8000, 0x1EFF00, 0x1F0000):
@@ -1085,10 +1243,69 @@ def test_a_reference_of_a_known_build_gives_a_warning_for_a_matching_table(tmp_p
     assert by["sensor-table"].ok and by["sensor-table"].severity == "warn"
     assert "proves a fit only if --stock was read before the camera was ever flashed" in by["sensor-table"].detail
     assert "not what fits it" in by["sensor-table"].detail
+    # with another program around the same table it does not even show that the file drives the sensor that way
+    code = bytearray(payload)
+    code[0x30000] ^= 1
+    code = bytes(code)
+    s = _checks(_named(tmp_path, code, "202611061400"), code, stock=backup, allow_modified=True)["sensor-table"]
+    assert s.ok and s.severity == "warn" and "the program around it differs from --stock's" in s.detail
+    assert "drives the sensor as the firmware in --stock does" not in s.detail
     # a table that differs from the reference still fails outside the donor route
     donor = pack.prepare_payload(_donor(backup))
     by = _checks(_named(tmp_path, donor, "202611061401"), donor, stock=backup, allow_modified=True)
     assert by["sensor-table"].severity == "fail" and "DIFFERS" in by["sensor-table"].detail
+
+
+def test_a_reference_of_an_unknown_build_passes_a_matching_table_only_with_its_program(tmp_path, synthetic_build):
+    """S3: against a read of a build nobody has published, the same table is a pass only when bytes 0..0x120000 are the
+    read's too; a different program can drive the same sensor differently."""
+    backup = synthetic_image([make_record()])
+    payload = pack.prepare_payload(backup)
+    s = _checks(_named(tmp_path, payload), payload, stock=backup)["sensor-table"]
+    assert s.ok and s.severity == "fail" and "and so is the program around it (bytes 0..0x120000)" in s.detail
+    code = bytearray(payload)
+    code[0x30000] ^= 1                            # the program, not the table
+    code = bytes(code)
+    s = _checks(_named(tmp_path, code, "202611061419"), code, stock=backup, allow_modified=True)["sensor-table"]
+    assert s.ok and s.severity == "warn" and "the same as in --stock" in s.detail
+    assert "the program around it differs from --stock's" in s.detail and "a different program can drive the same sensor" in s.detail
+    # a change in the resource pack leaves the program as it is: still a pass
+    beep = next(e for e in image.resource_directory(payload) if e.display_name == "BEEP.WAV")
+    sound = bytearray(payload)
+    sound[beep.offset + 0x40] ^= 1
+    sound = bytes(sound)
+    s = _checks(_named(tmp_path, sound, "202611061420"), sound, stock=backup, allow_modified=True)["sensor-table"]
+    assert s.ok and s.severity == "fail"
+
+
+def test_allow_unknown_build_never_clears_a_table_that_differs_from_stock(tmp_path, capsys, synthetic_build):
+    """S3: a table that differs from --stock's, or a --stock with no table of the known kind, is a FAIL outside the
+    donor route whatever the flags."""
+    from charmera_toolkit import cli
+    backup = synthetic_image([make_record()])
+    donor = pack.prepare_payload(_donor(backup))
+    p = _named(tmp_path, donor, "202611061421")
+    s = _checks(p, donor, stock=backup, allow_modified=True, allow_unknown_build=True, allow_odd_size=True)["sensor-table"]
+    assert not s.ok and s.severity == "fail" and "DIFFERS" in s.detail and "no flag accepts it" in s.detail and "--donor" in s.detail
+    no_table = bytearray(backup)
+    no_table[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = bytes.fromhex("fe0080ffffff")
+    payload = pack.prepare_payload(backup)
+    q = _named(tmp_path, payload, "202611061422")
+    s = _checks(q, payload, stock=bytes(no_table), allow_modified=True, allow_unknown_build=True)["sensor-table"]
+    assert not s.ok and s.severity == "fail" and "--stock has none of the kind the known builds use" in s.detail
+    assert "no flag accepts it" in s.detail
+    stock_path = tmp_path / "backup.bin"
+    stock_path.write_bytes(backup)
+    args = type("A", (), {"file": str(p), "stock": str(stock_path), "allow_modified": True, "allow_unknown_build": True,
+                          "allow_odd_size": False})
+    assert verify.handler(args) == 1
+    assert "FAIL sensor-table" in capsys.readouterr().out
+    # without --stock the flag still accepts a table that is not the known builds' (test above), and its help says what it never does
+    parser = cli.build_parser()
+    text = " ".join(next(a for a in parser._actions if a.dest == "command").choices["verify"].format_help().split())
+    assert "It never accepts a table that differs from --stock's or a --stock without one: only the donor route (--donor) takes those" in text
+    text = " ".join(next(a for a in parser._actions if a.dest == "command").choices["pack"].format_help().split())
+    assert "stage refuses such a file outside the donor route (--donor)" in text
 
 
 def test_a_broken_vector_table_is_refused_whatever_the_flags(tmp_path, synthetic_build):
@@ -1152,13 +1369,16 @@ def test_several_sensor_programs_are_refused(tmp_path, capsys, synthetic_build):
     assert "SEVERAL sensor programs" in pack.describe(two, "202611061404")
 
 
-def test_two_different_stamps_after_the_update_pattern_give_no_stamp(tmp_path, synthetic_build):
+def test_two_different_stamps_after_the_update_pattern_give_no_stamp(tmp_path, capsys, synthetic_build):
     """Which of two different stamps the updater compares cannot be told, so neither is taken."""
+    from charmera_toolkit import cli
     img = bytearray(synthetic_image([make_record()]))
     stamp_at = image.PUBLIC_BUILD.stamp_offset
     img[stamp_at - 8: stamp_at - 2] = b"*.bin\x00"
+    img[0x10000: 0x1000D] = b"202601010000\x00"     # a 12-digit run before the stamp, with no '*.bin' before it
     one = bytes(img)
-    assert image.find_marks(one).stamp == "202505201029" and image.find_marks(one).stamp_conflict == ()
+    m = image.find_marks(one)
+    assert (m.stamp, m.stamp_offset, m.stamp_conflict) == ("202505201029", stamp_at, ())   # the one after '*.bin' wins
     img[0x30000: 0x30006] = b"*.bin\x00"
     img[0x30008: 0x30015] = b"202601010000\x00"
     two = bytes(img)
@@ -1167,6 +1387,9 @@ def test_two_different_stamps_after_the_update_pattern_give_no_stamp(tmp_path, s
     payload = pack.prepare_payload(two)
     by = _checks(_named(tmp_path, payload, "202611061413"), payload, allow_modified=True)
     assert not by["series"].ok and "several different ones follow '*.bin'" in by["series"].detail
+    (tmp_path / "two.bin").write_bytes(two)
+    assert cli.main(["inspect", str(tmp_path / "two.bin")]) == 0
+    assert "several different stamps follow '*.bin': 202505201029, 202601010000" in capsys.readouterr().out
     # the same stamp twice is no conflict
     img[0x30008: 0x30015] = b"202505201029\x00"
     assert image.find_marks(bytes(img)).stamp == "202505201029"
@@ -1197,12 +1420,15 @@ def test_a_changed_copy_with_another_sensor_table_is_another_build(tmp_path, syn
     backup = synthetic_image([make_record()])
     payload = pack.prepare_payload(backup)
     m = image.detect_build(payload)
-    assert m.made_from is synthetic_build and "with changes" in m.label
+    assert m.made_from is synthetic_build and "with changes" in m.label and m.identity == "public-dump-modified"
     other = pack.prepare_payload(_donor(backup))
     m = image.detect_build(other)
     assert m.made_from is None and m.layout is synthetic_build
     assert m.label.startswith("Charmera firmware of a build this toolkit does not know, laid out like the public dump's build")
-    assert m.identity == "public-dump-modified"            # the key the mod commands and the backup manifest go by
+    # the key pack, inspect and the manifests show follows made_from; the mod commands go by m.build, the layout
+    assert m.identity == "charmera-unknown-build" and m.build is synthetic_build
+    assert "build:           charmera-unknown-build (Charmera firmware of a build this toolkit does not know" in pack.describe(
+        other, "202611061407")
     by = _checks(_named(tmp_path, other, "202611061407"), other, allow_modified=True, allow_unknown_build=True)
     assert by["build"].severity == "warn" and "laid out like" in by["build"].detail
     assert "differs from every known build" in by["software-region"].detail
@@ -1345,8 +1571,12 @@ def test_pack_keeps_the_untouched_block_of_a_dump_and_refuses_only_the_one_the_e
     out = capsys.readouterr().out
     assert "note:" in out and "the camera keeps its own as they are" in out and "not all blank" in out
     img[0x1F0000: 0x1F0004] = b"GONE"           # the block the final erase of a 0x1E0000-byte file destroys
-    with pytest.raises(ValueError, match="0x1f0000..0x200000 are not blank"):
+    with pytest.raises(ValueError, match="0x1f0000..0x200000 are not blank") as exc:
         pack.prepare_payload(bytes(img))
+    # an official-size file leaves the blocks from 0x180000 on alone, but its final erase resets the settings block
+    for said in (str(exc.value), pack.payload_notes(bytes(img), official_size=True)[0]):
+        assert "leaves everything from 0x180000 on as it is" in said and "above 0x170000" not in said
+        assert "resets the settings bank and the photo directory, in the block at 0x170000" in said
     assert len(pack.prepare_payload(bytes(img), official_size=True)) == checksum.OFFICIAL_UPDATE_SIZE
     # an official-size file blames the right thing for data past 0x169000
     selftest = bytearray(synthetic_image([make_record()]))

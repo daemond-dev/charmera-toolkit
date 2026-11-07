@@ -221,6 +221,12 @@ def _write_mod(args, image: bytes, out: Path, what: str) -> int:
     return 0
 
 
+def created_name(name: str) -> str:
+    """The name Windows gives the file it creates for `name`: it drops trailing dots and spaces ("JH_....bin." lands
+    as "JH_....bin"), and "name:stream" or "name::$DATA" writes a stream of the file before the colon."""
+    return name.split(":", 1)[0].rstrip(" .")
+
+
 def _check_output(src: Path, out: Path, overwrite: bool) -> Optional[str]:
     """Why an output path must be refused, or None. Never lets a mod land on top of the input, under an update
     file's name, or on what looks like a camera card.
@@ -228,8 +234,8 @@ def _check_output(src: Path, out: Path, overwrite: bool) -> Optional[str]:
     A mod is an image, not an update file: it keeps the input's length and nothing has verified it. Named
     JH_*.bin in a card's root, only its byte sum would stand between it and a flash, and a 2 MiB one erases
     past the end of the chip, which wraps to block 1 and bricks the camera (REPORTED on hardware by the
-    film-mods author). So such a name is refused in any case, and so is a folder that holds DCIM or a
-    JH_*.bin, as pack refuses them.
+    film-mods author). So such a name is refused in any case, and also when it is the name Windows would
+    create (created_name), and so is a folder that holds DCIM or a JH_*.bin, as pack refuses them.
     """
     # stage imports verify, which imports frames, which imports this module: import it here, not at the top.
     from .stage import list_update_files, looks_like_update_file
@@ -247,7 +253,7 @@ def _check_output(src: Path, out: Path, overwrite: bool) -> Optional[str]:
         return "--out is the input file; write the mod to a new path and keep your backup untouched"
     if out.is_dir():
         return f"{out} is a directory; give a file name for --out"
-    if looks_like_update_file(out.name):
+    if looks_like_update_file(out.name) or looks_like_update_file(created_name(out.name)):
         return (f"{out.name} is named like an update file (JH_*.bin), the name a camera flashes from its card; a mod "
                 "is an image, not an update file: give --out another name, then build the update file with pack and check it with verify")
     if not out.parent.is_dir():
