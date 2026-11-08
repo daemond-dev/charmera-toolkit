@@ -40,21 +40,26 @@ public final class Candidates {
             Arrays.asList("BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV");
 
     /**
-     * The sensor-ID probe (Kind.PROBE): the stock restore file with a reviewed 172-byte patch in two windows, over the
+     * The sensor-ID probe (Kind.PROBE): the stock restore file with a reviewed 314-byte patch in two windows, over the
      * restore file's own bytes and nothing else, both inside the 0x1E0000 image. PROBE_HOOK, at PROBE_HOOK_OFFSET,
      * redirects the one call that writes the image sensor's set-up table so the patch runs first. PROBE_STUB, at
-     * PROBE_STUB_OFFSET, is that patch, written over a routine the firmware never calls: it reads the sensor's ID
-     * register over the sensor bus, writes the two bytes to C:\SENSOR.TXT on the card, then lets the set-up table be
-     * written and the camera stop as before. build() checks the result against Kind.PROBE's SHA-256, so a wrong offset
-     * or byte here cannot produce a file the app will use.
+     * PROBE_STUB_OFFSET, is that patch, written over a routine the firmware never calls: it walks the sensor bus across
+     * every device address (0x08..0x77) and, for each that answers, dumps a window of its ID registers (0x00..0x1F
+     * and 0xF0..0xFF), writes that to C:\SENSOR.TXT on the card, then lets the set-up table be written and the camera
+     * stop as before. It reuses the firmware's own bus read routine (device address taken from the driver context, one
+     * byte it rewrites per address and restores to 0x78 before resuming). build() checks the result against Kind.PROBE's
+     * SHA-256, so a wrong offset or byte here cannot produce a file the app will use.
      */
     static final int PROBE_HOOK_OFFSET = 0x7B898;
     static final int PROBE_STUB_OFFSET = 0x62120;
     static final byte[] PROBE_HOOK = hex("209affeb");
-    static final byte[] PROBE_STUB = hex("f04f2de908d04de20040a0e178509fe50500a0e1fd10a0e30020a0e3392effeb0500a0e10210a0e30d20a0e13f2effeb0500a0e1" +
-            "0310a0e302208de23b2effebb000dde1b210dde10400cde50510cde53c009fe534109fe58f0402eb000050e3050000ba0060a0e1" +
-            "04108de20220a0e3430502eb0600a0e12d0302eb08d08de20400a0e1f04fbde8b76400eaa483100002060000b81f0600433a5c53" +
-            "454e534f522e545854000000");
+    static final byte[] PROBE_STUB = hex("f04f2de9e0d04de20040a0e10c519fe504808de2a600a0e30100c8e40100a0e30100c8e40090a0e308a0a0e1018088e20860" +
+            "a0e38600a0e10900c5e50500a0e10010a0e30d20a0e1922effeb000050e31b0000ba040059e3190000aa0160c8e40070a0e3" +
+            "ff00a0e30000cde50500a0e10710a0e10d20a0e1862effeb0000dde50100c8e4017087e2200057e3f4ffffbaf070a0e3ff00" +
+            "a0e30000cde50500a0e10710a0e10d20a0e17a2effeb0000dde50100c8e4017087e2010c57e3f4ffffba019089e2016086e2" +
+            "780056e3d8ffffba0090cae57800a0e30900c5e50db048e004b04be23c009fe534109fe56a0402eb000050e3050000ba0060" +
+            "a0e104108de20b20a0e11e0502eb0600a0e1080302ebe0d08de20400a0e1f04fbde8926400eaa4831000020600004c200600" +
+            "433a5c53454e534f522e54585400");
 
     /**
      * What the app can make. RESTORE is the published stock restore file: the stock dump's first 0x1E0000 bytes, under
@@ -74,13 +79,15 @@ public final class Candidates {
                 + " likely cause is a sensor it does not drive.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906"),
         PROBE(true, "The sensor-ID probe: the stock restore file with a small reviewed patch. When the camera enters"
-                + " photo mode it reads the image sensor's identifier over the sensor bus, writes it to SENSOR.TXT at"
-                + " the root of the card, then stops as the camera does now. It does not fix the camera: it reports"
-                + " which sensor is fitted, so you can tell whether a firmware fix is even possible. Its boot code,"
-                + " update code and image-sensor table are the stock restore file's byte for byte; only a dead debug"
-                + " routine and the one call that writes the sensor set-up are changed. The stock restore file (above)"
-                + " puts the camera back.",
-                "JH_5408202611071200_0F065671.bin", "be19fb35d1ce1c17ffdb56c5cdaa0232c21dd6bd50e32359ee293c21a5a4650b"),
+                + " photo mode it walks the sensor bus across every address, writes which addresses answered and a"
+                + " window of each one's ID registers to SENSOR.TXT at the root of the card, then stops as the camera"
+                + " does now. It"
+                + " does not fix the camera: it reports whether any image sensor is on the bus and at which address, so"
+                + " you can tell a dead or disconnected sensor from one the firmware simply does not drive. Its boot"
+                + " code, update code and image-sensor table are the stock restore file's byte for byte; only a dead"
+                + " debug routine and the one call that writes the sensor set-up are changed. The stock restore file"
+                + " (above) puts the camera back.",
+                "JH_5408202611082100_0F065AEE.bin", "190a8d0fba3b3c6fa643692f9a86f69dbd53944436dcc523908a68b11ecd1dda"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),

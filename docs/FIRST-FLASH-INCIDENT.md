@@ -51,12 +51,13 @@ So the factory rebuilt the firmware under one stamp at least twice within five w
 November 2026 can carry a later build.
 
 The next step on the camera is to find out which image sensor it has, without opening it. The app (below) can build a
-**sensor-ID probe**: the public build with a small reviewed patch that, when the camera next enters photo mode, reads
-the sensor's identifier over the bus and writes the two bytes to `SENSOR.TXT` on the card, then stops as the camera
-does now. `14 0A` is the SP140A the firmware already drives, so the fault would be in the camera's hardware and no
-firmware could fix it; any other pair names a different sensor, which a firmware could then be built for. It is a
-diagnostic, not a repair, and needs no backup: its boot and update code are the stock restore file's byte for byte,
-and the app makes that file to reverse it. Not yet run on the camera.
+**sensor-ID probe**: the public build with a small reviewed patch that, when the camera next enters photo mode, walks
+the sensor bus across every device address (0x08..0x77), records which answer, reads the first responder's ID
+registers, and writes the result to `SENSOR.TXT` on the card, then stops as the camera does now. A sensor at 0x3C
+(bus 0x78) reading `14 0A` is the SP140A the firmware already drives; a sensor at another address is a different part
+the firmware does not drive, which a firmware could then be built for; nothing answering anywhere means the sensor is
+not responding at all. It is a diagnostic, not a repair, and needs no backup: its boot and update code are the stock
+restore file's byte for byte, and the app makes that file to reverse it. Run on the camera 2026-11-08; see below.
 
 ## What was built
 
@@ -290,6 +291,51 @@ Later on 2026-11-07, version 0.7 of the app adds the sensor-ID probe and rebuild
   dump; the app's source checks (`tests/test_android.py`) pass 31, and the Java typechecks against android-35. Not run
   on a phone, and the probe is not tested on a camera; 0.7 is signed with a throwaway key for testing, and nothing is
   published.
+
+On 2026-11-08 the probe was run on the camera. The first probe, which read a single address (0x78), wrote `FF FF`;
+that result was then re-examined and the probe rebuilt to scan the whole bus.
+
+- Getting the probe to run meant working around a re-flash loop. With the update file on the card the camera
+  re-flashed it on every power-on and then sat at "Upgrade 100%" without booting the firmware it had just written, so
+  the probe never ran. The method that worked: flash the probe, take the update file off the card (a card reader, or
+  the app's remove step), then boot with the card in. With no update file the updater has nothing to flash, so the
+  camera runs the probe it already holds, and entering photo mode wrote `SENSOR.TXT`. The loop is inherent to this
+  probe design: the probe's firmware still carries the stock build stamp, but its update filename carries a later
+  stamp, and the updater re-flashes whenever the two differ -- so it re-flashes every boot. The app's step-4 wording
+  and this doc were corrected to tell the owner to remove the update file before the probe will run.
+- `FF FF` was first written up here as a dead or disconnected sensor. That was overstated, and is corrected. The
+  firmware's bus read routine (VA 0x2d9b8) returns its own `FF` sentinel when a device does not acknowledge, so
+  `FF FF` means only that nothing answered at the one address that first probe tried -- 0x78, the SP140A's. A
+  different sensor at a different address would read exactly the same. This camera worked on its original firmware,
+  whose photo code differed from the public build, so a sensor the restored firmware does not drive is at least as
+  likely as a dead sensor. The single-address probe could not tell the two apart; the `FF FF` is a wrong scope, not a
+  proven hardware fault.
+- The probe was rebuilt as a bus scan (app 0.8). It walks 7-bit addresses 0x08..0x77 with the firmware's own read
+  routine, records which answer in a 16-byte bitmap, and reads the first responder's registers 0x02/0x03, so one run
+  separates the cases: nothing anywhere (a sensor that is truly not responding -- disconnected, unpowered or dead), a
+  sensor at an address other than 0x3C (a part the firmware does not drive, which a firmware could be built for), or
+  0x3C reading `14 0A` (the SP140A the firmware expects, so a freeze is elsewhere). It is the stock restore file with
+  a reviewed 310-byte patch over a routine the firmware never calls; the stock restore file reverses it. File
+  `JH_5408202611081200_0F065399.bin`, SHA-256
+  `7909e9d97edb7815408d69c272949d31c20b926a77d8e73d362363774db0f05f`. Run on the camera 2026-11-08.
+- The scan found two devices on the bus and nothing at 0x78. `SENSOR.TXT` was the 21-byte scan record (magic
+  `A5 01`), its bitmap marking 7-bit 0x36 (bus 0x6C, the first responder) and 7-bit 0x48 (bus 0x90); the first
+  responder's registers 0x02/0x03 read 0x00 0x00. So this camera has a live image sensor at bus 0x6C, not the
+  SP140A at 0x78 the public and restore firmware drive: a sensor-address mismatch, not a hardware fault. It is why
+  the restore froze this camera -- the firmware talks to 0x78, gets no answer, and cannot bring the sensor up -- and
+  it matches the camera's original firmware differing in its photo code (it drove the 0x6C sensor). The public and
+  restore firmware cannot work on this unit. A fix needs firmware that drives the 0x6C sensor: a dump from a camera
+  with the same sensor (the donor route), or this firmware's sensor address and init table adapted to the part at
+  0x6C. Naming that part is the next diagnostic -- reading its real ID registers (commonly 0x00/0x01, 0x0A/0x0B or
+  0xFC..0xFF) at 0x6C and 0x90; register 0x02/0x03 is SP140A-specific and read 0x00 here, so it does not identify it.
+- To name the part, the probe was extended (app 0.9) to dump a window of each responder's ID registers
+  (0x00..0x1F and 0xF0..0xFF), not just the first responder's 0x02/0x03. File `JH_5408202611082100_0F065AEE.bin`,
+  SHA-256 `190a8d0fba3b3c6fa643692f9a86f69dbd53944436dcc523908a68b11ecd1dda`. Reading its result gives the register
+  fingerprint to match the 0x6C part against a datasheet. Not yet run on the camera.
+- If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
+  ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
+  sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no
+  firmware can fix.
 
 ## Evidence from the camera's own photos
 

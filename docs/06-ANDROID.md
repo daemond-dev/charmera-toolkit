@@ -40,7 +40,7 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 [Charmera Card](../android/README.md) does the card part on the phone: it downloads the public stock dump, makes the
 published stock restore file from it and a sensor-ID probe (it builds nothing else), compares the restore file with your backup, writes it to
 the camera's card over the camera's USB-C cable, reads it back, and walks you through the flash and the cleanup. It
-writes nothing without a backup on record, except the sensor-ID probe (described below). That is version 0.7.
+writes nothing without a backup on record, except the sensor-ID probe (described below). That is version 0.9.
 Download [charmera-card.apk](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk)
 on the phone. Its screen is a column of cards: a yellow "Before you flash" notice ("No backup of this camera, no
 flash"), then numbered steps beginning with "Back up the camera". Version 0.4, published before it, had no backup step and did not refuse the withdrawn candidates C, A and B;
@@ -68,26 +68,33 @@ which sensor is fitted. It is a diagnostic, not a repair: it does not make the c
 
 The probe is the stock restore file with a small reviewed patch. Its boot code, update code and image-sensor table
 are the stock restore file's byte for byte; only a dead debug routine and the one call that writes the sensor set-up
-are changed. When the camera next enters photo mode, the patch reads the sensor's identifier over the sensor bus,
-writes the two bytes (product-ID high then low) to `SENSOR.TXT` in the card's root, then stops as the camera does
-now. Because it changes no boot or update code and the stock restore file puts it back, it is the one file the app
-writes without a backup in step 0.
+are changed. When the camera next enters photo mode, the patch walks the sensor bus across every device address
+(0x08..0x77) with the firmware's own read routine, records which addresses answer, and for each one dumps a window of its ID
+registers (0x00..0x1F and 0xF0..0xFF), writes the result to `SENSOR.TXT` in the card's root, then stops as the camera does now. Because it changes
+no boot or update code and the stock restore file puts it back, it is the one file the app writes without a backup in
+step 0.
 
-After flashing it and opening photo mode, bring the card back to the phone and tap **Read the sensor result from the
-card** (step 4). The two bytes read as:
+After flashing it, take the update file off the card first — otherwise the camera re-flashes it on every boot
+instead of running it — then boot the camera and open photo mode so the probe runs. Bring the card back to the phone
+and tap **Read the sensor result from the card** (step 4). The result reads as:
 
-- `14 0A` — the SP140A, the sensor the firmware already drives. The sensor is not the mismatch; the fault is in the
-  camera's hardware (power, clock or wiring to the sensor), which no firmware change can fix.
-- `FF FF` or `00 00` — the sensor did not answer, or the camera stopped before the read. No harm done; flash the
-  probe again and open photo mode before reading.
-- any other pair — a different sensor from the one the firmware drives. Now that it is named, building a firmware
-  that drives it becomes possible.
+- **A sensor at 0x3C (bus 0x78) with ID `14 0A`** — the SP140A the firmware already drives. The sensor is present and
+  correct, so a frozen camera is not a sensor mismatch; the cause is elsewhere (power, clock, or a fault past the ID
+  read).
+- **A sensor at some other address** — a different sensor from the one the firmware drives. It is alive, just not the
+  part this firmware targets: that is the fixable case, and the address plus the ID bytes are where a firmware that
+  drives it would start.
+- **Nothing answered at any address** — the sensor is not responding at all (disconnected, unpowered, or dead).
+  Reseat the sensor's ribbon and scan again; if it still answers nowhere, it is a hardware fault no firmware can fix.
+
+When a sensor answers, the probe also records a window of its ID registers (0x00..0x1F and 0xF0..0xFF). Those bytes
+name the exact part against a datasheet: the app shows them, and the `SENSOR.TXT` file holds them for a closer look.
 
 The app builds the probe deterministically and checks it against a fixed hash, so a wrong byte cannot produce a
 usable file. The exact artifact:
 
-- file name: `JH_5408202611071200_0F065671.bin`
-- SHA-256: `be19fb35d1ce1c17ffdb56c5cdaa0232c21dd6bd50e32359ee293c21a5a4650b`
+- file name: `JH_5408202611082100_0F065AEE.bin`
+- SHA-256: `190a8d0fba3b3c6fa643692f9a86f69dbd53944436dcc523908a68b11ecd1dda`
 
 To undo it, flash the stock restore file (`JH_5408202610261427_0F065D55.bin`), which the app also makes.
 

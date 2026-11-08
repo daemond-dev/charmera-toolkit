@@ -228,14 +228,21 @@ public class MainActivity extends Activity {
     private static final class Plain extends IOException {
         /** The technical part, shown under the plain words as "Detail:", or null. */
         final String detail;
+        /** The HTTP status code when the failure was an HTTP response, else 0. */
+        final int code;
 
         Plain(String message) {
-            this(message, null);
+            this(message, null, 0);
         }
 
         Plain(String message, String detail) {
+            this(message, detail, 0);
+        }
+
+        Plain(String message, String detail, int code) {
             super(message);
             this.detail = detail;
+            this.code = code;
         }
     }
 
@@ -301,7 +308,7 @@ public class MainActivity extends Activity {
         divider(s1);
         s1.addView(subTitle("Identify the image sensor"));
         s1.addView(body("Build the sensor-ID probe. It is a diagnostic, not a repair — it will not make the camera"
-                + " take pictures. When the camera next enters photo mode it writes the sensor's identifier to"
+                + " take pictures. When the camera next enters photo mode it scans the sensor bus and writes a result to"
                 + " SENSOR.TXT on the card, then stops as it does now. It is the one file that needs no backup. Read the"
                 + " result with " + q(READ_RESULT) + " in step 4."));
         probeButton = primary(MAKE_PROBE, v -> confirmMakeProbe());
@@ -353,9 +360,13 @@ public class MainActivity extends Activity {
                 + " file damaged and ignored it; nothing was erased. Remove the file (step 5) and write it again.");
         divider(s4);
         s4.addView(subTitle("Read the sensor result"));
-        s4.addView(body("Flashed the sensor-ID probe? Open photo mode (the camera stops there as before, but writes"
-                + " SENSOR.TXT first), switch it off, reconnect the card, tap " + q(CHOOSE) + " in step 2 if needed,"
-                + " then tap " + q(READ_RESULT) + "."));
+        s4.addView(body("Flashed the sensor-ID probe? While the update file is on the card the camera re-flashes it"
+                + " every boot instead of running it, so take the update file off the card first: remove it (step 5),"
+                + " or delete the JH_5408\u2026.bin file with a card reader. Put the card back in the camera and switch"
+                + " it on \u2014 with no update file it boots the probe instead of re-flashing. Open photo mode: the"
+                + " camera stops there as before, but scans the sensor bus and writes SENSOR.TXT first. Then switch it"
+                + " off, bring the card back, tap " + q(CHOOSE) + " in step 2 if needed, and tap " + q(READ_RESULT)
+                + "."));
         readResultButton = primary(READ_RESULT, v -> readSensorResult());
         s4.addView(readResultButton);
         sensorStatus = body("");
@@ -887,6 +898,7 @@ public class MainActivity extends Activity {
             String problem = null;
             int remoteCode = -1;
             String remoteName = null;
+            boolean noRelease = false;
             try {
                 byte[] bytes = fetch(UPDATE_APK_URL);
                 File f = new File(getCacheDir(), ApkProvider.NAME);
@@ -901,6 +913,12 @@ public class MainActivity extends Activity {
                     remoteCode = info.versionCode;
                     remoteName = info.versionName;
                 }
+            } catch (Plain e) {
+                if (e.code == 404) {
+                    noRelease = true;   // the release, or its APK, is not there: nothing has been published yet
+                } else {
+                    problem = cause(e, "the phone could not reach GitHub, or the download stopped");
+                }
             } catch (IOException e) {
                 problem = cause(e, "the phone could not reach GitHub, or the download stopped");
             } catch (RuntimeException e) {
@@ -909,11 +927,17 @@ public class MainActivity extends Activity {
             final String p = problem;
             final int rc = remoteCode;
             final String rn = remoteName;
+            final boolean nr = noRelease;
             ui.post(() -> {
                 if (gone()) {
                     return;
                 }
                 checkingUpdate = false;
+                if (nr) {
+                    setStatus(updateStatus, "No app update has been published yet, so there is nothing to install. This"
+                            + " button will find one once a release is published.");
+                    return;
+                }
                 if (p != null) {
                     setStatus(updateStatus, "Could not check for updates: " + sentence(p) + " Open the releases page to"
                             + " check by hand.");
@@ -1585,8 +1609,8 @@ public class MainActivity extends Activity {
                         + "It is the one file the app puts on the card without a backup in step 0, because it is built"
                         + " from the public build and the stock restore file (step 1) puts it back: its boot and update"
                         + " code are that file's, byte for byte.\n\n"
-                        + "After you flash it (steps 2 to 4) and open photo mode on the camera, it writes the image"
-                        + " sensor's identifier to SENSOR.TXT on the card and the camera stops as it does now. Read it"
+                        + "After you flash it (steps 2 to 4) and open photo mode on the camera, it scans the sensor"
+                        + " bus and writes a result to SENSOR.TXT on the card and the camera stops as it does now. Read it"
                         + " with " + q(READ_RESULT) + " in step 4.\n\n"
                         + "The app cannot prove the file fits your camera without a dump of its chip, which you do not"
                         + " have. The worst case is an empty result, not a damaged camera.")
@@ -1614,7 +1638,7 @@ public class MainActivity extends Activity {
         try {
             int code = c.getResponseCode();
             if (code != 200) {
-                throw new Plain(GITHUB_REFUSED, "GitHub answered " + code + ".");
+                throw new Plain(GITHUB_REFUSED, "GitHub answered " + code + ".", code);
             }
             return readAll(c.getInputStream());
         } finally {
@@ -2059,7 +2083,7 @@ public class MainActivity extends Activity {
                         + "Update file: " + name + "\n"
                         + (probe
                             ? "This is the sensor-ID probe, written without a backup (the one file the app allows"
-                            + " that). It reads the image sensor's identifier to SENSOR.TXT and does not fix the"
+                            + " that). It scans the sensor bus and writes a result to SENSOR.TXT; it does not fix the"
                             + " camera.\n"
                             : "Compared with this camera's backup: " + backupLine + "\n")
                         + "Card: " + (c.state.label == null ? "the chosen card" : c.state.label) + "\n\n"
@@ -2340,39 +2364,154 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** What SENSOR.TXT's two bytes mean, for the owner. */
+    /** What SENSOR.TXT means, for the owner: the bus-scan result the probe writes, or an older probe's two bytes. */
     private String decodeSensor(byte[] b) {
         if (b == null) {
             return "No SENSOR.TXT on the card yet.\n\nFlash the sensor-ID probe (steps 2 to 4), then open photo mode on"
                     + " the camera: it stops there as before, but writes the file first. Then bring the card back and"
                     + " tap " + q(READ_RESULT) + " again.";
         }
+        // Current probe: 0xA6 0x01, a responder count, then for each responder its 7-bit address and a window of ID
+        // registers (0x00..0x1F then 0xF0..0xFF, 48 bytes).
+        if (b.length >= 3 && (b[0] & 0xFF) == 0xA6 && (b[1] & 0xFF) == 0x01) {
+            return decodeFingerprint(b);
+        }
+        // Earlier scan probe: 0xA5 0x01, a 16-byte present-address bitmap (7-bit addresses), the first responder's
+        // address (0xFF = none), then its registers 0x02 and 0x03.
+        if (b.length >= 21 && (b[0] & 0xFF) == 0xA5 && (b[1] & 0xFF) == 0x01) {
+            return decodeScan(b);
+        }
+        // An older single-address probe wrote just two bytes; keep reading it so an old card still makes sense.
         if (b.length < 2) {
-            return "SENSOR.TXT holds " + b.length + (b.length == 1 ? " byte" : " bytes") + ", not the two the probe"
+            return "SENSOR.TXT holds " + b.length + (b.length == 1 ? " byte" : " bytes") + ", not a result the probe"
                     + " writes. The probe may not have finished. Flash it again, open photo mode, and read it again.";
         }
-        int hi = b[0] & 0xFF;
-        int lo = b[1] & 0xFF;
+        int hi = b[0] & 0xFF, lo = b[1] & 0xFF;
         String id = String.format(java.util.Locale.ROOT, "0x%02X 0x%02X", hi, lo);
-        // SENSOR.TXT should be exactly the two bytes the probe writes; anything longer was written by something else.
-        String caveat = b.length > 2 ? "\n\nNote: SENSOR.TXT is longer than the two bytes the probe writes, so it may"
-                + " be a different file. Remove it (step 5), flash the probe again, then read once more." : "";
-        // No answer: the sensor bus reads all-ones or all-zeros. Neither is a real sensor ID, so treat both as no read.
         if ((hi == 0xFF && lo == 0xFF) || (hi == 0x00 && lo == 0x00)) {
-            return "Sensor ID " + id + ": the sensor did not answer, or the camera stopped before the read. No harm"
-                    + " done. Flash the probe again and make sure you open photo mode before reading." + caveat;
+            return "Sensor ID " + id + ": nothing answered at the one address this older probe tried. Flash the current"
+                    + " probe, which scans every address and tells a wrong address apart from a sensor that is truly"
+                    + " silent.";
         }
-        // The SP140A reports 0x14 (product-ID high) then 0x0A (low). The probe writes high byte first, but accept
-        // either order so a reversed read still names it rather than falling through to "a different sensor".
         if ((hi == 0x14 && lo == 0x0A) || (hi == 0x0A && lo == 0x14)) {
-            return "Sensor ID " + id + ": the SP140A, the sensor the firmware already drives.\n\nSo the sensor is not"
-                    + " the mismatch. The fault is in the camera's hardware (power, clock or wiring to the sensor),"
-                    + " which no firmware change can fix. The way forward is a replacement sensor or camera, not"
-                    + " another flash." + caveat;
+            return "Sensor ID " + id + ": the SP140A, the sensor the firmware already drives.";
         }
-        return "Sensor ID " + id + ": a different sensor from the one the firmware drives. That is the useful result:"
-                + " now that the sensor is named, building a firmware that drives it becomes possible. Note this pair"
-                + " down." + caveat;
+        return "Sensor ID " + id + ": a different sensor from the one the firmware drives. Note this pair down.";
+    }
+
+    /** Decode the bus-scan SENSOR.TXT (see decodeSensor for the layout): which 7-bit addresses answered, and the
+     *  first responder's ID bytes, turned into plain words about dead-sensor versus wrong-sensor. */
+    private String decodeScan(byte[] b) {
+        java.util.List<Integer> hits = new java.util.ArrayList<>();
+        for (int a = 0; a < 128; a++) {
+            if ((b[2 + (a >> 3)] & (1 << (a & 7))) != 0) {
+                hits.add(a);
+            }
+        }
+        final int SP140A = 0x3C;   // 7-bit; bus write address 0x78
+        if (hits.isEmpty()) {
+            return "The probe scanned every address on the sensor bus and nothing answered.\n\nThat points to a sensor"
+                    + " that is not responding at all \u2014 disconnected, unpowered, or dead \u2014 not a wrong-sensor"
+                    + " mismatch. Open the camera, reseat the sensor's ribbon, and scan again. If it still answers"
+                    + " nowhere, the sensor or its wiring is a hardware fault no firmware can fix.";
+        }
+        StringBuilder list = new StringBuilder();
+        for (int i = 0; i < hits.size(); i++) {
+            int a = hits.get(i);
+            list.append(i == 0 ? "" : ", ")
+                .append(String.format(java.util.Locale.ROOT, "0x%02X (bus 0x%02X)", a, a << 1));
+        }
+        int r2 = b[19] & 0xFF, r3 = b[20] & 0xFF;
+        String idStr = String.format(java.util.Locale.ROOT, "0x%02X 0x%02X", r2, r3);
+        StringBuilder sb = new StringBuilder();
+        if (hits.contains(SP140A)) {
+            boolean idRead = (b[18] & 0xFF) == SP140A;
+            boolean match = idRead && r2 == 0x14 && r3 == 0x0A;
+            sb.append("A sensor answered at 0x3C (bus 0x78), the address the firmware drives");
+            if (idRead) {
+                sb.append(", and its ID reads ").append(idStr)
+                  .append(match ? " \u2014 the SP140A it expects." : ", not the SP140A's 14 0A.");
+            } else {
+                sb.append(".");
+            }
+            sb.append("\n\n").append(match
+                    ? "So the sensor is present and is the exact part the firmware expects. The freeze is not a sensor"
+                      + " mismatch \u2014 the cause is elsewhere (power, clock, or a fault past the ID read)."
+                    : "A sensor is present at the expected address, so this is not a missing or wrong-address sensor."
+                      + " If the ID is not 14 0A, note it down.");
+        } else {
+            int a = (b[18] & 0xFF) != 0xFF ? (b[18] & 0xFF) : hits.get(0);
+            sb.append("A sensor answered at ")
+              .append(String.format(java.util.Locale.ROOT, "0x%02X (bus 0x%02X)", a, a << 1))
+              .append(", not the 0x3C (bus 0x78) the firmware drives.\n\n")
+              .append("The camera has a different sensor than the restored firmware targets \u2014 it is alive, just at"
+                      + " another address. That is the fixable case: a firmware built for this sensor could work. The"
+                      + " first responder's registers 0x02/0x03 read ").append(idStr).append(". Note the address and"
+                      + " these bytes down.");
+        }
+        sb.append("\n\nAnswered at: ").append(list).append(".");
+        return sb.toString();
+    }
+
+    /** Decode the scan+fingerprint SENSOR.TXT (0xA6 0x01, a responder count, then for each responder its 7-bit
+     *  address and a window of ID registers: 0x00..0x1F then 0xF0..0xFF). Gives the same dead/mismatch/SP140A verdict
+     *  as the scan, then shows each responder's registers so the exact part can be named from a datasheet. */
+    private String decodeFingerprint(byte[] b) {
+        final int REC = 49;   // 1 address byte + 48 register bytes
+        int count = b[2] & 0xFF;
+        java.util.List<Integer> addrs = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            int off = 3 + i * REC;
+            if (off + REC > b.length) { count = i; break; }
+            addrs.add(b[off] & 0xFF);
+        }
+        final int SP140A = 0x3C;   // 7-bit; bus write address 0x78
+        if (addrs.isEmpty()) {
+            return "The probe scanned every address on the sensor bus and nothing answered.\n\nThat points to a sensor"
+                    + " that is not responding at all \u2014 disconnected, unpowered, or dead \u2014 not a wrong-sensor"
+                    + " mismatch. Reseat the sensor's ribbon and scan again; if it still answers nowhere, the sensor or"
+                    + " its wiring is a hardware fault no firmware can fix.";
+        }
+        StringBuilder sb = new StringBuilder();
+        int sp = addrs.indexOf(SP140A);
+        if (sp >= 0) {
+            int off = 3 + sp * REC;
+            int r2 = b[off + 1 + 0x02] & 0xFF, r3 = b[off + 1 + 0x03] & 0xFF;
+            boolean match = r2 == 0x14 && r3 == 0x0A;
+            sb.append("A sensor answered at 0x3C (bus 0x78), the address the firmware drives, and its registers"
+                    + " 0x02/0x03 read ").append(String.format(java.util.Locale.ROOT, "0x%02X 0x%02X", r2, r3))
+              .append(match ? " \u2014 the SP140A it expects.\n\n" : ", not the SP140A's 14 0A.\n\n")
+              .append(match
+                    ? "So the sensor is present and is the exact part the firmware expects; a freeze is not a sensor"
+                      + " mismatch."
+                    : "Something answers at the SP140A address but reports a different ID.");
+        } else {
+            int a = addrs.get(0);
+            sb.append("A sensor answered at ")
+              .append(String.format(java.util.Locale.ROOT, "0x%02X (bus 0x%02X)", a, a << 1))
+              .append(", not the 0x3C (bus 0x78) the firmware drives.\n\n")
+              .append("The camera has a different sensor than the restored firmware targets \u2014 it is alive, just at"
+                      + " another address. That is the fixable case: a firmware built for this sensor could work.");
+        }
+        sb.append("\n\nRegister fingerprint (send SENSOR.TXT so the exact part can be named):");
+        for (int i = 0; i < count; i++) {
+            int off = 3 + i * REC;
+            int a = b[off] & 0xFF;
+            sb.append("\n\n").append(String.format(java.util.Locale.ROOT, "0x%02X (bus 0x%02X)", a, a << 1))
+              .append("\n  00-1F: ").append(hexRange(b, off + 1, 32))
+              .append("\n  F0-FF: ").append(hexRange(b, off + 1 + 32, 16));
+        }
+        return sb.toString();
+    }
+
+    /** n register bytes from data[start] as space-separated hex, double-spaced every 8. */
+    private static String hexRange(byte[] data, int start, int n) {
+        StringBuilder h = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            h.append(i == 0 ? "" : (i % 8 == 0 ? "  " : " "))
+             .append(String.format(java.util.Locale.ROOT, "%02X", data[start + i] & 0xFF));
+        }
+        return h.toString();
     }
 
     // --- cleaning up --------------------------------------------------------------------------------------------
