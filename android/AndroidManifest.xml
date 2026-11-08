@@ -7,6 +7,9 @@
     <!-- Internet only to download the public stock dump from GitHub. The card is reached through Android's folder
          picker, which grants access to the one folder the user chooses, so no storage permission is needed. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- To install an in-app update (the "Check for updates" button). The app only ever installs its own newer build,
+         downloaded from its GitHub releases, and the user confirms every install in Android's own installer. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -33,5 +36,11 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
+        <!-- Serves the downloaded update APK to the system installer as a content:// URI; see ApkProvider. -->
+        <provider
+            android:name=".ApkProvider"
+            android:authorities="io.github.daemonddev.charmera.updates"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

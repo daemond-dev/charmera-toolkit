@@ -592,7 +592,7 @@ def test_build_runs_every_jvm_test_and_compiles_the_gate():
     build = BUILD.read_text(encoding="utf-8")
     step1 = build[build.index('echo "1/4'): build.index('echo "2/4')]
     for path in sorted(PKG.glob("*.java")):
-        if path.name != "MainActivity.java":
+        if path.name not in ("MainActivity.java", "ApkProvider.java"):   # Android-only classes, not JVM-testable
             assert f"src/io/github/daemonddev/charmera/{path.name}" in step1, path.name
     for path in sorted((REPO / "android" / "test").glob("*.java")):
         assert f"test/{path.name}" in step1, path.name

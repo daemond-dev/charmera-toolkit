@@ -1,3 +1,4 @@
 out/
 *.keystore
 *.jks
+!test.keystore

@@ -26,6 +26,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -70,6 +71,9 @@ public class MainActivity extends Activity {
     private static final String WRITE = "Write the update file to the card";
     private static final String EJECT = "Eject the drive (opens Android's storage settings)";
     private static final String REMOVE = CardState.REMOVE_BUTTON;
+    /** Where new versions of the app are published; the footer links to it. */
+    private static final String RELEASES_PAGE = "https://github.com/daemond-dev/charmera-toolkit/releases";
+    private static final String UPDATE_APK_URL = "https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk";
     private static final String OPEN_SETTINGS = "Open storage settings";
     /** fetch's failure when GitHub answered, but not with the file; the download's message tells it apart. */
     private static final String GITHUB_REFUSED = "GitHub did not send the file";
@@ -135,8 +139,10 @@ public class MainActivity extends Activity {
     private TextView backupStatus;
     private Button backupButton;
     private TextView fileStatus;
-    /** The technical part under fileStatus: the checks, sums and Android's error words. Hidden when empty. */
+    /** The technical part under fileStatus: the checks, sums and Android's error words. Behind a "Details" toggle. */
     private TextView fileDetail;
+    /** The "Details" toggle that shows or hides fileDetail; hidden when there is no detail. */
+    private TextView fileDetailToggle;
     private TextView saveStatus;
     private TextView cardStatus;
     private TextView writeStatus;
@@ -152,6 +158,9 @@ public class MainActivity extends Activity {
     private TextView sensorStatus;
     /** A read of SENSOR.TXT is running; it blocks a second read until it ends. */
     private volatile boolean readingSensor;
+    /** The footer's update readout, and whether a check for a newer version is running. */
+    private TextView updateStatus;
+    private volatile boolean checkingUpdate;
     /** The owner's dump of this camera's flash chip, once chosen and accepted; the update file is compared with it. */
     private byte[] backup;
     /**
@@ -202,7 +211,7 @@ public class MainActivity extends Activity {
 
     // Colours for the card layout, chosen in resolveTheme() from the phone's light/dark mode and the theme accent.
     private LinearLayout col;
-    private int accent, onAccent, windowBg, cardFill, cardStroke, disabledFill, disabledText, ripple, warnAccent, cautionFill, cautionStroke;
+    private int accent, onAccent, windowBg, cardFill, cardStroke, disabledFill, disabledText, ripple, warnAccent, cautionFill, cautionStroke, okColor, badColor;
 
     /** The card's tree as chosen, and what was found the last time it was looked at. */
     private static final class Card {
@@ -266,13 +275,16 @@ public class MainActivity extends Activity {
         downloadButton = primary(DOWNLOAD, v -> downloadDump(Candidates.Kind.RESTORE));
         s1.addView(downloadButton);
         TextView offline = body("Offline, or the file is already on the phone? Tap " + q(USE_FILE) + " and choose the"
-                + " stock dump or an update file. In a browser: " + Candidates.STOCK_DUMP_PAGE);
-        android.text.util.Linkify.addLinks(offline, android.text.util.Linkify.WEB_URLS);
+                + " stock dump or an update file.");
         s1.addView(offline);
+        s1.addView(linkText("Open the download page \u2197", Candidates.STOCK_DUMP_PAGE));
         s1.addView(button(USE_FILE, v -> pickFile()));
         fileStatus = body("");
         s1.addView(fileStatus);
         fileDetail = mono();
+        fileDetail.setVisibility(View.GONE);
+        fileDetailToggle = detailToggle(fileDetail, "Details");
+        s1.addView(fileDetailToggle);
         s1.addView(fileDetail);
         TextView slotNote = body("Using the phone's own SD slot on Android 11+? Save a copy, then copy it onto the card"
                 + " with the Files app (see step 2).");
@@ -372,6 +384,22 @@ public class MainActivity extends Activity {
                 + " Android may refuse a card the camera has used (it leaves a flag set on the card) and offer to"
                 + " format it; formatting erases everything, so copy your photos off first. On a computer, the toolkit"
                 + " can clear the flag without erasing. See docs/05-CARDS.md and docs/06-ANDROID.md.");
+
+        TextView footer = body("Charmera Card " + appVersion());
+        footer.setTextColor(disabledText);
+        footer.setPadding(dp(4), dp(10), dp(4), 0);
+        col.addView(footer);
+        TextView check = body("Check for updates");
+        check.setTextColor(accent);
+        check.setTypeface(Typeface.DEFAULT_BOLD);
+        check.setTextIsSelectable(false);
+        check.setPadding(dp(4), dp(4), dp(4), dp(2));
+        check.setOnClickListener(v -> checkForUpdate());
+        col.addView(check);
+        updateStatus = body("");
+        updateStatus.setPadding(dp(4), 0, dp(4), dp(2));
+        col.addView(updateStatus);
+        col.addView(linkText("Open the releases page \u2197", RELEASES_PAGE));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFitsSystemWindows(true);
@@ -582,6 +610,8 @@ public class MainActivity extends Activity {
             ripple = 0x40FFFFFF;
             cautionFill = 0xFF2A2109;
             cautionStroke = 0xFF4A3A12;
+            okColor = 0xFF6FD08C;
+            badColor = 0xFFE57373;
         } else {
             windowBg = 0xFFF3F3F4;
             cardFill = 0xFFFFFFFF;
@@ -591,6 +621,8 @@ public class MainActivity extends Activity {
             ripple = 0x22000000;
             cautionFill = 0xFFFFF7E6;
             cautionStroke = 0xFFF0DFA8;
+            okColor = 0xFF2E7D32;
+            badColor = 0xFFC62828;
         }
     }
 
@@ -791,8 +823,174 @@ public class MainActivity extends Activity {
         return b;
     }
 
+    /** A "label" toggle (collapsed to begin with) that shows or hides an existing, dynamically updated view. */
+    private TextView detailToggle(final View target, final String label) {
+        final TextView toggle = new TextView(this);
+        toggle.setTextColor(accent);
+        toggle.setTypeface(Typeface.DEFAULT_BOLD);
+        toggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        toggle.setPadding(0, dp(8), 0, dp(4));
+        toggle.setText("\u25b8 " + label);
+        toggle.setOnClickListener(v -> {
+            boolean show = target.getVisibility() == View.GONE;
+            target.setVisibility(show ? View.VISIBLE : View.GONE);
+            toggle.setText((show ? "\u25be " : "\u25b8 ") + label);
+        });
+        return toggle;
+    }
+
+    /** A tappable accent label that opens a URL in the browser, so the raw address need not clutter the screen. */
+    private TextView linkText(String label, final String url) {
+        TextView t = body(label);
+        t.setTextColor(accent);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextIsSelectable(false);
+        t.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (ActivityNotFoundException e) {
+                // no browser installed; nothing to open
+            }
+        });
+        return t;
+    }
+
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    /** The app's version name from the manifest, for the footer; empty if it cannot be read. */
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return "";
+        }
+    }
+
+    private int installedVersionCode() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return 0;
+        }
+    }
+
+    /** Download the published APK, compare its version with this one, and offer to install it when it is newer. */
+    private void checkForUpdate() {
+        if (busy() || dialog != null || checkingUpdate) {
+            return;
+        }
+        checkingUpdate = true;
+        setStatus(updateStatus, "Checking for a newer version\u2026");
+        NET.execute(() -> {
+            String problem = null;
+            int remoteCode = -1;
+            String remoteName = null;
+            try {
+                byte[] bytes = fetch(UPDATE_APK_URL);
+                File f = new File(getCacheDir(), ApkProvider.NAME);
+                try (FileOutputStream os = new FileOutputStream(f)) {
+                    os.write(bytes);
+                }
+                android.content.pm.PackageInfo info = getPackageManager().getPackageArchiveInfo(f.getPath(), 0);
+                if (info == null) {
+                    f.delete();
+                    problem = "the download is not a valid app file";
+                } else {
+                    remoteCode = info.versionCode;
+                    remoteName = info.versionName;
+                }
+            } catch (IOException e) {
+                problem = cause(e, "the phone could not reach GitHub, or the download stopped");
+            } catch (RuntimeException e) {
+                problem = cause(e, "the download failed");
+            }
+            final String p = problem;
+            final int rc = remoteCode;
+            final String rn = remoteName;
+            ui.post(() -> {
+                if (gone()) {
+                    return;
+                }
+                checkingUpdate = false;
+                if (p != null) {
+                    setStatus(updateStatus, "Could not check for updates: " + sentence(p) + " Open the releases page to"
+                            + " check by hand.");
+                    return;
+                }
+                if (rc > installedVersionCode()) {
+                    confirmInstall(rn);
+                } else {
+                    setStatus(updateStatus, "You're on the latest version (" + appVersion() + "). The published release"
+                            + " is " + rn + ".");
+                    new File(getCacheDir(), ApkProvider.NAME).delete();
+                }
+            });
+        });
+    }
+
+    /** Offer to install the update that checkForUpdate downloaded. */
+    private void confirmInstall(String remoteName) {
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Update available")
+                .setMessage("Version " + remoteName + " is available; you have " + appVersion() + ". The update is"
+                        + " downloaded. Tap Update to install it \u2014 Android will ask you to confirm.")
+                .setNegativeButton("Not now", null)
+                .setPositiveButton("Update", (di, w) -> installUpdate())
+                .create();
+        d.setOnDismissListener(di -> {
+            if (dialog == di) {
+                dialog = null;
+            }
+            if (!gone()) {
+                updateButtons();
+            }
+        });
+        dialog = d;
+        d.show();
+        updateButtons();
+    }
+
+    /** Hand the downloaded APK to Android's installer, first asking to allow app installs when that is not granted. */
+    private void installUpdate() {
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            AlertDialog d = new AlertDialog.Builder(this)
+                    .setTitle("Allow updates")
+                    .setMessage("To install updates, allow this app to install apps. Android will open its settings;"
+                            + " turn it on, come back, and tap Check for updates again.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Open settings", (di, w) -> {
+                        try {
+                            startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:" + getPackageName())));
+                        } catch (ActivityNotFoundException e) {
+                            setStatus(updateStatus, "Could not open the setting. Turn on \"install unknown apps\" for"
+                                    + " this app in Android settings, then tap Check for updates again.");
+                        }
+                    })
+                    .create();
+            d.setOnDismissListener(di -> {
+                if (dialog == di) {
+                    dialog = null;
+                }
+                if (!gone()) {
+                    updateButtons();
+                }
+            });
+            dialog = d;
+            d.show();
+            updateButtons();
+            return;
+        }
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(ApkProvider.uri(), ApkProvider.MIME);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (ActivityNotFoundException e) {
+            setStatus(updateStatus, "No installer is available. Open the releases page to install by hand.");
+        }
     }
 
     private void updateButtons() {
@@ -900,9 +1098,16 @@ public class MainActivity extends Activity {
     /** Step 1's readout: the plain summary, and under it the technical part (hidden when there is none). */
     private void showFile(String summary, String technical) {
         setStatus(fileStatus, summary == null ? "" : summary.trim());
+        showDetail(technical);
+    }
+
+    /** Fills step 1's detail block (hidden behind the Details toggle, collapsed on every new readout). */
+    private void showDetail(String technical) {
         boolean none = technical == null || technical.trim().isEmpty();
         fileDetail.setText(none ? "" : technical.trim());
-        fileDetail.setVisibility(none ? View.GONE : View.VISIBLE);
+        fileDetail.setVisibility(View.GONE);            // new content starts collapsed, behind the Details toggle
+        fileDetailToggle.setText("\u25b8 Details");
+        fileDetailToggle.setVisibility(none ? View.GONE : View.VISIBLE);
     }
 
     /** The "Detail:" block for step 1's readout, or null when there is no detail. */
@@ -929,6 +1134,17 @@ public class MainActivity extends Activity {
     /** Whether a checked file is the sensor-ID probe, by its reviewed SHA-256: the one file written without a backup. */
     private static boolean isProbe(UpdateCheck.Result result) {
         return result != null && Candidates.Kind.PROBE.sha256.equals(result.sha256);
+    }
+
+    /** How many WARN lines a checked file produced, for the one-line status in step 1. */
+    private static int warnCount(UpdateCheck.Result result) {
+        int n = 0;
+        for (UpdateCheck.Line l : result.lines) {
+            if (l.level == UpdateCheck.Level.WARN) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /** The first sentence of a message: up to and including the first full stop that ends a sentence. */
@@ -1131,23 +1347,37 @@ public class MainActivity extends Activity {
 
     /** Step 1's readout for a file that was checked: the verdict, where the file came from, and what to do next. */
     private void showChecked(UpdateCheck.Result result, String origin, boolean chosen) {
+        String state;
+        int color;
         String next;
         if (!result.ok) {
-            next = "";
+            state = "\u2717 Not OK to put on the card.";
+            color = badColor;
+            next = "Tap Details to see what failed.";
         } else if (isProbe(result)) {
-            next = "This is the sensor-ID probe, so it needs no backup in step 0. Connect the camera (step 2) and tap "
-                    + q(WRITE) + ". After it flashes, open photo mode on the camera, then read it with " + q(READ_RESULT)
-                    + " in step 4.";
+            state = "\u2713 Sensor-ID probe ready \u2014 no backup needed.";
+            color = okColor;
+            next = "Connect the camera (step 2) and tap " + q(WRITE) + ". After it flashes, open photo mode, then read"
+                    + " it with " + q(READ_RESULT) + " in step 4.";
         } else if (!result.compared) {
-            next = "Next: choose this camera's backup in step 0, so the app can compare the file with it. It does not"
-                    + " write to the card without that.";
+            state = "\u26a0 Needs this camera's backup first.";
+            color = warnAccent;
+            next = "Add it in step 0; the app compares the file with it before it will write.";
         } else {
+            int warns = warnCount(result);
+            state = "\u2713 OK to put on the card." + (warns == 0 ? ""
+                    : " " + warns + (warns == 1 ? " warning" : " warnings") + " \u2014 see Details.");
+            color = okColor;
             next = nextAfterFile(chosen);
         }
-        showFile(result.verdict() + "\n" + origin + "\n" + next,
-                "Detail: " + UpdateCheck.bytes(result.size) + ", SHA-256 " + result.sha256 + ".\n\nThe app's checks"
-                        + (result.compared ? ", compared with " + backupName : " (not compared with a backup)") + ":\n\n"
-                        + result.report());
+        SpannableString line = new SpannableString(state + "\n" + next);
+        line.setSpan(new StyleSpan(Typeface.BOLD), 0, state.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        line.setSpan(new android.text.style.ForegroundColorSpan(color), 0, state.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        fileStatus.setText(line);
+        showDetail(result.verdict() + "\n\n" + origin + "\n\nDetail: " + UpdateCheck.bytes(result.size) + ", SHA-256 "
+                + result.sha256 + ".\n\nThe app's checks"
+                + (result.compared ? ", compared with " + backupName : " (not compared with a backup)") + ":\n\n"
+                + result.report());
     }
 
     // --- the update file ----------------------------------------------------------------------------------------
