@@ -158,6 +158,14 @@ can destroy the chip or the SoC. Read all of this section first.
   for reading the chip and the pin 1 dot, tape, and a tray for the tiny parts.
 - This toolkit and Python 3.9 or newer.
 
+This toolkit drives the programmer with flashrom. If you would rather use an Adafruit Trinket M0 as the
+programmer, the third-party [charmera-film-mods](https://github.com/Hyperlite-Media/charmera-film-mods) project
+(MIT-licensed) publishes its own SPI flasher for the same Puya chip: a Trinket sketch (`trinket_spi_flash.ino`)
+and a Python driver (`flasher/charmera_flash.py`) that read and write it, saving the chip's previous contents
+first and verifying after, without flashrom. It is not part of this toolkit and is not tested here, and as
+published it is POSIX-only (it uses `termios` and `/dev/cu.usbmodem*`), so on Windows you would run it under WSL
+or port it to `pyserial`. The 3.3 V supply and clip-orientation cautions below apply to any programmer.
+
 ### Opening the camera
 
 From JP's teardown (REPORTED):
