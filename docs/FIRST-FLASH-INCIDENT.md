@@ -392,7 +392,29 @@ that result was then re-examined and the probe rebuilt to scan the whole bus.
   colour, whose failure signatures -- a Bayer maze vs a uniform tint -- are distinguishable in a single frame. 61-write
   table, 266-byte stub (region 360). File `JH_5408202611090012_0F06264B.bin`, SHA-256
   `855c234d9ddb9f15918c7b7b3473c3a5b9d956015fe90136fc94916b5ef78da3`. Same reviewed-patch model; the stock restore file
-  reverses it. Not yet run on the camera.
+  reverses it.
+- **0.12 ran, and it was a regression: every frame sheared into diagonal lines** (viewscreen unusable). Flashed
+  2026-11-09. The captures (6 JPEGs + 2 AVIs) are 1440x1080 horizontal stripes with a steady diagonal shear -- scene
+  content faintly present (a bright light smears into a band) but line addressing scrambled. A horizontal
+  line-length/stride break, not colour. Root cause, **confirmed against the OV9732 datasheet** (`OV9732_CSP5_DS_1.0`,
+  user-supplied): the OV5640-family bit convention is wrong for OV9732. `0x3820` is ORIENTATION (default 0x10) --
+  bit3=Mirror, bit2=Flip, **bit1=Horizontal binning, bit0=Vertical binning**; `0x3821` is FORMAT1 **sub-sample**
+  (bit[3:2]=hsub, bit[1:0]=vsub), *not* mirror. So 0.12's `0x3820=0x16` set the stray horizontal-binning bit and
+  `0x3821=0x06` set hsub2+vsub4 -- three decimators that halved the active pixels-per-line while the SoC stride stays
+  fixed at 1280, shearing the frame. (bit2=Flip did take effect and is geometry-neutral, which is why the scene survives
+  faintly.) The WB block is geometrically inert and not implicated.
+- A multi-source research pass (5 production OV9732 drivers + the OV9734 sibling datasheet), then the user's own OV9732
+  datasheet, pinned the correct 180-degree flip: **`0x3820=0x1C`** (0x10 baseline | Flip 0x04 | Mirror 0x08),
+  **`0x3821=0x00`** (leave unwritten), no companion window/HTS/VTS writes. Adversarial review flagged the remaining
+  unknown: a 180-degree array flip reorders even-by-even BGGR to RGGB, and the reference drivers hide this with a
+  host-side ISP re-align the Charmera's **fixed BGGR ISP cannot do** -- so `0x1C` is geometry-certain but colour-unverified
+  (possible R/B swap, strictly worse than 0.11's blue-deficiency if it swaps).
+- **0.13 reverts the flip** (removes 0.12's `0x3820`/`0x3821` writes -- bit-for-bit back to 0.11's clean, upside-down
+  geometry) **and keeps only the blue WB lift** (`0x5184=0x01,0x5185=0x50`, ~1.31x). Restores a usable image and isolates
+  the WB test in the guaranteed-BGGR pipeline. 59-write table, 260-byte stub. File `JH_5408202611090013_0F062781.bin`,
+  SHA-256 `37df9e6083e98d2e3682666be0f412e817a7cbb6f9f2523eb0ecef4b27a073d5`. The pinned flip (`0x3820=0x1C`) is deferred
+  to 0.14, tested alone, with a +/-1 ISP-offset (`0x3811`/`0x3813`) Bayer-phase compensation staged if R/B swaps. Not yet
+  run on the camera.
 - If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
   ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
   sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no
