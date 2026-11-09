@@ -372,7 +372,27 @@ that result was then re-examined and the probe rebuilt to scan the whole bus.
   validated statically and empirically, in the boot-to-photo path the bring-up runs in. File
   `JH_5408202611090011_0F062D96.bin`, SHA-256 `bf22fb31157661387233fdfa20c8467e2a0cc9274af7b47d048886d9119b1fcd`. The
   open risk is whether the OV9732's 1-lane MIPI output timing matches the camera's receiver (configured for the SP140A),
-  which can only be confirmed on the bench; the worst case is no picture, as now. Not yet run on the camera.
+  which can only be confirmed on the bench; the worst case is no picture, as now.
+- **The 0.11 bring-up ran, and the camera produced images -- the MIPI path locked on the first try.** Flashed
+  2026-11-09; the camera booted into both photo and video mode and wrote three 1440x1080 JPEGs and a 14 MB AVI
+  (DCIM/PICT000{0,1,2}.jpg, MOVI0003.avi) to the card -- real, recognisable scenes. The open MIPI-timing risk above is
+  resolved: the OV9732 streams and the SoC receives frames. Three faults remain, all downstream tuning, read off the
+  frames: (1) image rotated 180 degrees (lamps point up, person inverted) -- the OV9732 module is mounted rotated vs the
+  SP140A; (2) a yellow-green cast, measured as a *blue deficit* in the should-be-neutral bright regions (R~=G, B low by
+  1.2-1.5x, consistent across three different scenes), i.e. the SoC white balance is fixed for the SP140A spectral
+  response, not an auto-WB that would vary by scene; (3) exposure not adaptive (lamps blow out, shadows crush) because
+  the firmware's AE loop still writes SP140A exposure registers. SENSOR.TXT on the card was 101 bytes of 0xFF (erased
+  sectors) -- expected, since the bring-up is not the probe and writes no sensor file.
+- A second iteration was built (app 0.12, the same "Make the OV9732 bring-up" button; it replaces 0.11's reviewed
+  patch). It adds four writes to the start-up table before stream-on: `0x3820=0x16` and `0x3821=0x06` -- a 180-degree
+  flip with the Bayer order *preserved* (array bit1 + ISP bit2, the OmniVision convention across OV5640/OV5647; bit4
+  0x10 is the T20 baseline) -- and an explicit WB block `0x5180..0x5185` with blue digital gain ~1.31x
+  (`0x5184=0x01,0x5185=0x50`), R and G at 1.00, to lift the measured blue deficit from the sensor side (upstream of the
+  SoC's fixed WB). Exposure/AE is deliberately left for a later cycle, so this flash changes only orientation and
+  colour, whose failure signatures -- a Bayer maze vs a uniform tint -- are distinguishable in a single frame. 61-write
+  table, 266-byte stub (region 360). File `JH_5408202611090012_0F06264B.bin`, SHA-256
+  `855c234d9ddb9f15918c7b7b3473c3a5b9d956015fe90136fc94916b5ef78da3`. Same reviewed-patch model; the stock restore file
+  reverses it. Not yet run on the camera.
 - If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
   ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
   sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no

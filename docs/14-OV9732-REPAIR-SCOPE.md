@@ -109,11 +109,15 @@ Repurpose the dead read path (wrapper `0x2d850`) to read `0x300A`/`0x300B` and c
 
 ## Open risks / unverified (cannot be resolved from the binary alone)
 
-1. **MIPI D-PHY / timing** at engine `0xD0800000` — configured for the SP140A's MIPI bit rate; the OV9732's MIPI output timing must match, or the engine must be reconfigured. This is the **deepest unknown** and the most likely reason a first bring-up attempt fails to produce an image.
-2. **Module wiring** — that the installed OV9732 is the MIPI-output variant wired to the 10-pad flex (very likely, since the board/SP140A are MIPI, but a physical assumption).
-3. **MCLK** the SoC emits (~24 MHz likely; 25 MHz hinted by a descriptor field). OV9732 accepts 6–27 MHz, so almost certainly in range.
-4. **Bayer / CFA order** (OV9732 default BGGR) and the ISP's mirror/flip phase — must be tuned empirically.
-5. **Flash safety** — the restore path reverts to the **public** stock image, not a backup of this specific unit's flash. A true safety net means dumping this unit's own flash first.
+**Resolved by the 0.11 flash (2026-11-09):** the bring-up produced real frames — three 1440×1080 JPEGs and a 14 MB AVI — so risks 1, 2 and 3 below are **confirmed OK**: the OV9732 streams 1-lane MIPI, the SoC's capture/ISP/MJPEG path receives it unchanged, the module is wired to the flex, and the MCLK is in range. The "deepest unknown" did not bite.
+
+1. ~~**MIPI D-PHY / timing**~~ — **RESOLVED**: frames received on the first bring-up; the OV9732's MIPI timing matches the SP140A-configured receiver with no engine reconfiguration.
+2. ~~**Module wiring**~~ — **RESOLVED**: the installed OV9732 is the MIPI-output variant on the flex (it streams).
+3. ~~**MCLK**~~ — **RESOLVED**: the emitted clock drives the OV9732 fine.
+4. **Bayer / CFA order and mirror/flip phase** — being tuned empirically. The first frames came out **rotated 180°** (module mounted rotated vs the SP140A); 0.12 sets `0x3820=0x16`/`0x3821=0x06` to flip both axes with the Bayer order preserved (array bit1 + ISP bit2). The color was a smooth cast, not a Bayer maze, so the demosaic phase is likely already correct — the flip must not disturb it.
+5. **White balance** — the should-be-neutral bright regions measured **R≈G, B low by 1.2–1.5×** across three scenes: a consistent **blue deficit**, i.e. the SoC WB is fixed for the SP140A's spectral response (an auto-WB would vary by scene). 0.12 lifts blue ~1.31× in the OV9732's own digital-gain block (`0x5184/0x5185`), upstream of the SoC. May need a second pass, and a missing IR-cut filter on the donor module could cap how neutral it gets.
+6. **Exposure / AE** — not adaptive: bright scenes clip, dim ones crush, because the firmware's auto-exposure loop still writes **SP140A** exposure registers, not the OV9732's (`0x3500–0x3502`, `0x350A/0x350B`). Fixing this needs a second hook on the exposure/gain updater (~`0x7b340`) — deferred past 0.12.
+7. **Flash safety** — the restore path reverts to the **public** stock image, not a backup of this specific unit's flash. A true safety net means dumping this unit's own flash first.
 
 ---
 
