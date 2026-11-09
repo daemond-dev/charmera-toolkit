@@ -116,6 +116,18 @@ public final class WriteGateTest {
             tampered[200] ^= 1;
             expect("probe bytes changed after the check are refused",
                     refused(probeCheck, tampered, null, false, false, "changed"));
+            // The OV9732 bring-up is the second reviewed patch the gate lets through without a backup (same waiver).
+            byte[] bringup = Candidates.build(dump, Candidates.Kind.BRINGUP);
+            UpdateCheck.Result bringupCheck = UpdateCheck.check(Candidates.Kind.BRINGUP.fileName, bringup,
+                    UpdateCheck.PUBLIC_BUILD, null);
+            expect("the OV9732 bring-up goes to the card with no backup on record",
+                    WriteGate.refusal(bringupCheck, bringup, null, false, false) == null, null);
+            expect("the bring-up goes to the card with a backup on record too",
+                    WriteGate.refusal(bringupCheck, bringup, sha(dump), false, false) == null, null);
+            byte[] bringupTampered = bringup.clone();
+            bringupTampered[200] ^= 1;
+            expect("bring-up bytes changed after the check are refused",
+                    refused(bringupCheck, bringupTampered, null, false, false, "changed"));
             byte[] restore = Candidates.build(dump, Candidates.Kind.RESTORE);
             UpdateCheck.Result restoreCheck = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore,
                     UpdateCheck.PUBLIC_BUILD, null);

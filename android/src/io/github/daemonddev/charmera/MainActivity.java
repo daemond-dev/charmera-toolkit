@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private static final String BACKUP = "Choose this camera's backup";
     private static final String DOWNLOAD = "Download the stock restore file";
     private static final String MAKE_PROBE = "Make the sensor-ID probe";
+    private static final String MAKE_BRINGUP = "Make the OV9732 bring-up";
     private static final String READ_RESULT = "Read the sensor result from the card";
     private static final String USE_FILE = "Use a file on the phone";
     private static final String SAVE = "Save a copy to the phone";
@@ -154,6 +155,7 @@ public class MainActivity extends Activity {
     private TextView cleanStatus;
     private Button saveButton;
     private Button probeButton;
+    private Button bringupButton;
     private Button readResultButton;
     private TextView sensorStatus;
     /** A read of SENSOR.TXT is running; it blocks a second read until it ends. */
@@ -316,6 +318,19 @@ public class MainActivity extends Activity {
         expander(s1, "Why the probe needs no backup", "It changes no boot or update code and leaves the sensor table"
                 + " untouched — only a dead debug routine and one sensor-setup call are patched. The stock restore"
                 + " file reverses it.");
+        divider(s1);
+        s1.addView(subTitle("Try the OV9732 bring-up (experimental)"));
+        s1.addView(body("Once the probe has named the sensor as an OmniVision OV9732, build the bring-up. It drives that"
+                + " sensor in place of the SP140A the firmware expects — setting its 16-bit control address and writing"
+                + " a 1-lane MIPI start-up table — then lets the camera run, so you can try a picture. It may not give a"
+                + " clean image on the first try: the sensor's MIPI timing has to match the camera's receiver, which"
+                + " can only be confirmed on the bench. It cannot damage the camera, and the stock restore file puts it"
+                + " back. Like the probe, it needs no backup."));
+        bringupButton = primary(MAKE_BRINGUP, v -> confirmMakeBringup());
+        s1.addView(bringupButton);
+        expander(s1, "Why the bring-up needs no backup", "Like the sensor-ID probe, it changes no boot or update code"
+                + " and leaves the SP140A table in place — only a dead routine and the one sensor-setup call are"
+                + " patched — so a camera it does not suit is left as it is, and the stock restore file reverses it.");
 
         LinearLayout s2 = stepCard("2", "Connect the camera", null);
         s2.addView(caution("Plugging the cable into a switched-off camera turns it on, and it will flash any update file"
@@ -1028,6 +1043,7 @@ public class MainActivity extends Activity {
         cleanButton.setEnabled(idle && card != null && card.state.listed && !card.state.updateFiles.isEmpty());
         downloadButton.setEnabled(idle && !downloading);
         probeButton.setEnabled(idle && !downloading);
+        bringupButton.setEnabled(idle && !downloading);
         readResultButton.setEnabled(idle && !readingSensor && card != null && card.state.listed);
         backupButton.setEnabled(idle && !loadingBackup);
         saveButton.setEnabled(idle && fileOk);
@@ -1155,9 +1171,19 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    /** Whether a checked file is the sensor-ID probe, by its reviewed SHA-256: the one file written without a backup. */
+    /** Whether a checked file is the sensor-ID probe, by its reviewed SHA-256: a file written without a backup. */
     private static boolean isProbe(UpdateCheck.Result result) {
         return result != null && Candidates.Kind.PROBE.sha256.equals(result.sha256);
+    }
+
+    /** Whether a checked file is the OV9732 bring-up, by its reviewed SHA-256. */
+    private static boolean isBringup(UpdateCheck.Result result) {
+        return result != null && Candidates.Kind.BRINGUP.sha256.equals(result.sha256);
+    }
+
+    /** Whether a checked file is one of the reviewed patches (probe or bring-up): the files written without a backup. */
+    private static boolean isReviewedPatch(UpdateCheck.Result result) {
+        return result != null && Candidates.isReviewedPatch(result.sha256);
     }
 
     /** How many WARN lines a checked file produced, for the one-line status in step 1. */
@@ -1308,10 +1334,11 @@ public class MainActivity extends Activity {
             checking = false;
             return;
         }
-        // The probe is backup-independent; its check is never re-made against a backup. This keys on the applied
-        // check (fileCheck), which is set and cleared together with fileData on the UI thread, so a probe in fileData
-        // always has isProbe(fileCheck) true here (finding 7). Keep that lock-step if you change how file state is set.
-        if (isProbe(fileCheck)) {
+        // The reviewed patches (probe, bring-up) are backup-independent; their check is never re-made against a backup.
+        // This keys on the applied check (fileCheck), set and cleared together with fileData on the UI thread, so a
+        // patch in fileData always has isReviewedPatch(fileCheck) true here (finding 7). Keep that lock-step if you
+        // change how file state is set.
+        if (isReviewedPatch(fileCheck)) {
             checking = false;
             return;
         }
@@ -1356,11 +1383,11 @@ public class MainActivity extends Activity {
         fileName = name;
         fileOrigin = origin;
         fileChosen = chosen;
-        // The sensor-ID probe is backup-independent (WriteGate's one exemption): it is checked with no reference
-        // (buildRestore), so its check never needs re-checking against the backup on record, and must not be —
-        // comparing it with a backup it was never meant to match would fail its sensor-table line and refuse the one
-        // file that needs no backup. Apply the probe's check as it stands.
-        if (!isProbe(result) && !Objects.equals(result.referenceSha256, backupSha256)) {
+        // The reviewed patches (probe, bring-up) are backup-independent (WriteGate's exemption): each is checked with
+        // no reference (buildRestore), so its check never needs re-checking against the backup on record, and must not
+        // be — comparing it with a backup it was never meant to match would fail its sensor-table line and refuse a
+        // file that needs no backup. Apply the patch's check as it stands.
+        if (!isReviewedPatch(result) && !Objects.equals(result.referenceSha256, backupSha256)) {
             fileCheck = null;
             recheckFile();
             return;
@@ -1383,6 +1410,11 @@ public class MainActivity extends Activity {
             color = okColor;
             next = "Connect the camera (step 2) and tap " + q(WRITE) + ". After it flashes, open photo mode, then read"
                     + " it with " + q(READ_RESULT) + " in step 4.";
+        } else if (isBringup(result)) {
+            state = "\u2713 OV9732 bring-up ready \u2014 no backup needed.";
+            color = okColor;
+            next = "Connect the camera (step 2) and tap " + q(WRITE) + ". After it flashes, power the camera on and try"
+                    + " a photo, then take the card out and look at the JPEGs. The stock restore file puts it back.";
         } else if (!result.compared) {
             state = "\u26a0 Needs this camera's backup first.";
             color = warnAccent;
@@ -1616,6 +1648,39 @@ public class MainActivity extends Activity {
                         + " have. The worst case is an empty result, not a damaged camera.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Make it", (di, w) -> downloadDump(Candidates.Kind.PROBE))
+                .create();
+        d.setOnDismissListener(di -> {
+            if (dialog == di) {
+                dialog = null;
+            }
+            if (!gone()) {
+                updateButtons();
+            }
+        });
+        dialog = d;
+        d.show();
+        updateButtons();
+    }
+
+    /** Explain the OV9732 bring-up (a reviewed patch, written without a backup), then build it on the owner's go-ahead. */
+    private void confirmMakeBringup() {
+        if (busy() || dialog != null || downloading) {
+            return;
+        }
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Make the OV9732 bring-up?")
+                .setMessage("This is experimental. It drives the OmniVision OV9732 that is fitted, in place of the"
+                        + " SuperPix SP140A the firmware was built for, so the camera can try to take a picture.\n\n"
+                        + "Like the sensor-ID probe, it goes on the card without a backup in step 0, because it is built"
+                        + " from the public build and the stock restore file (step 1) puts it back: its boot and update"
+                        + " code are that file's, byte for byte, and the SP140A table is left in place.\n\n"
+                        + "After you flash it (steps 2 to 4), power the camera on and try a photo, then take the card out"
+                        + " and look at the JPEGs.\n\n"
+                        + "It may take no clean picture on the first try: the sensor's 1-lane MIPI timing has to match"
+                        + " what the camera's receiver expects, which can only be confirmed on the bench. It cannot"
+                        + " damage the camera; the worst case is no picture, as now.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Make it", (di, w) -> downloadDump(Candidates.Kind.BRINGUP))
                 .create();
         d.setOnDismissListener(di -> {
             if (dialog == di) {
@@ -2064,6 +2129,7 @@ public class MainActivity extends Activity {
         }
         final String name = check.cardName;
         final boolean probe = isProbe(check);
+        final boolean bringup = isBringup(check);
         final String backupLine = backupSha256 == null ? null
                 : backupName + ", SHA-256 " + backupSha256.substring(0, 16) + "…";
         CardState.Item same = c.state.sameFile(check);
@@ -2077,19 +2143,29 @@ public class MainActivity extends Activity {
             return;
         }
         AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle(probe ? "Write the sensor-ID probe to the card?" : "Write the update file to the card?")
+                .setTitle(probe ? "Write the sensor-ID probe to the card?"
+                        : bringup ? "Write the OV9732 bring-up to the card?"
+                        : "Write the update file to the card?")
                 .setMessage("The app copies the update file to the card's top folder. Nothing changes on the camera"
                         + " yet: it flashes the file the next time it switches on with this card in it.\n\n"
                         + "Update file: " + name + "\n"
                         + (probe
-                            ? "This is the sensor-ID probe, written without a backup (the one file the app allows"
-                            + " that). It scans the sensor bus and writes a result to SENSOR.TXT; it does not fix the"
-                            + " camera.\n"
+                            ? "This is the sensor-ID probe, written without a backup (one of the reviewed patches the"
+                            + " app allows that). It scans the sensor bus and writes a result to SENSOR.TXT; it does not"
+                            + " fix the camera.\n"
+                            : bringup
+                            ? "This is the OV9732 bring-up, written without a backup (one of the reviewed patches the app"
+                            + " allows that). It drives the fitted OV9732 in place of the SP140A set-up; it changes no"
+                            + " boot or update code, and the stock restore file reverses it.\n"
                             : "Compared with this camera's backup: " + backupLine + "\n")
                         + "Card: " + (c.state.label == null ? "the chosen card" : c.state.label) + "\n\n"
                         + (probe
                             ? "After it flashes, open photo mode on the camera, then read the result with "
                             + q(READ_RESULT) + " in step 4.\n\n"
+                            : bringup
+                            ? "After it flashes, power the camera on and try a photo, then take the card out and look at"
+                            + " the JPEGs. It may take no clean picture on the first try; the stock restore file puts it"
+                            + " back.\n\n"
                             : "The app cannot tell which camera a backup was read from: write only if that backup is a"
                             + " read of the camera this card goes into.\n\n")
                         + "Detail: " + UpdateCheck.bytes(check.size) + ", SHA-256 " + check.sha256 + ".")
@@ -2371,8 +2447,13 @@ public class MainActivity extends Activity {
                     + " the camera: it stops there as before, but writes the file first. Then bring the card back and"
                     + " tap " + q(READ_RESULT) + " again.";
         }
-        // Current probe: 0xA6 0x01, a responder count, then for each responder its 7-bit address and a window of ID
-        // registers (0x00..0x1F then 0xF0..0xFF, 48 bytes).
+        // Current probe (16-bit ID read): 0xA7 0x01, a responder count, then per responder its 7-bit address and two
+        // 16-bit register windows: 0x3000..0x301F (32 bytes) then 0x3100..0x310F (16 bytes).
+        if (b.length >= 3 && (b[0] & 0xFF) == 0xA7 && (b[1] & 0xFF) == 0x01) {
+            return decodeFingerprint16(b);
+        }
+        // Earlier 8-bit fingerprint probe: 0xA6 0x01, a responder count, then per responder its 7-bit address and a
+        // window of 8-bit registers (0x00..0x1F then 0xF0..0xFF, 48 bytes).
         if (b.length >= 3 && (b[0] & 0xFF) == 0xA6 && (b[1] & 0xFF) == 0x01) {
             return decodeFingerprint(b);
         }
@@ -2502,6 +2583,113 @@ public class MainActivity extends Activity {
               .append("\n  F0-FF: ").append(hexRange(b, off + 1 + 32, 16));
         }
         return sb.toString();
+    }
+
+    /** Decode the 16-bit ID-read SENSOR.TXT (0xA7 0x01, a responder count, then per responder its 7-bit address and
+     *  two 16-bit register windows: 0x3000..0x301F then 0x3100..0x310F). Reads the real chip-ID registers of a
+     *  16-bit-addressed sensor (OmniVision at 0x300A/0x300B/0x300C, SmartSens at 0x3107/0x3108) and names the part.
+     *  Absent registers read 0xFF here (the probe pre-fills 0xFF and the bus routine leaves it on a NACK), not 0x00. */
+    private String decodeFingerprint16(byte[] b) {
+        final int REC = 49;   // 1 address byte + 32 (0x3000..0x301F) + 16 (0x3100..0x310F)
+        int count = b[2] & 0xFF;
+        java.util.List<Integer> addrs = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            int off = 3 + i * REC;
+            if (off + REC > b.length) { count = i; break; }
+            addrs.add(b[off] & 0xFF);
+        }
+        if (addrs.isEmpty()) {
+            return "The probe scanned every address on the sensor bus and nothing answered.\n\nThat points to a sensor"
+                    + " that is not responding at all — disconnected, unpowered, or dead. Reseat the sensor's ribbon"
+                    + " and try again; if it still answers nowhere, it is a hardware fault no firmware can fix.";
+        }
+        final int SP140A = 0x3C;   // 7-bit; bus write address 0x78
+        StringBuilder sb = new StringBuilder();
+        if (addrs.indexOf(SP140A) >= 0) {
+            sb.append("A sensor answered at 0x3C (bus 0x78), the address the firmware drives.\n\n");
+        } else {
+            sb.append("A sensor answered at ").append(hexAddr(addrs.get(0)))
+              .append(", not the 0x3C (bus 0x78) the firmware drives — alive, just at another address.\n\n");
+        }
+        for (int i = 0; i < count; i++) {
+            int off = 3 + i * REC;
+            sb.append(hexAddr(b[off] & 0xFF)).append(": ").append(identify16(b, off)).append('\n');
+        }
+        sb.append("\nSend SENSOR.TXT so the fingerprint can be confirmed against a datasheet.");
+        sb.append("\n\nRegister fingerprint (16-bit reads; FF = no answer):");
+        for (int i = 0; i < count; i++) {
+            int off = 3 + i * REC;
+            sb.append("\n\n").append(hexAddr(b[off] & 0xFF))
+              .append("\n  3000-301F: ").append(hexRange(b, off + 1, 32))
+              .append("\n  3100-310F: ").append(hexRange(b, off + 1 + 32, 16));
+        }
+        return sb.toString();
+    }
+
+    /** Name the part at one responder from its 16-bit chip-ID registers, or explain why it could not be named. */
+    private static String identify16(byte[] b, int off) {
+        int w1 = off + 1;          // 0x3000..0x301F
+        int w2 = off + 1 + 32;     // 0x3100..0x310F
+        int r300A = b[w1 + 0x0A] & 0xFF, r300B = b[w1 + 0x0B] & 0xFF, r300C = b[w1 + 0x0C] & 0xFF;
+        int r3107 = b[w2 + 0x07] & 0xFF, r3108 = b[w2 + 0x08] & 0xFF;
+        int ov = -1;
+        if (r300A != 0x00 && r300A != 0xFF) {
+            ov = (r300A << 8) | r300B;                  // e.g. 0x2680, 0x5647
+        } else if (r300A == 0x00 && r300B != 0x00 && r300B != 0xFF) {
+            ov = (r300B << 8) | r300C;                  // OV8865-style: 0x300A reads 0x00
+        }
+        if (ov > 0) {
+            String known = ovName(ov);
+            return "OmniVision " + (known != null ? known
+                    : String.format(java.util.Locale.ROOT, "OV%04X (not in the app's list)", ov))
+                    + String.format(java.util.Locale.ROOT, "  [0x300A/B/C = %02X %02X %02X]", r300A, r300B, r300C);
+        }
+        if (r3107 != 0x00 && r3107 != 0xFF) {
+            return String.format(java.util.Locale.ROOT, "SmartSens SC%02X%02X  [0x3107/8 = %02X %02X]",
+                    r3107, r3108, r3107, r3108);
+        }
+        boolean allFF = true, all00 = true, allSame = true;
+        int first = b[w1] & 0xFF;
+        for (int k = 0; k < 48; k++) {
+            int v = b[w1 + k] & 0xFF;
+            if (v != 0xFF) allFF = false;
+            if (v != 0x00) all00 = false;
+            if (v != first) allSame = false;
+        }
+        if (allFF) {
+            return "no 16-bit register answered (all FF) — the part likely uses 8-bit register addresses; the probe"
+                    + " can be switched to an 8-bit ID read of 0x00..0x1F and 0xF0..0xFF.";
+        }
+        if (all00) {
+            return "answered, but the 16-bit ID registers all read 00 — the sensor's core may be held unclocked, or"
+                    + " its ID is at a register other than 0x300A/0x3107.";
+        }
+        if (allSame) {
+            return String.format(java.util.Locale.ROOT, "all registers read %02X — likely the wrong sub-address"
+                    + " width for this part.", first);
+        }
+        return "ID not recognized at 0x300A/0x300B (OmniVision) or 0x3107/0x3108 (SmartSens) — send the file.";
+    }
+
+    /** Known OmniVision chip IDs (0x300A/0x300B, or 0x300B/0x300C when 0x300A reads 0), small point-and-shoot parts. */
+    private static String ovName(int id) {
+        switch (id) {
+            case 0x2680: return "OV2680";
+            case 0x2685: return "OV2685";
+            case 0x2640: return "OV2640";
+            case 0x5640: return "OV5640";
+            case 0x5647: return "OV5647";
+            case 0x5648: return "OV5648";
+            case 0x8865: return "OV8865";
+            case 0x9732: return "OV9732";
+            case 0x7670: return "OV7670";
+            default: return null;
+        }
+    }
+
+    /** "0x36 (bus 0x6C)" for a 7-bit sensor address. */
+    private static String hexAddr(int a) {
+        return String.format(java.util.Locale.ROOT, "0x%02X (bus 0x%02X)", a, (a << 1) & 0xFF);
     }
 
     /** n register bytes from data[start] as space-separated hex, double-spaced every 8. */

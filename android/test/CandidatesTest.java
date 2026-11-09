@@ -53,9 +53,9 @@ public final class CandidatesTest {
         // Whether a 2 MiB file could be a backup is for UpdateCheck.backupProblem to say: step 0 may refuse it too.
         expect("a refused dump is not pointed to step 0", !refused(() -> Candidates.stockDump(junk), "step 0")
                 && !refused(() -> Candidates.stockDump(junk), "Choose this camera's backup"));
-        expect("the stock restore and the sensor-ID probe are offered, in that order", java.util.Arrays.equals(
-                Candidates.Kind.offeredKinds(),
-                new Candidates.Kind[]{Candidates.Kind.RESTORE, Candidates.Kind.PROBE}));
+        expect("the stock restore, the sensor-ID probe and the OV9732 bring-up are offered, in that order",
+                java.util.Arrays.equals(Candidates.Kind.offeredKinds(), new Candidates.Kind[]{Candidates.Kind.RESTORE,
+                        Candidates.Kind.PROBE, Candidates.Kind.BRINGUP}));
         byte[] restore0 = invokeTransform(img, Candidates.Kind.RESTORE);
         expect("the restore is the dump's first 0x1E0000 bytes, untouched",
                 java.util.Arrays.equals(restore0, java.util.Arrays.copyOf(img, UpdateCheck.UPDATE_SIZE)));
@@ -93,6 +93,15 @@ public final class CandidatesTest {
                     restoreWithBackup.compared && restoreWithBackup.referenceSha256 != null);
             expect("Candidates.isProbe keys on the exact probe bytes", Candidates.isProbe(probe7)
                     && !Candidates.isProbe(restore));
+            // The OV9732 bring-up is the second reviewed patch: like the probe it is checked with no reference, so a
+            // backup it was never meant to match cannot fail its sensor-table line and refuse it (finding 7).
+            byte[] bringup7 = Candidates.build(dump, Candidates.Kind.BRINGUP);
+            UpdateCheck.Result bringupWithBackup = Candidates.check(Candidates.Kind.BRINGUP.fileName, bringup7, dump);
+            expect("the bring-up is checked with no reference even when a backup is passed", bringupWithBackup.ok
+                    && !bringupWithBackup.compared && bringupWithBackup.referenceSha256 == null);
+            expect("isReviewedPatch covers both the probe and the bring-up, and nothing else",
+                    Candidates.isReviewedPatch(probe7) && Candidates.isReviewedPatch(bringup7)
+                    && !Candidates.isReviewedPatch(restore) && !Candidates.isProbe(bringup7));
             UpdateCheck.Marks mk = UpdateCheck.findMarks(dump);
             expect("the real dump's marks are found by content where the research put them", mk.complete()
                     && mk.stampOffset == 0x218C4 && "202505201029".equals(mk.stamp) && mk.buildOffset == 0x18964

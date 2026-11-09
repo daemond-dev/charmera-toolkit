@@ -40,26 +40,43 @@ public final class Candidates {
             Arrays.asList("BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV");
 
     /**
-     * The sensor-ID probe (Kind.PROBE): the stock restore file with a reviewed 314-byte patch in two windows, over the
+     * The sensor-ID probe (Kind.PROBE): the stock restore file with a reviewed 330-byte patch in two windows, over the
      * restore file's own bytes and nothing else, both inside the 0x1E0000 image. PROBE_HOOK, at PROBE_HOOK_OFFSET,
      * redirects the one call that writes the image sensor's set-up table so the patch runs first. PROBE_STUB, at
      * PROBE_STUB_OFFSET, is that patch, written over a routine the firmware never calls: it walks the sensor bus across
-     * every device address (0x08..0x77) and, for each that answers, dumps a window of its ID registers (0x00..0x1F
-     * and 0xF0..0xFF), writes that to C:\SENSOR.TXT on the card, then lets the set-up table be written and the camera
-     * stop as before. It reuses the firmware's own bus read routine (device address taken from the driver context, one
-     * byte it rewrites per address and restores to 0x78 before resuming). build() checks the result against Kind.PROBE's
+     * every device address (0x08..0x77) and, for each that answers, reads its 16-bit chip-ID windows (0x3000..0x301F
+     * and 0x3100..0x310F), writes them to C:\SENSOR.TXT on the card, then lets the set-up table be written and the camera
+     * stop as before. It reuses the firmware's own bus read routine (device address and register width taken from the
+     * driver context, the bytes it rewrites per read and restores before resuming). build() checks the result against Kind.PROBE's
      * SHA-256, so a wrong offset or byte here cannot produce a file the app will use.
      */
     static final int PROBE_HOOK_OFFSET = 0x7B898;
     static final int PROBE_STUB_OFFSET = 0x62120;
     static final byte[] PROBE_HOOK = hex("209affeb");
-    static final byte[] PROBE_STUB = hex("f04f2de9e0d04de20040a0e10c519fe504808de2a600a0e30100c8e40100a0e30100c8e40090a0e308a0a0e1018088e20860" +
-            "a0e38600a0e10900c5e50500a0e10010a0e30d20a0e1922effeb000050e31b0000ba040059e3190000aa0160c8e40070a0e3" +
-            "ff00a0e30000cde50500a0e10710a0e10d20a0e1862effeb0000dde50100c8e4017087e2200057e3f4ffffbaf070a0e3ff00" +
-            "a0e30000cde50500a0e10710a0e10d20a0e17a2effeb0000dde50100c8e4017087e2010c57e3f4ffffba019089e2016086e2" +
-            "780056e3d8ffffba0090cae57800a0e30900c5e50db048e004b04be23c009fe534109fe56a0402eb000050e3050000ba0060" +
-            "a0e104108de20b20a0e11e0502eb0600a0e1080302ebe0d08de20400a0e1f04fbde8926400eaa4831000020600004c200600" +
-            "433a5c53454e534f522e54585400");
+    static final byte[] PROBE_STUB = hex("f04f2de9e0d04de20040a0e11c519fe504808de2a700a0e30100c8e40100a0e30100c8e40090a0e308a0a0e1018088e20860" +
+            "a0e38600a0e10900c5e50500a0e10010a0e30d20a0e1922effeb000050e31f0000ba040059e31d0000aa0160c8e41000a0e3" +
+            "0700c5e50070a0e3ff00a0e30000cde50500a0e1031a87e30d20a0e1842effeb0000dde50100c8e4017087e2200057e3f4ff" +
+            "ffba0070a0e3ff00a0e30000cde50500a0e1311c87e30d20a0e1782effeb0000dde50100c8e4017087e2100057e3f4ffffba" +
+            "0800a0e30700c5e5019089e2016086e2780056e3d4ffffba0090cae57800a0e30900c5e50db048e004b04be23c009fe53410" +
+            "9fe5660402eb000050e3050000ba0060a0e104108de20b20a0e11a0502eb0600a0e1040302ebe0d08de20400a0e1f04fbde8" +
+            "8e6400eaa4831000020600005c200600433a5c53454e534f522e54585400");
+
+    /**
+     * The OV9732 bring-up (Kind.BRINGUP): the same patch shape as the sensor-ID probe — PROBE_HOOK at
+     * PROBE_HOOK_OFFSET redirects the one call that writes the image sensor's set-up table, over a routine the
+     * firmware never calls — but this stub drives the OmniVision OV9732 that is actually fitted instead of probing. It
+     * points a 16-bit control context at bus 0x6C and walks a 1-lane MIPI RAW10 1280x720 start-up table (from the
+     * Ingenic T31 ov9732.c driver) through the firmware's own sensor-write routine (VA 0x2d828), then returns so the
+     * capture pipeline runs. Boot code, update code and the SP140A set-up table are the stock restore file's byte for
+     * byte; only the one call and the dead routine change, so the stock restore file reverses it. build() checks the
+     * result against Kind.BRINGUP's SHA-256, so a wrong offset or byte here cannot produce a file the app will use.
+     */
+    static final byte[] BRINGUP_STUB = hex("f0412de934509fe534809fe50010d8e5ff0051e30600000a0100d8e5011480e10220d8e50500a0e1362effeb038088e2" +
+            "f5ffffea0000a0e3f041bde81eff2fe1681f0600721f06001100120000000010086c01030101000001000030071f3008" +
+            "ff30142230813c3084003600f636017236100c3611f0361235365822365922365a0237001f37011037020c3703073704" +
+            "3c37058137100c378258380f03380fce350131350a00350b103d82383d83a43d861f3d87034001e04006014007404800" +
+            "0048050048028448193048253248260848271d48215048235048373750000f57080657810057830f01000137030b3705" +
+            "51ff");
 
     /**
      * What the app can make. RESTORE is the published stock restore file: the stock dump's first 0x1E0000 bytes, under
@@ -79,15 +96,25 @@ public final class Candidates {
                 + " likely cause is a sensor it does not drive.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906"),
         PROBE(true, "The sensor-ID probe: the stock restore file with a small reviewed patch. When the camera enters"
-                + " photo mode it walks the sensor bus across every address, writes which addresses answered and a"
-                + " window of each one's ID registers to SENSOR.TXT at the root of the card, then stops as the camera"
-                + " does now. It"
-                + " does not fix the camera: it reports whether any image sensor is on the bus and at which address, so"
-                + " you can tell a dead or disconnected sensor from one the firmware simply does not drive. Its boot"
+                + " photo mode it walks the sensor bus, and for each address that answers it reads the 16-bit chip-ID"
+                + " registers (0x3000..0x301F and 0x3100..0x310F) and writes them to SENSOR.TXT at the root of the"
+                + " card, then stops as the camera does now. It"
+                + " does not fix the camera: it reports which image sensor is on the bus and at which address, so a"
+                + " wrong-sensor mismatch can be told apart and the exact part named. Its boot"
                 + " code, update code and image-sensor table are the stock restore file's byte for byte; only a dead"
                 + " debug routine and the one call that writes the sensor set-up are changed. The stock restore file"
                 + " (above) puts the camera back.",
-                "JH_5408202611082100_0F065AEE.bin", "190a8d0fba3b3c6fa643692f9a86f69dbd53944436dcc523908a68b11ecd1dda"),
+                "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b"),
+        BRINGUP(true, "The OV9732 bring-up (experimental): the stock restore file with a reviewed patch, the same shape"
+                + " as the sensor-ID probe, that drives the OmniVision OV9732 actually fitted instead of the SuperPix"
+                + " SP140A the firmware was built for. It points the control bus at the OV9732's 16-bit address (bus"
+                + " 0x6C) and writes a 1-lane MIPI start-up table for it through the firmware's own write routine, then"
+                + " lets the camera run. It changes no boot or update code and leaves the SP140A table in place; only a"
+                + " dead routine and the one sensor-setup call change, so the stock restore file (above) puts it back. It"
+                + " may not take a clean picture on the first try — the sensor's MIPI timing has to match what the"
+                + " camera's receiver expects — but it cannot damage the camera; the worst case is no picture, as"
+                + " now.",
+                "JH_5408202611090011_0F062D96.bin", "bf22fb31157661387233fdfa20c8467e2a0cc9274af7b47d048886d9119b1fcd"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
@@ -187,20 +214,36 @@ public final class Candidates {
         return out;
     }
 
-    /** Whether these exact bytes are the reviewed sensor-ID probe, by SHA-256: the one file written without a backup. */
+    /** Whether these exact bytes are the reviewed sensor-ID probe, by SHA-256: a file written without a backup. */
     public static boolean isProbe(byte[] data) {
         return Kind.PROBE.sha256.equals(UpdateCheck.sha256Hex(data, 0, data.length));
     }
 
     /**
+     * Whether these exact bytes are one of the reviewed patches the app writes without a backup — the sensor-ID probe
+     * or the OV9732 bring-up — by SHA-256. Both are built from the public build and reversed by the stock restore
+     * file: boot code, update code and the SP140A set-up table are the restore file's byte for byte, and only a dead
+     * routine and the one sensor-setup call are patched. So, like the probe, the bring-up is checked with no backup.
+     */
+    public static boolean isReviewedPatch(byte[] data) {
+        return isReviewedPatch(UpdateCheck.sha256Hex(data, 0, data.length));
+    }
+
+    /** As isReviewedPatch(byte[]), by the SHA-256 of the bytes that passed the check (for WriteGate). */
+    public static boolean isReviewedPatch(String sha256) {
+        return Kind.PROBE.sha256.equals(sha256) || Kind.BRINGUP.sha256.equals(sha256);
+    }
+
+    /**
      * UpdateCheck.check against the public build, with the one rule every file-entry path in the app shares: the
-     * sensor-ID probe is checked with no reference, whatever backup is passed. It is backup-independent (WriteGate's
-     * one exemption), so no path may compare it with a backup it was never meant to match — that would fail its
-     * sensor-table line and refuse the one file that needs no backup (finding 7). Every other file is checked against
-     * the reference given. The extra hash runs only when a reference is present (the common no-backup case is free).
+     * reviewed patches (the sensor-ID probe and the OV9732 bring-up) are checked with no reference, whatever backup is
+     * passed. They are backup-independent (WriteGate's exemption), so no path may compare one with a backup it was
+     * never meant to match — that would fail its sensor-table line and refuse a file that needs no backup (finding 7).
+     * Every other file is checked against the reference given. The extra hash runs only when a reference is present
+     * (the common no-backup case is free).
      */
     public static UpdateCheck.Result check(String name, byte[] data, byte[] reference) {
-        byte[] ref = reference != null && isProbe(data) ? null : reference;
+        byte[] ref = reference != null && isReviewedPatch(data) ? null : reference;
         return UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
     }
 
@@ -216,6 +259,12 @@ public final class Candidates {
             byte[] payload = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the restore file, with the probe patch
             System.arraycopy(PROBE_HOOK, 0, payload, PROBE_HOOK_OFFSET, PROBE_HOOK.length);
             System.arraycopy(PROBE_STUB, 0, payload, PROBE_STUB_OFFSET, PROBE_STUB.length);
+            return payload;
+        }
+        if (kind == Kind.BRINGUP) {
+            byte[] payload = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the restore file, with the bring-up patch
+            System.arraycopy(PROBE_HOOK, 0, payload, PROBE_HOOK_OFFSET, PROBE_HOOK.length);   // same hook as the probe
+            System.arraycopy(BRINGUP_STUB, 0, payload, PROBE_STUB_OFFSET, BRINGUP_STUB.length);
             return payload;
         }
         byte[] image = dump.clone();

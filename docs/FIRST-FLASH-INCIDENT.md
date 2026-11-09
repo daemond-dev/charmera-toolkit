@@ -328,10 +328,51 @@ that result was then re-examined and the probe rebuilt to scan the whole bus.
   with the same sensor (the donor route), or this firmware's sensor address and init table adapted to the part at
   0x6C. Naming that part is the next diagnostic -- reading its real ID registers (commonly 0x00/0x01, 0x0A/0x0B or
   0xFC..0xFF) at 0x6C and 0x90; register 0x02/0x03 is SP140A-specific and read 0x00 here, so it does not identify it.
-- To name the part, the probe was extended (app 0.9) to dump a window of each responder's ID registers
+- To name the part, the probe was extended (app 0.9) to dump a window of each responder's 8-bit ID registers
   (0x00..0x1F and 0xF0..0xFF), not just the first responder's 0x02/0x03. File `JH_5408202611082100_0F065AEE.bin`,
-  SHA-256 `190a8d0fba3b3c6fa643692f9a86f69dbd53944436dcc523908a68b11ecd1dda`. Reading its result gives the register
-  fingerprint to match the 0x6C part against a datasheet. Not yet run on the camera.
+  SHA-256 `190a8d0fba3b3c6fa643692f9a86f69dbd53944436dcc523908a68b11ecd1dda`. Run on the camera 2026-11-08.
+- The 0.9 result was all zeros: both responders (0x36 and 0x48) answered, but every one of their 48 ID-register
+  bytes read 0x00. That is not a dead read -- the probe pre-fills 0xFF and only overwrites on a successful read, so
+  0x00 means each read ACKed and returned 0. Disassembly of the probe's store path (it reads the byte back from the
+  buffer the bus routine fills, not the routine's status) and of the bus read routine, cross-checked by adversarial
+  review, ruled out a probe bug: the zeros are real wire data. The cause is the register-address width. Bus 0x6C
+  (7-bit 0x36) is the canonical OmniVision/SmartSens camera address, and those sensors use 16-bit register
+  sub-addresses with their chip ID in the 0x30xx block; the firmware (built for the SP140A, an 8-bit part) sends one
+  sub-address byte, which the sensor ACKs (SCCB's 9th bit is don't-care) but which never reaches the real ID
+  registers, so the 8-bit-addressable space reads 0x00. The 0xF0/0xF1 window the probe also read -- where the one
+  common 8-bit family, GalaxyCore, keeps its ID -- was 0x00 too, which rules out a correctly-read 8-bit part.
+- The probe was rebuilt to read at 16-bit sub-addressing (app 0.10). The scan stays at 8-bit (so it still enumerates
+  both responders as 0.8/0.9 did); only the per-responder reads switch to 16-bit, covering the chip-ID windows
+  0x3000..0x301F (OmniVision 0x300A/0x300B/0x300C) and 0x3100..0x310F (SmartSens 0x3107/0x3108), and restoring the
+  width afterward. The app names the part from those bytes -- OV2680, the 2 MP OmniVision at bus 0x6C, is the leading
+  candidate; OV5647/5648/8865 and the SmartSens SC-series are covered. It is the stock restore file with a reviewed
+  330-byte patch over the routine the firmware never calls; the stock restore file reverses it, and the change was
+  verified against the proven-good 0.9 stub and by adversarial review before release. File
+  `JH_5408202611082300_0F065C4D.bin`, SHA-256
+  `6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b`. Run on the camera 2026-11-08.
+- The 0.10 result named the sensor. Both responders (0x36 / bus 0x6C and 0x48 / bus 0x90) answered, and each returned
+  chip-ID registers 0x300A=0x97, 0x300B=0x32 at 16-bit sub-addressing -- `0x9732`, the OmniVision **OV9732** (1 MP,
+  1280x720, 1-lane MIPI, 10-bit RAW), not the OV2680 that had been the leading guess. The 0x48 responder returned the
+  same fingerprint and is almost certainly the one OV9732 aliased to a second address, not a second sensor. Confirmed
+  against the Ingenic/Dafang OV9732 driver's detect routine (reads 0x300A/0x300B, expects 0x97/0x32) and an independent
+  OpenIPC trace. So the fitted sensor (OV9732, 16-bit registers, bus 0x6C) differs from the one the firmware drives
+  (SuperPix SP140A, 8-bit registers, bus 0x78): a same-class part at a different address and register width. See
+  [14-OV9732-REPAIR-SCOPE.md](14-OV9732-REPAIR-SCOPE.md).
+- A first repair was built (app 0.11, "Make the OV9732 bring-up"). It is the same patch shape as the probe -- the hook
+  over the dead routine, the SP140A table left in place -- but the stub points a 16-bit control context at bus 0x6C and
+  walks a 1-lane MIPI RAW10 1280x720 OV9732 start-up table (from the Ingenic T31 ov9732.c driver, 53 writes) through the
+  firmware's own write routine (0x2d828), then returns so the capture pipeline runs. It is a reviewed patch written
+  without a backup, like the probe, and the stock restore file reverses it. Verified by disassembly (the write wrapper
+  0x2d828 and primitive 0x2d6bc preserve the ctx and table-pointer registers across every write; the bus-grab 0x2d784
+  touches neither), by the in-JVM candidate tests against the real dump, and by adversarial review. That review also
+  checked placement: the patched region (VA 0x61F20, the same one the 0.10 probe used) is not blank padding but an
+  unreferenced SSV WiFi-logging routine (the camera has no WiFi). No branch or pointer anywhere in the 2 MB image
+  targets it, so it is unreachable; and the 0.10 probe already overwrote this exact region (a superset, 330 bytes to
+  the bring-up's 242) and ran -- the camera booted, entered photo mode and wrote SENSOR.TXT -- so overwriting it is
+  validated statically and empirically, in the boot-to-photo path the bring-up runs in. File
+  `JH_5408202611090011_0F062D96.bin`, SHA-256 `bf22fb31157661387233fdfa20c8467e2a0cc9274af7b47d048886d9119b1fcd`. The
+  open risk is whether the OV9732's 1-lane MIPI output timing matches the camera's receiver (configured for the SP140A),
+  which can only be confirmed on the bench; the worst case is no picture, as now. Not yet run on the camera.
 - If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
   ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
   sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no
