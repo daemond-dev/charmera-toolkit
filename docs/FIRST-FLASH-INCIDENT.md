@@ -421,7 +421,17 @@ that result was then re-examined and the probe rebuilt to scan the whole bus.
   reorders BGGR->RGGB and the fixed ISP cannot re-align, so colours may come back R/B-swapped -- if so, the next version
   adds the `+/-1` ISP-offset re-phase (`0x3811`/`0x3813`) or moves the blue gain to the swapped channel. 60-write table,
   263-byte stub. File `JH_5408202611090014_0F0626B3.bin`, SHA-256
-  `6f96b7548736db93921962d02be5ec762b503b5a01bd12bfcabf62e5807b0fc0`. Not yet run on the camera.
+  `6f96b7548736db93921962d02be5ec762b503b5a01bd12bfcabf62e5807b0fc0`.
+- **0.14 ran, and it works -- the repair's core is done.** Flashed 2026-11-09. The user confirms the image is now
+  right-side up (the flip corrected orientation), and a controlled test against a color-bar target shown on the phone
+  (at reduced brightness) shows **no R/B swap**: the blue bar reads pure blue `(0,0,235)` and red reads R-dominant
+  across three frames, so the 180-degree flip **preserved** the Bayer order on the fixed ISP -- the flagged RGGB-swap
+  risk did NOT materialize. Exposure was 1-5% blown with the dimmed target (vs 19-29% at max brightness on 0.13), so the
+  fixed exposure is fine in controlled light. Remaining polish, not blockers: (1) colours are correct in hue but
+  somewhat DESATURATED -- red `(255,158,131)` and green `(174,239,217)` read washed while blue is clean -- a
+  saturation/CCM refinement, partly exaggerated by photographing an emissive screen; (2) the AE is still non-adaptive,
+  so uncontrolled bright scenes blow out. After four firmware iterations the OV9732 drives correctly: upright, correct
+  colours, well-exposed in controlled light.
 - If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
   ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
   sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no
