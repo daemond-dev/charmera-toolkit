@@ -36,12 +36,14 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
-        <!-- Full-screen reference target to photograph on each firmware iteration (CalibrationActivity). Landscape to
-             match the camera's landscape frame; no action bar so the card fills the screen; brightness is tunable. -->
+        <!-- Full-screen reference target to photograph on each firmware iteration (CalibrationActivity).
+             reverseLandscape so the phone can sit flipped 180° (easier to prop against the camera) and still shoot
+             upright; matches the camera's landscape frame. No action bar so the card fills the screen; brightness is
+             tunable and stamped into the frame. -->
         <activity
             android:name=".CalibrationActivity"
             android:exported="false"
-            android:screenOrientation="landscape"
+            android:screenOrientation="reverseLandscape"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
         <!-- Serves the downloaded update APK to the system installer as a content:// URI; see ApkProvider. -->
         <provider

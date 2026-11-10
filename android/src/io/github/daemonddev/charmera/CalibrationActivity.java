@@ -11,11 +11,9 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -27,11 +25,19 @@ import android.widget.TextView;
  * black-to-white ramp (exposure), and a large "F" with a TOP arrow (orientation — an "F" is asymmetric under both flip
  * and mirror).
  *
+ * <p>The activity is pinned to {@code reverseLandscape} in the manifest so the phone can be set down flipped 180°
+ * (easier to prop against the camera) and still photograph upright.
+ *
  * <p>Brightness is deliberately NOT forced to maximum: the camera's exposure is fixed/non-adaptive, so a full-brightness
  * screen in a dark room overexposes the shot (measured 19-29% clipped pure white, washing out the colours). It starts
  * at a moderate level and the owner tunes it with the slider to suit the camera's fixed exposure — set it low enough
- * that the white patch does not clip, then keep it the same for every shot. The level is remembered. A phone screen is
- * not a colour-calibrated reference, but at a fixed brightness it is a consistent one, which is what comparison needs.
+ * that the white patch does not clip, then keep it the same for every shot. The chosen level is remembered AND printed
+ * onto the card itself (inside the camera frame), so every capture records the brightness it was shot at and two shots
+ * taken at different levels can never be mixed up. A phone screen is not a colour-calibrated reference, but at a fixed
+ * brightness it is a consistent one, which is what comparison needs.
+ *
+ * <p>The controls (brightness readout, slider, Done) sit in their own reserved strip that is always on screen; only the
+ * instruction text collapses, via the {@code ⓘ} button.
  */
 public final class CalibrationActivity extends Activity {
 
@@ -39,6 +45,8 @@ public final class CalibrationActivity extends Activity {
     private static final String KEY_BRIGHTNESS = "brightness";
     private static final float DEFAULT_BRIGHTNESS = 0.45f;   // moderate — max overexposes the fixed-exposure camera
     private static final float MIN_BRIGHTNESS = 0.05f;        // never 0 (0 means "use system brightness", not black)
+
+    private CalibrationView card;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -49,39 +57,20 @@ public final class CalibrationActivity extends Activity {
         float start = prefs.getFloat(KEY_BRIGHTNESS, DEFAULT_BRIGHTNESS);
         applyBrightness(start);
 
-        FrameLayout root = new FrameLayout(this);
-        final CalibrationView card = new CalibrationView(this);
-        root.addView(card, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // Vertical stack: the card fills all space above a reserved, always-visible controls strip (no overlap).
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
 
-        final LinearLayout panel = buildControls(prefs, start);
-        root.addView(panel, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
+        card = new CalibrationView(this);
+        card.setBrightnessPct(Math.round(start * 100));
+        root.addView(card, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        // An always-reachable exit: the system nav bar is hidden in immersive mode, so provide an explicit Done button
-        // rather than relying on the back gesture (which also collides with the slider at the bottom edge).
-        int m = Math.round(12 * getResources().getDisplayMetrics().density);
-        final TextView done = new TextView(this);
-        done.setText("✕  Done");
-        done.setTextColor(Color.WHITE);
-        done.setTypeface(Typeface.DEFAULT_BOLD);
-        done.setBackgroundColor(0xCC000000);
-        done.setPadding(m, m, m, m);
-        done.setOnClickListener(v -> finish());
-        FrameLayout.LayoutParams dlp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
-        dlp.setMargins(m, m, 0, 0);
-        root.addView(done, dlp);
-
-        // Tapping the card hides/shows the controls and the Done button, so the target can be shot clean.
-        card.onTap = () -> {
-            int vis = panel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE;
-            panel.setVisibility(vis);
-            done.setVisibility(vis);
-        };
+        root.addView(buildControls(prefs, start), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         setContentView(root);
-        card.setSystemUiVisibility(
+        root.setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -99,34 +88,66 @@ public final class CalibrationActivity extends Activity {
     private LinearLayout buildControls(final SharedPreferences prefs, float start) {
         int pad = Math.round(16 * getResources().getDisplayMetrics().density);
         int startPct = Math.round(start * 100);
+
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(0xCC000000);
-        // Extra bottom padding lifts the slider clear of the phone's bottom gesture-nav / back-swipe zone.
-        panel.setPadding(pad, pad, pad, pad * 3);
+        panel.setPadding(pad, pad, pad, pad);
 
-        TextView instr = new TextView(this);
+        // Instruction text — the ONLY element that hides (toggled by the ⓘ button below).
+        final TextView instr = new TextView(this);
         instr.setTextColor(Color.WHITE);
-        instr.setText("Photograph this each flash — dark room, auto-brightness and night-light off, fill the frame.\n"
-                + "Set brightness low enough that the white patch doesn't clip, then keep it there. Tap the card to"
-                + " hide these controls.");
+        instr.setText("Photograph this each flash — dark room, auto-brightness and night-light off, fill the frame with"
+                + " the card. Set brightness low enough that the white patch doesn't clip, then keep it there for every"
+                + " shot. The level is printed on the card, so each photo records the brightness it was taken at.");
+        instr.setPadding(0, 0, 0, pad);
         panel.addView(instr);
+
+        // Always-visible control row: Done | brightness readout | slider | instructions toggle.
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        final TextView done = new TextView(this);
+        done.setText("✕ Done");
+        done.setTextColor(Color.WHITE);
+        done.setTypeface(Typeface.DEFAULT_BOLD);
+        done.setPadding(0, 0, pad, 0);
+        done.setOnClickListener(v -> finish());
+        row.addView(done);
 
         final TextView label = new TextView(this);
         label.setTextColor(Color.WHITE);
         label.setTypeface(Typeface.DEFAULT_BOLD);
-        label.setPadding(0, pad, 0, 0);
-        label.setText("Screen brightness: " + startPct + "%");
-        panel.addView(label);
+        label.setText("Brightness: " + startPct + "%");
+        label.setPadding(0, 0, pad, 0);
+        row.addView(label);
 
         final SeekBar bar = new SeekBar(this);
         bar.setMax(100);
         bar.setProgress(startPct);
+        row.addView(bar, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        final TextView toggle = new TextView(this);
+        toggle.setText("ⓘ Hide");
+        toggle.setTextColor(0xFFFFD400);
+        toggle.setTypeface(Typeface.DEFAULT_BOLD);
+        toggle.setPadding(pad, 0, 0, 0);
+        toggle.setOnClickListener(v -> {
+            boolean show = instr.getVisibility() != View.VISIBLE;
+            instr.setVisibility(show ? View.VISIBLE : View.GONE);
+            toggle.setText(show ? "ⓘ Hide" : "ⓘ Help");
+        });
+        row.addView(toggle);
+
+        panel.addView(row);
+
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
                 applyBrightness(progress / 100f);
-                label.setText("Screen brightness: " + progress + "%");
+                label.setText("Brightness: " + progress + "%");
+                card.setBrightnessPct(progress);   // keep the in-frame stamp in sync
             }
 
             @Override
@@ -138,36 +159,25 @@ public final class CalibrationActivity extends Activity {
                 prefs.edit().putFloat(KEY_BRIGHTNESS, Math.max(MIN_BRIGHTNESS, sb.getProgress() / 100f)).apply();
             }
         });
-        panel.addView(bar);
         return panel;
     }
 
-    /** Draws the reference card; a tap calls {@link #onTap} to toggle the controls panel. */
+    /** Draws the reference card, including the current brightness stamped inside the camera frame. */
     private static final class CalibrationView extends View {
-        Runnable onTap;
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private int brightnessPct;
 
         CalibrationView(Context c) {
             super(c);
             setBackgroundColor(Color.rgb(0x80, 0x80, 0x80));   // neutral mid-grey surround
         }
 
-        @Override
-        public boolean performClick() {
-            super.performClick();
-            if (onTap != null) {
-                onTap.run();
+        void setBrightnessPct(int pct) {
+            if (pct != brightnessPct) {
+                brightnessPct = pct;
+                invalidate();
             }
-            return true;
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent e) {
-            if (e.getAction() == MotionEvent.ACTION_UP) {
-                performClick();
-            }
-            return true;
         }
 
         @Override
@@ -177,7 +187,8 @@ public final class CalibrationActivity extends Activity {
             float pad = Math.min(w, h) * 0.04f;
             float x = pad, right = w - pad, innerW = right - x, y = pad;
 
-            // 1) Orientation marker: a bold "F" plus a TOP arrow — an "F" is asymmetric under both flip and mirror.
+            // 1) Orientation marker ("F" + TOP arrow) plus the brightness stamp, all on one black header bar so the
+            //    capture records both orientation and the brightness it was shot at.
             float markH = h * 0.18f;
             fill.setColor(Color.BLACK);
             fill.setStyle(Paint.Style.FILL);
@@ -187,6 +198,9 @@ public final class CalibrationActivity extends Activity {
             text.setTextAlign(Paint.Align.LEFT);
             text.setTextSize(markH * 0.72f);
             canvas.drawText("F", x + pad, y + markH * 0.80f, text);
+            text.setTextAlign(Paint.Align.CENTER);
+            text.setTextSize(markH * 0.40f);
+            canvas.drawText("BRIGHT " + brightnessPct + "%", (x + right) / 2f, y + markH * 0.64f, text);
             text.setTextAlign(Paint.Align.RIGHT);
             text.setTextSize(markH * 0.26f);
             canvas.drawText("▲ TOP", right - pad, y + markH * 0.46f, text);
