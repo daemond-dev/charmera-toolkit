@@ -58,8 +58,27 @@ public final class CalibrationActivity extends Activity {
         root.addView(panel, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
 
-        // Tapping the card hides/shows the controls, so the target can be shot clean.
-        card.onTap = () -> panel.setVisibility(panel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+        // An always-reachable exit: the system nav bar is hidden in immersive mode, so provide an explicit Done button
+        // rather than relying on the back gesture (which also collides with the slider at the bottom edge).
+        int m = Math.round(12 * getResources().getDisplayMetrics().density);
+        final TextView done = new TextView(this);
+        done.setText("✕  Done");
+        done.setTextColor(Color.WHITE);
+        done.setTypeface(Typeface.DEFAULT_BOLD);
+        done.setBackgroundColor(0xCC000000);
+        done.setPadding(m, m, m, m);
+        done.setOnClickListener(v -> finish());
+        FrameLayout.LayoutParams dlp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
+        dlp.setMargins(m, m, 0, 0);
+        root.addView(done, dlp);
+
+        // Tapping the card hides/shows the controls and the Done button, so the target can be shot clean.
+        card.onTap = () -> {
+            int vis = panel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE;
+            panel.setVisibility(vis);
+            done.setVisibility(vis);
+        };
 
         setContentView(root);
         card.setSystemUiVisibility(
@@ -83,16 +102,14 @@ public final class CalibrationActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(0xCC000000);
-        panel.setPadding(pad, pad, pad, pad);
+        // Extra bottom padding lifts the slider clear of the phone's bottom gesture-nav / back-swipe zone.
+        panel.setPadding(pad, pad, pad, pad * 3);
 
         TextView instr = new TextView(this);
         instr.setTextColor(Color.WHITE);
-        instr.setText("Calibration target — photograph this each flash.\n"
-                + "• Dark room; turn off auto-brightness and night-light / blue filter.\n"
-                + "• Fill the frame; keep the phone flat and steady.\n"
-                + "• \"F\" + ▲ TOP read orientation; R/G/B read a colour swap.\n"
-                + "• The camera's exposure is fixed, so set brightness low enough that the white patch does not"
-                + " clip, then keep it the same for every shot. Tap the card to hide these controls.");
+        instr.setText("Photograph this each flash — dark room, auto-brightness and night-light off, fill the frame.\n"
+                + "Set brightness low enough that the white patch doesn't clip, then keep it there. Tap the card to"
+                + " hide these controls.");
         panel.addView(instr);
 
         final TextView label = new TextView(this);

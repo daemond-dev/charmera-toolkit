@@ -213,6 +213,8 @@ public class MainActivity extends Activity {
 
     // Colours for the card layout, chosen in resolveTheme() from the phone's light/dark mode and the theme accent.
     private LinearLayout col;
+    private ScrollView scroll;
+    private boolean uiReady;
     private int accent, onAccent, windowBg, cardFill, cardStroke, disabledFill, disabledText, ripple, warnAccent, cautionFill, cautionStroke, okColor, badColor, textPrimary, textSecondary;
 
     /** The card's tree as chosen, and what was found the last time it was looked at. */
@@ -264,9 +266,8 @@ public class MainActivity extends Activity {
 
         banner();
 
-        LinearLayout s0 = stepCard("0", "Back up the camera", "Read this camera's flash chip to a 2 MB file (a CH341A"
-                + " clip on a computer — see docs/02-RECOVERY.md, section B), copy it to the phone, and choose it"
-                + " here. Every update file is compared with it before the app will write.");
+        LinearLayout s0 = stepCard("0", "Back up the camera", "Read this camera's flash to a 2 MB file (CH341A clip on"
+                + " a computer) and choose it here. Required before any write.");
         backupButton = primary(BACKUP, v -> pickBackup());
         s0.addView(backupButton);
         backupStatus = body("");
@@ -278,16 +279,16 @@ public class MainActivity extends Activity {
                 + " one's. A dump read after a flash holds what was flashed, not what fits; when that is a public"
                 + " build, the app says so.");
 
-        LinearLayout s1 = stepCard("1", "Get the update file", "Download the public 2 MB dump from GitHub. It is checked"
-                + " and the stock restore file is built from it. On a camera that ran the public build, flashing it"
-                + " restores that build.");
+        LinearLayout s1 = stepCard("1", "Get the update file", "Download the public 2 MB dump; the stock restore file"
+                + " is built from it.");
         downloadButton = primary(DOWNLOAD, v -> downloadDump(Candidates.Kind.RESTORE));
         s1.addView(downloadButton);
-        TextView offline = body("Offline, or the file is already on the phone? Tap " + q(USE_FILE) + " and choose the"
-                + " stock dump or an update file.");
-        s1.addView(offline);
         s1.addView(linkText("Open the download page \u2197", Candidates.STOCK_DUMP_PAGE));
         s1.addView(button(USE_FILE, v -> pickFile()));
+        saveButton = button(SAVE, v -> saveCopy());
+        s1.addView(saveButton);
+        saveStatus = body("");
+        s1.addView(saveStatus);
         fileStatus = body("");
         s1.addView(fileStatus);
         fileDetail = mono();
@@ -295,40 +296,31 @@ public class MainActivity extends Activity {
         fileDetailToggle = detailToggle(fileDetail, "Details");
         s1.addView(fileDetailToggle);
         s1.addView(fileDetail);
-        TextView slotNote = body("Using the phone's own SD slot on Android 11+? Save a copy, then copy it onto the card"
-                + " with the Files app (see step 2).");
-        slotNote.setPadding(0, dp(10), 0, dp(2));
-        s1.addView(slotNote);
-        saveButton = button(SAVE, v -> saveCopy());
-        s1.addView(saveButton);
-        saveStatus = body("");
-        s1.addView(saveStatus);
-        expander(s1, "What the stock restore file is", "A public copy of a working camera's memory, under its published"
-                + " name. Several owners report working cameras after flashing it, though what their cameras ran before"
-                + " is not known. Matching the public file exactly says nothing about your camera, so the app still"
-                + " compares it with your step 0 backup before it will write.");
+        expander(s1, "Already have the file, or using the phone's SD slot?", "Have the dump or an update file already?"
+                + " Tap " + q(USE_FILE) + " and choose it. Android 11+ with the card in the phone's own slot: tap "
+                + q(SAVE) + ", copy the file onto the card with the Files app (step 2), then " + q(USE_FILE) + " to check"
+                + " it. The stock restore file is a public copy of a working camera's memory under its published name;"
+                + " matching it says nothing about your camera, so the app still checks it against your step 0 backup"
+                + " before writing.");
         divider(s1);
         s1.addView(subTitle("Identify the image sensor"));
-        s1.addView(body("Build the sensor-ID probe. It is a diagnostic, not a repair — it will not make the camera"
-                + " take pictures. When the camera next enters photo mode it scans the sensor bus and writes a result to"
-                + " SENSOR.TXT on the card, then stops as it does now. It is the one file that needs no backup. Read the"
-                + " result with " + q(READ_RESULT) + " in step 4."));
+        s1.addView(body("Diagnostic only: writes the sensor's ID to SENSOR.TXT. It does not repair. No backup needed."));
         probeButton = primary(MAKE_PROBE, v -> confirmMakeProbe());
         s1.addView(probeButton);
-        expander(s1, "Why the probe needs no backup", "It changes no boot or update code and leaves the sensor table"
-                + " untouched — only a dead debug routine and one sensor-setup call are patched. The stock restore"
-                + " file reverses it.");
+        expander(s1, "Details", "When the camera next enters photo mode it scans the sensor bus, writes the result to"
+                + " SENSOR.TXT, and stops as it does now. Read it with " + q(READ_RESULT) + " in step 4. It changes no"
+                + " boot or update code, only a dead debug routine and one sensor-setup call, so the stock restore file"
+                + " reverses it.");
         divider(s1);
         s1.addView(subTitle("Try the OV9732 bring-up (experimental)"));
-        s1.addView(body("Once the probe names the sensor as an OmniVision OV9732, build the bring-up: it drives that"
-                + " sensor in place of the SP140A the firmware expects, then lets the camera run so you can try a photo."
-                + " It may not be right on the first try, but it cannot damage the camera and the stock restore file"
-                + " puts it back. Needs no backup."));
+        s1.addView(body("Drives the OV9732 so the camera can take photos. The stock restore file reverts it. No backup"
+                + " needed."));
         bringupButton = primary(MAKE_BRINGUP, v -> confirmMakeBringup());
         s1.addView(bringupButton);
-        expander(s1, "Why the bring-up needs no backup", "Like the sensor-ID probe, it changes no boot or update code"
-                + " and leaves the SP140A table in place — only a dead routine and the one sensor-setup call are"
-                + " patched — so a camera it does not suit is left as it is, and the stock restore file reverses it.");
+        expander(s1, "Details", "Once the probe names the sensor as an OmniVision OV9732, this drives it in place of the"
+                + " SP140A the firmware expects, then lets the camera run so you can try a photo. It may not be right on"
+                + " the first try, but it cannot damage the camera; like the probe it changes no boot or update code, so"
+                + " the stock restore file puts it back.");
 
         LinearLayout s2 = stepCard("2", "Connect the camera", null);
         s2.addView(caution("Plugging the cable into a switched-off camera turns it on, and it will flash any update file"
@@ -373,13 +365,12 @@ public class MainActivity extends Activity {
                 + " file damaged and ignored it; nothing was erased. Remove the file (step 5) and write it again.");
         divider(s4);
         s4.addView(subTitle("Read the sensor result"));
-        s4.addView(body("Flashed the sensor-ID probe? While the update file is on the card the camera re-flashes it"
-                + " every boot instead of running it, so take the update file off the card first: remove it (step 5),"
-                + " or delete the JH_5408\u2026.bin file with a card reader. Put the card back in the camera and switch"
-                + " it on \u2014 with no update file it boots the probe instead of re-flashing. Open photo mode: the"
-                + " camera stops there as before, but scans the sensor bus and writes SENSOR.TXT first. Then switch it"
-                + " off, bring the card back, tap " + q(CHOOSE) + " in step 2 if needed, and tap " + q(READ_RESULT)
+        s4.addView(body("Flashed the sensor-ID probe? Take the update file off the card (step 5) so the camera boots the"
+                + " probe instead of re-flashing, open photo mode so it writes SENSOR.TXT, then tap " + q(READ_RESULT)
                 + "."));
+        expander(s4, "Details", "While an update file is on the card the camera re-flashes it every boot instead of"
+                + " running it. With it gone, the probe boots; photo mode stops as before but scans the sensor bus and"
+                + " writes SENSOR.TXT first. Bring the card back and tap " + q(CHOOSE) + " in step 2 if needed.");
         readResultButton = primary(READ_RESULT, v -> readSensorResult());
         s4.addView(readResultButton);
         sensorStatus = body("");
@@ -405,9 +396,8 @@ public class MainActivity extends Activity {
 
         LinearLayout tools = card();
         tools.addView(subTitle("Compare test shots"));
-        tools.addView(body("Shows a fixed reference card — grey patches, R/G/B bars, an exposure ramp, an orientation"
-                + " marker — full-screen at max brightness. Photograph it after each flash so colour and orientation are"
-                + " compared against the same image every time."));
+        tools.addView(body("A fixed reference card to photograph after each flash, so colour and orientation are always"
+                + " compared against the same image."));
         tools.addView(primary("Open calibration target", v ->
                 startActivity(new Intent(this, CalibrationActivity.class))));
         expander(tools, "How to use it", "In a dark room, turn off auto-brightness and night-light, fill the frame with"
@@ -435,7 +425,7 @@ public class MainActivity extends Activity {
         col.addView(updateStatus);
         col.addView(linkText("Open the releases page \u2197", RELEASES_PAGE));
 
-        ScrollView scroll = new ScrollView(this);
+        scroll = new ScrollView(this);
         scroll.setFitsSystemWindows(true);
         scroll.addView(col);
         setContentView(scroll);
@@ -458,6 +448,7 @@ public class MainActivity extends Activity {
             watching = last;
         }
         updateButtons();
+        uiReady = true;     // from here a new file result scrolls itself into view (not the initial empty state)
         // A file the app was opened with is handled once: not again by a recreated screen (state != null), and not
         // when Recents starts the app again with the intent it was first opened with.
         Intent first = getIntent();
@@ -1171,6 +1162,12 @@ public class MainActivity extends Activity {
     private void showFile(String summary, String technical) {
         setStatus(fileStatus, summary == null ? "" : summary.trim());
         showDetail(technical);
+        // The probe/bring-up/download buttons sit far below this readout; scroll it into view so the result is seen
+        // without hunting back up the page.
+        if (uiReady && scroll != null) {
+            fileStatus.post(() -> fileStatus.requestRectangleOnScreen(
+                    new android.graphics.Rect(0, 0, fileStatus.getWidth(), fileStatus.getHeight()), false));
+        }
     }
 
     /** Fills step 1's detail block (hidden behind the Details toggle, collapsed on every new readout). */
