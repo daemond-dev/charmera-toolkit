@@ -1,10 +1,15 @@
 # OV9732 AE / WB / flash: verified port reference
 
+> **Status (2026-11-10): the AE redirect in §2 is BUILT, FLASHED, and CONFIRMED WORKING on camera (firmware v0.21).**
+> As-built offsets, bytes, and the on-camera result are in **§7**. The implemented hook is at **VA `0x7b378`** (file
+> `0x7B578`) — not the `0x7b340` named in §2 below and in the earlier scope docs (docs/14, FIRST-FLASH-INCIDENT); §7
+> explains why. White balance (§4) and the flash lead (§5) are still plans — not built.
+
 Primary-source verification of a research corpus (peer-provided, independently checked 2026-11-10 by fetching each
 source directly — K230 driver/XML, the GPCV2247F teardown blog, two AE-loop repos, chromacrank, plus a cross-pipeline
 CCM/init check). Verdicts: driver math **confirmed with one correction**; CCM/AWB values **confirmed exact**; init
-table **independently validated**; flash lead **downgraded**. This is a plan + vetted data for the next firmware steps,
-not yet built or flashed.
+table **independently validated**; flash lead **downgraded**. The AE redirect below is now built and flashed (§7); the
+WB and flash sections remain vetted data for the next firmware steps.
 
 ## 1. Actuator — OV9732 exposure/gain writes (K230 `ov9732_drv.c`, verbatim)
 
@@ -37,7 +42,8 @@ shows the stock firmware already runs a full AE engine every frame:
 - Writes the sensor as SP140A: **`FD` page-select; page-1 `03`/`04` = integration, `24` = analog gain** (bare hex, no `0x`).
 
 On our camera that brain runs but its writes land on the dead SP140A registers. **The redirect = hook its register-write
-tail (VA `0x7b340`, inside the updater at `0x7b2e4`) and translate the computed values to the OV9732:**
+tail (VA `0x7b378` as built — see §7; the `0x7b340` originally written here was a pre-implementation locate of the same
+tail inside the updater at `0x7b2e4`) and translate the computed values to the OV9732:**
 
 | stock (SP140A) | → OV9732 | translation |
 |---|---|---|
@@ -86,6 +92,49 @@ K230 `ov9732-1280x720.xml` values **confirmed exact** (5 illuminants: A, D50, D6
 3. `esp_ipa` "portable AE loop" → closed ESP32-P4 binary; not liftable source.
 4. "TL84/CWF" → K230 has F11 (labeled TL84) only; no CWF profile.
 5. D65 AWB/CCM and BLS values → **accurate** (rounded from exact binary fractions).
+
+## 7. As-built (firmware v0.21) — what shipped, and what the camera showed
+
+Implemented in `android/src/io/github/daemonddev/charmera/Candidates.java` (`AE_HOOK` / `AE_STUB`, applied by `build()`
+for `Kind.BRINGUP`), reviewed against the disassembly and gated by a SHA-256 check so a wrong offset or byte cannot
+produce a file the app will flash. Flashed and tested on the camera 2026-11-10.
+
+**Hook + stub (exact, from the committed code):**
+- `AE_HOOK_OFFSET = 0x7B578` (VA `0x7b378`) — the updater's register-write tail. The 4-byte `AE_HOOK` (`42 9b ff ea`)
+  replaces the `cmp r0,r1` instruction there with a `b` into the stub.
+- `AE_STUB_OFFSET = 0x62288` (VA `0x62088`) — a 174-byte routine placed in a region the firmware never calls (the dead
+  SSV-wifi cave). It loads the firmware's own per-frame integration `A = [r4+8]` and gain `C = [r4+0xc]`, clamps them
+  (`A ∈ [1, 0x310]`, gain code `∈ [0x10, 0xf0]`), and re-emits them to the OV9732 through the firmware's own
+  sensor-write routine `SCCB_write` (VA `0x2d828`, OV9732 context, bus `0x6C`) as:
+  - exposure `0x3501 = (A>>4) & 0xff`, `0x3502 = (A<<4) & 0xff` (register unit = 1/16 line);
+  - gain `0x350b = (C>>4) & 0xff`, `0x350a = ((C>>4)>>8) & 3` (gain code = gain×16; `C>>4` is bit-exact to the
+    firmware's own SP140A reg-`0x24` packer).
+
+  It then branches back to the updater's epilogue, so exposure tracks the scene instead of holding the fixed init value.
+  (These four register writes and the clamps were re-disassembled from the committed `AE_STUB` bytes and match this
+  description exactly.)
+
+**Why the hook point is `0x7b378`, not the plan's `0x7b340`:** the per-frame AE loop is reached by an *indirect*
+callback — apply-task `0x65330` → fn-ptr `[BASE+0xEB8]` → wrapper `0x7b6e0` → tail-branch into the updater `0x7b2e4`.
+A naive BL / word-reference scan of `0x7b2e4` finds only the one-time set-mode call and so reads as "no per-frame AE"
+(an earlier mistake the verification pass caught). The live per-frame write tail — the `cmp r0,r1` — is at `0x7b378`.
+**This is the first thing to re-check in any review: confirm `0x7b378` is on the live per-frame path via that indirect
+callback, not a one-shot setup path.**
+
+**Why a redirect at all:** the OV9732 has **no internal AEC** (manual-only; `0x3503` "auto" is Reserved, no `0x3a`
+block) — every reference driver drives it with an external loop. Reusing the stock AE brain and translating its output
+is therefore the only path; there is no sensor-side AEC to switch on.
+
+**On-camera result (scene-matched against the stock camera, 2026-11-10):** the closed loop converges. A dim bottle+mug
+scene that read luma ≈5 (black) under v0.19's static 2× gain now reads **L118 vs stock L132**; muffins L101 vs 114;
+water-bottle L148 vs 143; real scenes average **L122 vs stock L130** (~6% under), exposure adapting scene-to-scene with
+highlight clip ≤0.5% on bright real scenes. This settles the one point §2 left open — that the GP ISP computes its luma
+statistics on the OV9732 frames (if it did not, the loop could not have converged).
+
+**Not caused by this patch:** the flashed unit's louder/cracklier beeps and menu-navigation screen flashes predate
+v0.21 — present since the first flash, when both cameras were still identical. A separate read-only forensics pass tied
+them to the variant mismatch's cosmetic tail (a settings-default sound level, plus an unresolved per-unit clock/analog
+interaction), not to this redirect. Do not read them as AE regressions.
 
 ## Sources
 - K230 driver: `raw.githubusercontent.com/kendryte/k230_sdk/main/src/big/mpp/kernel/sensor/src/ov9732_drv.c`
