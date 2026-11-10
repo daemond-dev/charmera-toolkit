@@ -36,6 +36,13 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
+        <!-- Full-screen reference target to photograph on each firmware iteration (CalibrationActivity). Portrait and
+             no action bar so the card fills the screen; brightness is forced to max in code. -->
+        <activity
+            android:name=".CalibrationActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
         <!-- Serves the downloaded update APK to the system installer as a content:// URI; see ApkProvider. -->
         <provider
             android:name=".ApkProvider"

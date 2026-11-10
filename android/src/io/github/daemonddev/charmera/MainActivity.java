@@ -213,7 +213,7 @@ public class MainActivity extends Activity {
 
     // Colours for the card layout, chosen in resolveTheme() from the phone's light/dark mode and the theme accent.
     private LinearLayout col;
-    private int accent, onAccent, windowBg, cardFill, cardStroke, disabledFill, disabledText, ripple, warnAccent, cautionFill, cautionStroke, okColor, badColor;
+    private int accent, onAccent, windowBg, cardFill, cardStroke, disabledFill, disabledText, ripple, warnAccent, cautionFill, cautionStroke, okColor, badColor, textPrimary, textSecondary;
 
     /** The card's tree as chosen, and what was found the last time it was looked at. */
     private static final class Card {
@@ -320,12 +320,10 @@ public class MainActivity extends Activity {
                 + " file reverses it.");
         divider(s1);
         s1.addView(subTitle("Try the OV9732 bring-up (experimental)"));
-        s1.addView(body("Once the probe has named the sensor as an OmniVision OV9732, build the bring-up. It drives that"
-                + " sensor in place of the SP140A the firmware expects — setting its 16-bit control address and writing"
-                + " a 1-lane MIPI start-up table — then lets the camera run, so you can try a picture. It may not give a"
-                + " clean image on the first try: the sensor's MIPI timing has to match the camera's receiver, which"
-                + " can only be confirmed on the bench. It cannot damage the camera, and the stock restore file puts it"
-                + " back. Like the probe, it needs no backup."));
+        s1.addView(body("Once the probe names the sensor as an OmniVision OV9732, build the bring-up: it drives that"
+                + " sensor in place of the SP140A the firmware expects, then lets the camera run so you can try a photo."
+                + " It may not be right on the first try, but it cannot damage the camera and the stock restore file"
+                + " puts it back. Needs no backup."));
         bringupButton = primary(MAKE_BRINGUP, v -> confirmMakeBringup());
         s1.addView(bringupButton);
         expander(s1, "Why the bring-up needs no backup", "Like the sensor-ID probe, it changes no boot or update code"
@@ -404,6 +402,16 @@ public class MainActivity extends Activity {
         s5.addView(after);
         expander(s5, "Phone's own SD slot (Android 11+)", "Put the card in the phone, delete the update file from its"
                 + " top folder with the Files app, and eject the card before removing it.");
+
+        LinearLayout tools = card();
+        tools.addView(subTitle("Compare test shots"));
+        tools.addView(body("Shows a fixed reference card — grey patches, R/G/B bars, an exposure ramp, an orientation"
+                + " marker — full-screen at max brightness. Photograph it after each flash so colour and orientation are"
+                + " compared against the same image every time."));
+        tools.addView(primary("Open calibration target", v ->
+                startActivity(new Intent(this, CalibrationActivity.class))));
+        expander(tools, "How to use it", "In a dark room, turn off auto-brightness and night-light, fill the frame with"
+                + " the card, and keep the phone flat. It is a consistent target, not a lab-calibrated one.");
 
         LinearLayout help = card();
         expander(help, "The drive does not show up", "Check the cable first — some USB-C cables only charge."
@@ -623,32 +631,42 @@ public class MainActivity extends Activity {
         boolean night = (getResources().getConfiguration().uiMode
                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
                 == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-        TypedValue tv = new TypedValue();
-        accent = getTheme().resolveAttribute(android.R.attr.colorAccent, tv, true) ? tv.data : 0xFF3B6FB6;
-        onAccent = 0xFFFFFFFF;
-        warnAccent = night ? 0xFFF0B429 : 0xFFB06A00;
+        // Fixed, accessible colours rather than the device theme's (which can be low-contrast on some skins). The
+        // accent/onAccent pair is chosen so button labels and link text both clear 4.5:1 in each mode: a darker accent
+        // with white text in light mode, a lighter accent with near-black text in dark mode. Every text colour below
+        // is set explicitly so nothing falls back to the theme default (the old dark-mode readability bug).
         if (night) {
+            accent = 0xFF5AA0F5;
+            onAccent = 0xFF0A0A0A;
+            warnAccent = 0xFFF0B429;
             windowBg = 0xFF121212;
             cardFill = 0xFF1E1E1E;
             cardStroke = 0xFF2E2E2E;
             disabledFill = 0xFF333333;
-            disabledText = 0xFF808080;
+            disabledText = 0xFF8A8A8A;
             ripple = 0x40FFFFFF;
             cautionFill = 0xFF2A2109;
             cautionStroke = 0xFF4A3A12;
             okColor = 0xFF6FD08C;
             badColor = 0xFFE57373;
+            textPrimary = 0xFFEDEDED;
+            textSecondary = 0xFFAEAEAE;
         } else {
+            accent = 0xFF1D6FD6;
+            onAccent = 0xFFFFFFFF;
+            warnAccent = 0xFFB06A00;
             windowBg = 0xFFF3F3F4;
             cardFill = 0xFFFFFFFF;
             cardStroke = 0xFFE3E3E6;
             disabledFill = 0xFFDCDCE0;
-            disabledText = 0xFF9A9A9A;
+            disabledText = 0xFF8C8C8C;
             ripple = 0x22000000;
             cautionFill = 0xFFFFF7E6;
             cautionStroke = 0xFFF0DFA8;
             okColor = 0xFF2E7D32;
             badColor = 0xFFC62828;
+            textPrimary = 0xFF1A1A1A;
+            textSecondary = 0xFF5B5B5B;
         }
     }
 
@@ -699,6 +717,7 @@ public class MainActivity extends Activity {
         head.addView(badge(number));
         TextView t = new TextView(this);
         t.setText(title);
+        t.setTextColor(textPrimary);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         head.addView(t);
@@ -766,6 +785,7 @@ public class MainActivity extends Activity {
     private TextView subTitle(String s) {
         TextView t = new TextView(this);
         t.setText(s);
+        t.setTextColor(textPrimary);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setPadding(0, dp(4), 0, dp(2));
@@ -827,7 +847,9 @@ public class MainActivity extends Activity {
     private TextView body(String s) {
         TextView t = new TextView(this);
         t.setText(s);
+        t.setTextColor(textPrimary);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        t.setLineSpacing(dp(2), 1f);
         t.setPadding(0, dp(4), 0, dp(4));
         t.setTextIsSelectable(true);
         return t;
@@ -883,6 +905,16 @@ public class MainActivity extends Activity {
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    /** Scroll the main view so a freshly-shown result is on screen, not left below the fold. Bubbles up to the
+     *  enclosing ScrollView; a no-op if the view has no size yet, so it is posted after layout. */
+    private void reveal(final View v) {
+        if (v == null) {
+            return;
+        }
+        v.post(() -> v.requestRectangleOnScreen(
+                new android.graphics.Rect(0, 0, v.getWidth(), v.getHeight()), false));
     }
 
     /** The app's version name from the manifest, for the footer; empty if it cannot be read. */
@@ -1430,6 +1462,7 @@ public class MainActivity extends Activity {
         line.setSpan(new StyleSpan(Typeface.BOLD), 0, state.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         line.setSpan(new android.text.style.ForegroundColorSpan(color), 0, state.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         fileStatus.setText(line);
+        reveal(fileStatus);
         showDetail(result.verdict() + "\n\n" + origin + "\n\nDetail: " + UpdateCheck.bytes(result.size) + ", SHA-256 "
                 + result.sha256 + ".\n\nThe app's checks"
                 + (result.compared ? ", compared with " + backupName : " (not compared with a backup)") + ":\n\n"
@@ -2401,6 +2434,7 @@ public class MainActivity extends Activity {
                 }
                 readingSensor = false;
                 setStatus(sensorStatus, tt);
+                reveal(sensorStatus);
                 updateButtons();
             });
         });
