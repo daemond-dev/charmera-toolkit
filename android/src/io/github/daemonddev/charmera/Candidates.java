@@ -52,6 +52,8 @@ public final class Candidates {
      */
     static final int PROBE_HOOK_OFFSET = 0x7B898;
     static final int PROBE_STUB_OFFSET = 0x62120;
+    static final int CCM_OFFSET = 0xF7782;   // SoC ISP colour-correction matrix (file offset), inside the update region
+    static final byte[] CCM_PATCH = hex("8900d7ffe0ffd2ff9500d9fff6ffc2ff8800");   // saturation-boosted, gray-preserving
     static final byte[] PROBE_HOOK = hex("209affeb");
     static final byte[] PROBE_STUB = hex("f04f2de9e0d04de20040a0e11c519fe504808de2a700a0e30100c8e40100a0e30100c8e40090a0e308a0a0e1018088e20860" +
             "a0e38600a0e10900c5e50500a0e10010a0e30d20a0e1922effeb000050e31f0000ba040059e31d0000aa0160c8e41000a0e3" +
@@ -105,17 +107,11 @@ public final class Candidates {
                 + " debug routine and the one call that writes the sensor set-up are changed. The stock restore file"
                 + " (above) puts the camera back.",
                 "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b"),
-        BRINGUP(true, "The OV9732 bring-up (experimental, iteration 4): the stock restore file with a reviewed patch, the"
-                + " same shape as the sensor-ID probe, that drives the OmniVision OV9732 actually fitted instead of the"
-                + " SuperPix SP140A the firmware was built for. Iteration 3 was clean but upside down; this adds the"
-                + " datasheet-confirmed 180° flip (register 0x3820=0x1C) and keeps the blue white-balance lift, so the"
-                + " only change from the last version is the rotation. It points the control bus at the OV9732's 16-bit"
-                + " address (bus 0x6C) and writes a 1-lane MIPI start-up table for it through the firmware's own write"
-                + " routine, then lets the camera run. It changes no boot or update code and leaves the SP140A table in"
-                + " place; only a dead routine and the one sensor-setup call change, so the stock restore file (above)"
-                + " puts it back. The flip may swap red and blue (the fixed colour pipeline cannot re-align after a"
-                + " flip) — if so the next version corrects it; it cannot damage the camera.",
-                "JH_5408202611090014_0F0626B3.bin", "6f96b7548736db93921962d02be5ec762b503b5a01bd12bfcabf62e5807b0fc0"),
+        BRINGUP(true, "The OV9732 bring-up (experimental): drives the OmniVision OV9732 fitted in place of the SP140A"
+                + " the firmware was built for, with a 180° flip, a blue white-balance lift, and a saturation boost to"
+                + " the ISP colour matrix. The stock restore file reverts it and no backup is needed; it cannot damage"
+                + " the camera.",
+                "JH_5408202611090017_0F0626B1.bin", "326566d5a965d620633d7c18d46e8bc64128fce4453aa716f46cac4fccd64673"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
@@ -266,6 +262,7 @@ public final class Candidates {
             byte[] payload = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the restore file, with the bring-up patch
             System.arraycopy(PROBE_HOOK, 0, payload, PROBE_HOOK_OFFSET, PROBE_HOOK.length);   // same hook as the probe
             System.arraycopy(BRINGUP_STUB, 0, payload, PROBE_STUB_OFFSET, BRINGUP_STUB.length);
+            System.arraycopy(CCM_PATCH, 0, payload, CCM_OFFSET, CCM_PATCH.length);   // saturation tune for the OV9732
             return payload;
         }
         byte[] image = dump.clone();

@@ -432,6 +432,24 @@ that result was then re-examined and the probe rebuilt to scan the whole bus.
   saturation/CCM refinement, partly exaggerated by photographing an emissive screen; (2) the AE is still non-adaptive,
   so uncontrolled bright scenes blow out. After four firmware iterations the OV9732 drives correctly: upright, correct
   colours, well-exposed in controlled light.
+- A reverse-engineering pass on the stock firmware (its workflow stalled after the research phase; findings recovered
+  from the journal) located **both** remaining levers. **Auto-exposure:** the stock AE updater is a self-contained
+  function (VA `0x7b2e4`; register-write tail `0x7b340`) reached by one per-frame callback -- it reads frame luma,
+  looks up an exposure+gain pair, and writes SP140A page-1 registers (exposure `0x03`/`0x04` in whole lines; gain
+  `0x24` Q4.4) the OV9732 ignores. Redirecting its output to the OV9732's exposure (`0x3500-0x3502`, 1/16-line) and gain
+  (`0x350A/0x350B`) registers makes exposure adaptive (same hook shape as the init). **Saturation:** the SoC ISP
+  colour-correction matrix was located and **verified** at FILE `0xF7782` -- a 3x3 signed int16 block, unity=64,
+  gray-preserving (rows sum 64), diagonal-dominant, reached by the SP140A profile descriptor (ptr[10] @ `0xF5C4C`) and
+  applied sensor-agnostically, so it already runs on the OV9732. The flat colours are spectral (OV9732 CFA vs SP140A),
+  fixable by deepening this matrix. Original `[[104,-23,-17],[-27,114,-22],[-1,-38,104]]`.
+- **0.17 boosts saturation via the CCM, and makes the calibration target landscape.** It patches `0xF7782` to a
+  gray-preserving ~1.40x-saturation matrix `[[137,-41,-32],[-46,149,-39],[-10,-62,136]]` (rows still sum 64, so white
+  balance is untouched), on top of 0.14's flip + WB stub. File `JH_5408202611090017_0F0626B1.bin`, SHA-256
+  `326566d5a965d620633d7c18d46e8bc64128fce4453aa716f46cac4fccd64673`. The app's calibration Activity is now **landscape**
+  (was portrait) to match the camera's frame. The saturation scale is tunable against the untouched 2nd camera (same
+  OV9732, newer-batch factory firmware, which works upright with reasonable colour -- but the owner will not open it to
+  dump, so we retune the public dump rather than lift its firmware). Adaptive exposure (the AE redirect) is the next
+  firmware step. Not yet run on the camera.
 - If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
   ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
   sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no
