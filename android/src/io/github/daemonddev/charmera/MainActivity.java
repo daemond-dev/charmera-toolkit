@@ -919,7 +919,7 @@ public class MainActivity extends Activity {
 
     /**
      * The firmware version the bring-up patch writes, read from its file name
-     * (JH_&lt;12 digits&gt;&lt;NNNN&gt;_&lt;hex&gt;.bin, e.g. ...11090017_... -&gt; "0.17"). It tracks the firmware the
+     * (JH_&lt;12 digits&gt;&lt;NNNN&gt;_&lt;hex&gt;.bin, e.g. ...11090017_... -&gt; "v0.17"). It tracks the firmware the
      * patch actually carries, which can differ from the app's own version on an app-only release; it falls back to the
      * raw file name if the pattern ever changes, so a wrong number is never shown.
      */
@@ -927,7 +927,7 @@ public class MainActivity extends Activity {
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("JH_\\d{12}(\\d{4})_[0-9A-Fa-f]+\\.bin")
                 .matcher(Candidates.Kind.BRINGUP.fileName);
-        return m.matches() ? "0." + Integer.parseInt(m.group(1)) : Candidates.Kind.BRINGUP.fileName;
+        return m.matches() ? "v0." + Integer.parseInt(m.group(1)) : Candidates.Kind.BRINGUP.fileName;
     }
 
     private int installedVersionCode() {

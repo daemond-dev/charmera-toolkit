@@ -79,6 +79,24 @@ public final class Candidates {
             "0051820151830051840151855001000137030b370551ff");
 
     /**
+     * The OV9732 adaptive-exposure redirect, applied on top of the bring-up stub (Kind.BRINGUP only). The stock
+     * firmware runs a per-frame auto-exposure loop that computes integration and gain each frame and writes them to
+     * the SP140A registers that are dead on the OV9732; AE_HOOK, at AE_HOOK_OFFSET (the updater's write tail, VA
+     * 0x7b378), diverts that write to AE_STUB, at AE_STUB_OFFSET (a routine the firmware never calls, VA 0x62088).
+     * AE_STUB reads the firmware's own computed integration/gain and re-emits them as OV9732 manual exposure
+     * (0x3501/0x3502) and gain (0x350a/0x350b) through the firmware's own sensor-write routine (VA 0x2d828), then
+     * returns to the updater's epilogue, so exposure tracks the scene instead of staying fixed. Reviewed against the
+     * disassembly; build() checks the result's SHA-256, so a wrong offset or byte cannot produce a file the app uses.
+     */
+    static final int AE_HOOK_OFFSET = 0x7B578;
+    static final int AE_STUB_OFFSET = 0x62288;
+    static final byte[] AE_HOOK = hex("429bffea");
+    static final byte[] AE_STUB = hex("080094e5010050e30100a0b3311ea0e3010050e10100a0c10c3094e54332a0e1100053e31030a0b3f010a0e3010053e10130a0c1" +
+            "0040a0e10350a0e15c609fe50600a0e1353ca0e3011083e32422a0e1ff2002e2d12dffeb0600a0e1353ca0e3021083e30422a0e1ff20" +
+            "02e2cb2dffeb0600a0e1353ca0e30a1083e32524a0e1032002e2c52dffeb0600a0e1353ca0e30b1083e3ff2005e2c02dffebc16400ea" +
+            "2c2106001100120000000010086c");
+
+    /**
      * What the app can make. RESTORE is the published stock restore file: the stock dump's first 0x1E0000 bytes, under
      * its published name. PROBE is the sensor-ID probe: the stock restore file with a reviewed patch that reads the
      * image sensor's identifier and writes it to the card, so the owner can tell which sensor is fitted; it does not
@@ -106,10 +124,11 @@ public final class Candidates {
                 + " (above) puts the camera back.",
                 "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b"),
         BRINGUP(true, "The OV9732 bring-up (experimental): drives the OmniVision OV9732 fitted in place of the SP140A"
-                + " the firmware was built for, with a 180° flip, a blue white-balance lift, and a brighter exposure"
-                + " (2x sensor gain) to lift the dark picture. The stock restore file reverts it and no backup is"
-                + " needed; it cannot damage the camera.",
-                "JH_5408202611100019_0F0626C3.bin", "4c56e146a4764796617ddba2f75df8f57abd4526302df020568137223e5ad0b5"),
+                + " the firmware was built for, with a 180° flip, a blue white-balance lift, and scene-adaptive"
+                + " exposure — the stock firmware's own per-frame auto-exposure, redirected to the OV9732's exposure"
+                + " and gain registers so the picture tracks the light instead of staying fixed and dark. The stock"
+                + " restore file reverts it and no backup is needed; it cannot damage the camera.",
+                "JH_5408202611100021_0F061D9B.bin", "ded509d9e1fcb72cf3c3b64046d19df133095114ae75c8544578ad43a51dfce2"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
@@ -260,6 +279,8 @@ public final class Candidates {
             byte[] payload = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the restore file, with the bring-up patch
             System.arraycopy(PROBE_HOOK, 0, payload, PROBE_HOOK_OFFSET, PROBE_HOOK.length);   // same hook as the probe
             System.arraycopy(BRINGUP_STUB, 0, payload, PROBE_STUB_OFFSET, BRINGUP_STUB.length);
+            System.arraycopy(AE_HOOK, 0, payload, AE_HOOK_OFFSET, AE_HOOK.length);            // + the AE-exposure redirect
+            System.arraycopy(AE_STUB, 0, payload, AE_STUB_OFFSET, AE_STUB.length);
             return payload;
         }
         byte[] image = dump.clone();
