@@ -415,6 +415,13 @@ that result was then re-examined and the probe rebuilt to scan the whole bus.
   SHA-256 `37df9e6083e98d2e3682666be0f412e817a7cbb6f9f2523eb0ecef4b27a073d5`. The pinned flip (`0x3820=0x1C`) is deferred
   to 0.14, tested alone, with a +/-1 ISP-offset (`0x3811`/`0x3813`) Bayer-phase compensation staged if R/B swaps. Not yet
   run on the camera.
+- **0.14 adds the datasheet-confirmed flip, alone.** The only change from 0.13 is one write: `0x3820=0x1C` (ORIENTATION
+  default 0x10 | Flip bit2 0x04 | Mirror bit3 0x08); `0x3821` stays 0x00; the WB block is unchanged. So the flip is the
+  single variable. Best case: upright and colour-corrected. Known risk (flagged, not yet observed): an array flip
+  reorders BGGR->RGGB and the fixed ISP cannot re-align, so colours may come back R/B-swapped -- if so, the next version
+  adds the `+/-1` ISP-offset re-phase (`0x3811`/`0x3813`) or moves the blue gain to the swapped channel. 60-write table,
+  263-byte stub. File `JH_5408202611090014_0F0626B3.bin`, SHA-256
+  `6f96b7548736db93921962d02be5ec762b503b5a01bd12bfcabf62e5807b0fc0`. Not yet run on the camera.
 - If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
   ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
   sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no

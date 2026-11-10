@@ -75,8 +75,8 @@ public final class Candidates {
             "f5ffffea0000a0e3f041bde81eff2fe1681f0600721f06001100120000000010086c01030101000001000030071f3008" +
             "ff30142230813c3084003600f636017236100c3611f0361235365822365922365a0237001f37011037020c3703073704" +
             "3c37058137100c378258380f03380fce350131350a00350b103d82383d83a43d861f3d87034001e04006014007404800" +
-            "0048050048028448193048253248260848271d48215048235048373750000f57080657810057830f5180015181005182" +
-            "0151830051840151855001000137030b370551ff");
+            "0048050048028448193048253248260848271d48215048235048373750000f57080657810057830f38201c5180015181" +
+            "0051820151830051840151855001000137030b370551ff");
 
     /**
      * What the app can make. RESTORE is the published stock restore file: the stock dump's first 0x1E0000 bytes, under
@@ -105,18 +105,17 @@ public final class Candidates {
                 + " debug routine and the one call that writes the sensor set-up are changed. The stock restore file"
                 + " (above) puts the camera back.",
                 "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b"),
-        BRINGUP(true, "The OV9732 bring-up (experimental, iteration 3): the stock restore file with a reviewed patch, the"
+        BRINGUP(true, "The OV9732 bring-up (experimental, iteration 4): the stock restore file with a reviewed patch, the"
                 + " same shape as the sensor-ID probe, that drives the OmniVision OV9732 actually fitted instead of the"
-                + " SuperPix SP140A the firmware was built for. Iteration 2 tried a 180° flip, but its flip registers"
-                + " were wrong for the OV9732 (0x3821 is sub-sampling, not mirror) and sheared every frame into lines;"
-                + " this one removes that flip — back to the clean, upside-down geometry that worked — and keeps only the"
-                + " blue white-balance lift. It points the control bus at the OV9732's 16-bit address (bus 0x6C) and"
-                + " writes a 1-lane MIPI start-up table for it through the firmware's own write routine, then lets the"
-                + " camera run. It changes no boot or update code and leaves the SP140A table in place; only a dead"
-                + " routine and the one sensor-setup call change, so the stock restore file (above) puts it back. The"
-                + " image will be upside down and exposure is not adaptive yet, but it cannot damage the camera; the"
-                + " worst case is no picture, as now.",
-                "JH_5408202611090013_0F062781.bin", "37df9e6083e98d2e3682666be0f412e817a7cbb6f9f2523eb0ecef4b27a073d5"),
+                + " SuperPix SP140A the firmware was built for. Iteration 3 was clean but upside down; this adds the"
+                + " datasheet-confirmed 180° flip (register 0x3820=0x1C) and keeps the blue white-balance lift, so the"
+                + " only change from the last version is the rotation. It points the control bus at the OV9732's 16-bit"
+                + " address (bus 0x6C) and writes a 1-lane MIPI start-up table for it through the firmware's own write"
+                + " routine, then lets the camera run. It changes no boot or update code and leaves the SP140A table in"
+                + " place; only a dead routine and the one sensor-setup call change, so the stock restore file (above)"
+                + " puts it back. The flip may swap red and blue (the fixed colour pipeline cannot re-align after a"
+                + " flip) — if so the next version corrects it; it cannot damage the camera.",
+                "JH_5408202611090014_0F0626B3.bin", "6f96b7548736db93921962d02be5ec762b503b5a01bd12bfcabf62e5807b0fc0"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
