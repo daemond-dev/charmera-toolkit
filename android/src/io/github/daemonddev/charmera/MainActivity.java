@@ -312,7 +312,7 @@ public class MainActivity extends Activity {
                 + " boot or update code, only a dead debug routine and one sensor-setup call, so the stock restore file"
                 + " reverses it.");
         divider(s1);
-        s1.addView(subTitle("Try the OV9732 bring-up (experimental)"));
+        s1.addView(subTitle("Try the OV9732 bring-up — firmware " + bringupFirmwareVersion() + " (experimental)"));
         s1.addView(body("Drives the OV9732 so the camera can take photos. The stock restore file reverts it. No backup"
                 + " needed."));
         bringupButton = primary(MAKE_BRINGUP, v -> confirmMakeBringup());
@@ -917,6 +917,19 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * The firmware version the bring-up patch writes, read from its file name
+     * (JH_&lt;12 digits&gt;&lt;NNNN&gt;_&lt;hex&gt;.bin, e.g. ...11090017_... -&gt; "0.17"). It tracks the firmware the
+     * patch actually carries, which can differ from the app's own version on an app-only release; it falls back to the
+     * raw file name if the pattern ever changes, so a wrong number is never shown.
+     */
+    private static String bringupFirmwareVersion() {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("JH_\\d{12}(\\d{4})_[0-9A-Fa-f]+\\.bin")
+                .matcher(Candidates.Kind.BRINGUP.fileName);
+        return m.matches() ? "0." + Integer.parseInt(m.group(1)) : Candidates.Kind.BRINGUP.fileName;
+    }
+
     private int installedVersionCode() {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
@@ -1440,7 +1453,7 @@ public class MainActivity extends Activity {
             next = "Connect the camera (step 2) and tap " + q(WRITE) + ". After it flashes, open photo mode, then read"
                     + " it with " + q(READ_RESULT) + " in step 4.";
         } else if (isBringup(result)) {
-            state = "\u2713 OV9732 bring-up ready \u2014 no backup needed.";
+            state = "\u2713 OV9732 bring-up " + bringupFirmwareVersion() + " ready \u2014 no backup needed.";
             color = okColor;
             next = "Connect the camera (step 2) and tap " + q(WRITE) + ". After it flashes, power the camera on and try"
                     + " a photo, then take the card out and look at the JPEGs. The stock restore file puts it back.";
@@ -1698,7 +1711,7 @@ public class MainActivity extends Activity {
             return;
         }
         AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Make the OV9732 bring-up?")
+                .setTitle("Make the OV9732 bring-up — firmware " + bringupFirmwareVersion() + "?")
                 .setMessage("This is experimental. It drives the OmniVision OV9732 that is fitted, in place of the"
                         + " SuperPix SP140A the firmware was built for, so the camera can try to take a picture.\n\n"
                         + "Like the sensor-ID probe, it goes on the card without a backup in step 0, because it is built"
@@ -2174,7 +2187,7 @@ public class MainActivity extends Activity {
         }
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle(probe ? "Write the sensor-ID probe to the card?"
-                        : bringup ? "Write the OV9732 bring-up to the card?"
+                        : bringup ? "Write the OV9732 bring-up (firmware " + bringupFirmwareVersion() + ") to the card?"
                         : "Write the update file to the card?")
                 .setMessage("The app copies the update file to the card's top folder. Nothing changes on the camera"
                         + " yet: it flashes the file the next time it switches on with this card in it.\n\n"
