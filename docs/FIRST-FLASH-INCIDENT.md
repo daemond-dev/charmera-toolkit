@@ -450,6 +450,21 @@ that result was then re-examined and the probe rebuilt to scan the whole bus.
   OV9732, newer-batch factory firmware, which works upright with reasonable colour -- but the owner will not open it to
   dump, so we retune the public dump rather than lift its firmware). Adaptive exposure (the AE redirect) is the next
   firmware step. Not yet run on the camera.
+- **0.19 drops the saturation experiment and raises exposure, after a verified diagnosis.** Independent measurement of
+  the matched standard-target shots (same scene, both cameras) found the dominant defect is UNDEREXPOSURE, not low
+  saturation: our 0.14 patch reads mean luma **78.6** vs the stock camera's **107**, with **55.9%** of pixels crushed
+  below luma 16 (stock 29%); real indoor scenes read luma ~**31** (stock ~55). Root cause, from the OV9732 datasheet:
+  `0x3503` (AEC MANUAL) powers up at **0x03** = `aec_manual=1, agc_manual=1`, and the init never clears it, so the
+  sensor HOLDS the fixed init exposure/gain (exposure `0x3501=0x31` ~784 lines, gain `0x350B=0x10` = 1.0x) -- nothing
+  lifts a dark scene. This reframes 0.14's "desaturated" note: boosting the CCM (0.17) cannot brighten a dark frame, so
+  the saturation patch is dropped. 0.19 instead raises analog gain to 2.0x (`0x350B` `0x10`->`0x20`), which maps the
+  dim-scene luma ~31 onto the stock camera's ~55; the CCM returns to stock `[[104,-23,-17],[-27,114,-22],[-1,-38,104]]`
+  so brightness is the only variable vs 0.14. File `JH_5408202611100019_0F0626C3.bin`, SHA-256
+  `4c56e146a4764796617ddba2f75df8f57abd4526302df020568137223e5ad0b5`, on 0.14's flip + WB stub. Because `0x3503` is
+  already manual, a brighter gain is guaranteed to take effect (no internal AEC overrides it) -- which is also the mode a
+  software-AE loop needs, so the real fix stays the AE redirect (VA `0x7b2e4` -> OV9732 `0x3500-0x3502`/`0x350A-0x350B`),
+  scene-adaptive like stock. App is 0.19 (built on 0.18, which shows the firmware version at each flash step). Not yet
+  run on the camera.
 - If the scan finds nothing at any address, the reseat test still applies: open the camera, reseat the image sensor's
   ribbon, look for a cracked flex or cold joint, and scan again. A reading that turns into a real address proves the
   sensor is alive and it was a connection fault; nothing, still, points to a dead sensor or its wiring, which no

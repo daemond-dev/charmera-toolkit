@@ -52,8 +52,6 @@ public final class Candidates {
      */
     static final int PROBE_HOOK_OFFSET = 0x7B898;
     static final int PROBE_STUB_OFFSET = 0x62120;
-    static final int CCM_OFFSET = 0xF7782;   // SoC ISP colour-correction matrix (file offset), inside the update region
-    static final byte[] CCM_PATCH = hex("8900d7ffe0ffd2ff9500d9fff6ffc2ff8800");   // saturation-boosted, gray-preserving
     static final byte[] PROBE_HOOK = hex("209affeb");
     static final byte[] PROBE_STUB = hex("f04f2de9e0d04de20040a0e11c519fe504808de2a700a0e30100c8e40100a0e30100c8e40090a0e308a0a0e1018088e20860" +
             "a0e38600a0e10900c5e50500a0e10010a0e30d20a0e1922effeb000050e31f0000ba040059e31d0000aa0160c8e41000a0e3" +
@@ -76,7 +74,7 @@ public final class Candidates {
     static final byte[] BRINGUP_STUB = hex("f0412de934509fe534809fe50010d8e5ff0051e30600000a0100d8e5011480e10220d8e50500a0e1362effeb038088e2" +
             "f5ffffea0000a0e3f041bde81eff2fe1681f0600721f06001100120000000010086c01030101000001000030071f3008" +
             "ff30142230813c3084003600f636017236100c3611f0361235365822365922365a0237001f37011037020c3703073704" +
-            "3c37058137100c378258380f03380fce350131350a00350b103d82383d83a43d861f3d87034001e04006014007404800" +
+            "3c37058137100c378258380f03380fce350131350a00350b203d82383d83a43d861f3d87034001e04006014007404800" +
             "0048050048028448193048253248260848271d48215048235048373750000f57080657810057830f38201c5180015181" +
             "0051820151830051840151855001000137030b370551ff");
 
@@ -108,10 +106,10 @@ public final class Candidates {
                 + " (above) puts the camera back.",
                 "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b"),
         BRINGUP(true, "The OV9732 bring-up (experimental): drives the OmniVision OV9732 fitted in place of the SP140A"
-                + " the firmware was built for, with a 180° flip, a blue white-balance lift, and a saturation boost to"
-                + " the ISP colour matrix. The stock restore file reverts it and no backup is needed; it cannot damage"
-                + " the camera.",
-                "JH_5408202611090017_0F0626B1.bin", "326566d5a965d620633d7c18d46e8bc64128fce4453aa716f46cac4fccd64673"),
+                + " the firmware was built for, with a 180° flip, a blue white-balance lift, and a brighter exposure"
+                + " (2x sensor gain) to lift the dark picture. The stock restore file reverts it and no backup is"
+                + " needed; it cannot damage the camera.",
+                "JH_5408202611100019_0F0626C3.bin", "4c56e146a4764796617ddba2f75df8f57abd4526302df020568137223e5ad0b5"),
         C(false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
@@ -262,7 +260,6 @@ public final class Candidates {
             byte[] payload = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);   // the restore file, with the bring-up patch
             System.arraycopy(PROBE_HOOK, 0, payload, PROBE_HOOK_OFFSET, PROBE_HOOK.length);   // same hook as the probe
             System.arraycopy(BRINGUP_STUB, 0, payload, PROBE_STUB_OFFSET, BRINGUP_STUB.length);
-            System.arraycopy(CCM_PATCH, 0, payload, CCM_OFFSET, CCM_PATCH.length);   // saturation tune for the OV9732
             return payload;
         }
         byte[] image = dump.clone();
