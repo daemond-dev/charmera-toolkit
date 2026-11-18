@@ -5,11 +5,18 @@ Layout (verified in both public dumps and in the firmware's loader, writer, sett
 - The store is a 64 KiB bank at flash offset 0x170000 made of 128 sectors of 512 bytes. A record is one
   sector: 252 bytes of settings, the CRC32 (zlib polynomial, little-endian) of those bytes at 0xFC, and a
   second 256-byte page of zeros. Unused sectors are 0xFF.
-- The firmware appends a record at the first erased sector whenever a setting changes, and on boot takes
-  the sector just before the first erased one as current. When the first erased sector is number 127 the
-  bank is erased and writing restarts, so it holds at most 127 records and has no sequence numbers.
-- Sector 120 of this bank (0x17F000) is also the internal photo directory, which the firmware treats as a
-  settings record after 120 saves (a stock bug: it then falls back to defaults and blanks the directory).
+- The firmware appends a record at the first erased sector (first 8 bytes 0xFF) whenever a setting changes,
+  reads it back and rewrites it once on a mismatch, and on boot takes the sector just before the first erased
+  one as current. When the first erased sector is number 127 the whole 64 KiB block is erased and writing
+  restarts at sector 0. There are no sequence numbers.
+- Sector 120 (0x17F000) is the internal photo directory. It is not erased, so the writer steps over it and
+  records continue in sectors 121..126. The block erase at the wrap takes the directory with it, and a
+  directory write (it erases 0x17F000..0x17FFFF, then rewrites sector 120 only) can erase a current record
+  in 121..126; if the camera then powers off before the next save, the first erased sector is 121 and boot
+  loads sector 120, whose CRC fails, so the camera falls back to defaults. (Static analysis of the stock
+  dump, 2026-11-11, independently checked; see docs/11-FORMAT.md. Not observed on a camera.)
+- Byte +0x00 is the menu language, an index into the firmware's language table (holding Up in photo mode
+  changes it).
 - Byte +0x19 is the UI-sound setting: 0 disables every event sound (power on, power off, keys, shutter),
   1..8 is their volume. Factory default 5. The stock Charmera menu never changes it.
 - Byte +0x05 is the general playback volume, 0..8, default 5. Byte +0x01 selects the auto power-off time
@@ -17,6 +24,7 @@ Layout (verified in both public dumps and in the firmware's loader, writer, sett
 """
 from __future__ import annotations
 
+import struct
 import zlib
 from dataclasses import dataclass
 from typing import List, Optional
@@ -35,7 +43,7 @@ OFF_PLAYBACK_VOLUME = 0x05
 OFF_UI_SOUND = 0x19
 
 FIELD_NAMES = {
-    0x00: "capture style/frame selector 0..10 (cycled by its setter; records are selected by position, not by this byte)",
+    0x00: "menu language 0..10 (index into the language table; records are selected by position, not by this byte)",
     0x01: "auto power-off: 1 = 3 min, 2 = 5 min, n >= 3 = n min (default 2)",
     0x05: "playback volume 0..8 (default 5)",
     0x12: "field 0x12 (changes in the dumps; frame/filter related)",
@@ -98,9 +106,12 @@ def is_erased_sector(image: bytes, off: int) -> bool:
 
 
 def parse_settings(image: bytes) -> List[SettingsRecord]:
-    """All non-erased records in order of appearance, up to (not including) the photo directory sector."""
+    """All non-erased records in order of appearance: sectors 0..119 and 121..127 (sector 120 is the photo
+    directory, which the writer steps over)."""
     out = []
-    for off in range(SETTINGS_BASE, SETTINGS_END, RECORD_STRIDE):
+    for off in range(SETTINGS_BASE, BANK_END, RECORD_STRIDE):
+        if off == PHOTO_DIRECTORY:
+            continue
         raw = image[off : off + RECORD_SIZE]
         if len(raw) < RECORD_SIZE or is_erased_sector(image, off):
             continue
@@ -111,8 +122,9 @@ def parse_settings(image: bytes) -> List[SettingsRecord]:
 def firmware_current_sector(image: bytes) -> Optional[int]:
     """Offset of the sector the firmware would load: the one before the first erased sector of the bank.
 
-    Returns None when sector 0 is erased (the firmware then applies defaults). Note that the scan does not
-    stop at the photo directory: that is the stock bug described in the module docstring.
+    Returns None when sector 0 is erased (the firmware then applies defaults). The scan does not skip the
+    photo directory: when sector 121 is the first erased one, the firmware loads sector 120 (see the module
+    docstring), and current_record() reports that.
     """
     for off in range(SETTINGS_BASE, BANK_END, SECTOR_SIZE):
         if is_erased_sector(image, off):
@@ -123,14 +135,16 @@ def firmware_current_sector(image: bytes) -> Optional[int]:
 def current_record(image: bytes) -> SettingsRecord:
     """The record the firmware loads at boot, which must also pass its CRC.
 
-    Raises ValueError when the bank is blank, when the firmware would pick the photo directory sector
-    (120 or more records), or when the selected sector fails the CRC (the firmware then uses defaults).
+    Raises ValueError when the bank is blank, when the firmware would pick the photo directory sector (sector
+    121 is the first erased one), or when the selected sector fails the CRC (the firmware then uses defaults).
+    Records in sectors 121..126 are ordinary records.
     """
     off = firmware_current_sector(image)
     if off is None:
         raise ValueError("settings bank is blank; the camera would apply defaults")
-    if off >= PHOTO_DIRECTORY:
-        raise ValueError("the firmware would read the photo directory sector as a settings record (120+ records)")
+    if off == PHOTO_DIRECTORY:
+        raise ValueError("the firmware would read the photo directory sector as a settings record (sector 121 is "
+                         "the first erased one); the camera would apply defaults")
     rec = SettingsRecord(off, image[off : off + RECORD_SIZE])
     if not rec.crc_ok:
         raise ValueError(f"settings record at {off:#x} fails its CRC; the camera would apply defaults")
@@ -138,10 +152,15 @@ def current_record(image: bytes) -> SettingsRecord:
 
 
 def rewrite_store(image: bytes, record: SettingsRecord) -> bytes:
-    """Return a copy of the image whose settings bank holds only this record (sector 0), with the photo
-    directory sector zeroed if it is erased, which is what the firmware itself writes on a reset."""
+    """Return a copy of the image whose settings bank holds only this record (sector 0): sectors 1..119 and
+    121..127 erased, the photo directory sector kept, or zeroed if it is erased, which is what the firmware
+    itself writes on a reset."""
     buf = bytearray(image)
     buf[SETTINGS_BASE:SETTINGS_END] = b"\xff" * (SETTINGS_END - SETTINGS_BASE)
+    high = PHOTO_DIRECTORY + SECTOR_SIZE
+    if len(buf) > high:
+        end = min(BANK_END, len(buf))
+        buf[high:end] = b"\xff" * (end - high)     # stale records past the directory
     buf[SETTINGS_BASE : SETTINGS_BASE + SECTOR_SIZE] = record.sector()
     if buf[PHOTO_DIRECTORY : PHOTO_DIRECTORY + 8] == b"\xff" * 8:
         buf[PHOTO_DIRECTORY : PHOTO_DIRECTORY + PHOTO_DIRECTORY_LEN] = b"\x00" * PHOTO_DIRECTORY_LEN
@@ -158,6 +177,20 @@ def photo_directory_consistent(image: bytes) -> bool:
     except ValueError:
         return True
     return image[PHOTO_DIRECTORY : PHOTO_DIRECTORY + 8] != b"\xff" * 8
+
+
+def photo_directory_lists(image: bytes) -> int:
+    """How many of the two 8-byte directory entries at 0x17F000 (u16 number, u16 used, u32 length) mark a photo as
+    present: used neither 0 nor 0xFFFF and length neither 0 nor 0xFFFFFFFF. An erased directory counts as none, as
+    does a file that ends before it. The same rule as the app's UpdateCheck.photoDirectoryEntries."""
+    if len(image) < PHOTO_DIRECTORY + 16 or is_erased_sector(image, PHOTO_DIRECTORY):
+        return 0
+    n = 0
+    for i in range(2):
+        _number, used, length = struct.unpack_from("<HHI", image, PHOTO_DIRECTORY + 8 * i)
+        if used not in (0, 0xFFFF) and length not in (0, 0xFFFFFFFF):
+            n += 1
+    return n
 
 
 def diff_records(a: SettingsRecord, b: SettingsRecord) -> List[int]:

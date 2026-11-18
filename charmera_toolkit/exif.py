@@ -8,8 +8,10 @@ What the camera gets wrong, as verified by two community projects whose logic th
 - PixelXDimension/PixelYDimension say 640x480 while the frame is 1440x1080.
 - The MakerNote offset points past the end of the EXIF block, so editors refuse to write the file.
 - Make/Model are "Generalplus"/"CBB3": the chip, not the camera.
-- Every AVI carries the same recording date, 2010-06-29, in its text date chunks (IDIT in the header list,
-  ICRD in the INFO list). The file's modification time on the card is the real recording time.
+- Every AVI carries the same recording date, 2010-06-29. The public build writes an INFO list with ICRD
+  '2010-06-29' and no IDIT chunk (VERIFIED, static analysis of the public dump; no video from a camera was
+  examined). The community tools expect an IDIT chunk in the header list as well, and the repair handles one
+  too when a file has it. The file's modification time on the card is the real recording time.
 
 The repair never edits the camera's EXIF block in place because its offsets cannot be trusted. It reads the
 true dimensions from the JPEG frame header, salvages orientation, YCbCr positioning, make, model and the
@@ -86,6 +88,7 @@ TYPE_UNDEFINED = 7
 TAG_MAKE = 0x010F
 TAG_MODEL = 0x0110
 TAG_ORIENTATION = 0x0112
+TAG_SOFTWARE = 0x0131
 TAG_DATETIME = 0x0132
 TAG_YCBCR_POSITIONING = 0x0213
 TAG_EXIF_IFD = 0x8769
@@ -212,6 +215,7 @@ class ExifInfo:
     date_time: str = ""
     date_time_original: str = ""
     date_time_digitized: str = ""
+    software: str = ""  # read for photo-id; the rebuilt EXIF does not carry it
 
 
 def read_exif(tiff: bytes) -> ExifInfo:
@@ -254,6 +258,8 @@ def _read_dir(tiff: bytes, order: str, off: int, info: ExifInfo, in_exif: bool) 
                 info.make = _read_ascii(tiff, order, value, typ, cnt)
             elif tag == TAG_MODEL:
                 info.model = _read_ascii(tiff, order, value, typ, cnt)
+            elif tag == TAG_SOFTWARE:
+                info.software = _read_ascii(tiff, order, value, typ, cnt)
             elif tag == TAG_DATETIME:
                 info.date_time = _read_ascii(tiff, order, value, typ, cnt)
             elif tag == TAG_EXIF_IFD and typ == TYPE_LONG:
@@ -985,8 +991,8 @@ class _Run:
         self.ffmpeg = ffmpeg
         self.out_dir: Path = args.out
         self.tokens: Set[str] = set() if args.keep_names else existing_tokens(args.out)
-        # Lower-cased file names that occur more than once among the sources (DCIM/100MEDIA/PICT0001.JPG and
-        # DCIM/101MEDIA/PICT0001.JPG): with --keep-names those get their folder name in front.
+        # Lower-cased file names that occur more than once among the sources (PICT0001.JPG in the copies of two
+        # cards, say): with --keep-names those get their folder name in front.
         self.duplicate_names: Set[str] = duplicate_names or set()
         self.photos = 0  # Charmera photos rebuilt
         self.copied = 0  # other JPEGs copied unchanged

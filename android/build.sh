@@ -5,8 +5,10 @@
 #
 # versionName defaults to the one in VERSION, versionCode to the current UTC date and hour.
 # Needs the Android SDK with "platforms;android-35" and "build-tools;35.0.0", a JDK 17 or newer, and zip.
-# Signing: KEYSTORE, KS_ALIAS and KS_PASS name your key. Without them a throwaway key is made in out/; an APK
-# signed with a different key than the installed one cannot be installed over it (uninstall first).
+# Signing: KEYSTORE, KS_ALIAS and KS_PASS name your key. Without them the committed test key test.keystore is used,
+# so local builds share one certificate and install over one another. test.keystore is not secret; the published app
+# is signed with the release key from the CI secrets (never test.keystore), and CI refuses to publish any other cert.
+# An APK signed with a different key than the installed one cannot be installed over it (uninstall first).
 set -eu
 cd "$(dirname "$0")"
 
@@ -15,7 +17,7 @@ BT=$SDK/build-tools/35.0.0
 AJ=$SDK/platforms/android-35/android.jar
 VER=${1:-$(cat VERSION)}
 CODE=${2:-$(date -u +%y%m%d%H)}
-KEYSTORE=${KEYSTORE:-out/throwaway.keystore}
+KEYSTORE=${KEYSTORE:-test.keystore}
 KS_ALIAS=${KS_ALIAS:-charmera}
 KS_PASS=${KS_PASS:-throwaway-key}
 APK=out/charmera-card-$VER.apk
@@ -27,13 +29,31 @@ done
 rm -rf out/build out/test
 mkdir -p out/build/classes out/build/gen out/test
 
-echo "1/4 checker and card tests"
+echo "1/4 checker, write gate, card, flash log, flash steps, photo header, identify, date repair and recipe tests"
 javac -encoding UTF-8 -d out/test src/io/github/daemonddev/charmera/UpdateCheck.java \
     src/io/github/daemonddev/charmera/CardState.java src/io/github/daemonddev/charmera/Candidates.java \
-    test/UpdateCheckTest.java test/CardStateTest.java test/CandidatesTest.java
+    src/io/github/daemonddev/charmera/WriteGate.java src/io/github/daemonddev/charmera/FlashLog.java \
+    src/io/github/daemonddev/charmera/FlashFlow.java \
+    src/io/github/daemonddev/charmera/PhotoId.java src/io/github/daemonddev/charmera/DateFix.java \
+    src/io/github/daemonddev/charmera/ZipCheck.java src/io/github/daemonddev/charmera/Identify.java \
+    src/io/github/daemonddev/charmera/Recipes.java src/io/github/daemonddev/charmera/Recipe.java \
+    test/UpdateCheckTest.java test/CardStateTest.java test/CandidatesTest.java test/CandidatesFactoryTest.java \
+    test/WriteGateTest.java \
+    test/FlashLogTest.java test/FlashFlowTest.java test/PhotoIdTest.java test/DateFixTest.java test/ZipCheckTest.java \
+    test/IdentifyTest.java test/RecipesTest.java test/RecipeTest.java
 java -cp out/test UpdateCheckTest
 java -cp out/test io.github.daemonddev.charmera.CardStateTest
 java -cp out/test CandidatesTest
+java -cp out/test io.github.daemonddev.charmera.CandidatesFactoryTest
+java -cp out/test io.github.daemonddev.charmera.WriteGateTest
+java -cp out/test io.github.daemonddev.charmera.FlashLogTest
+java -cp out/test io.github.daemonddev.charmera.FlashFlowTest
+java -cp out/test io.github.daemonddev.charmera.PhotoIdTest
+java -cp out/test io.github.daemonddev.charmera.DateFixTest
+java -cp out/test io.github.daemonddev.charmera.ZipCheckTest
+java -cp out/test io.github.daemonddev.charmera.IdentifyTest
+java -cp out/test io.github.daemonddev.charmera.RecipesTest
+java -cp out/test io.github.daemonddev.charmera.RecipeTest
 
 echo "2/4 resources"
 "$BT/aapt2" compile --dir res -o out/build/res.zip
@@ -51,7 +71,7 @@ cp out/build/base.apk out/build/unsigned.apk
 
 echo "4/4 signing"
 if [ ! -f "$KEYSTORE" ]; then
-    echo "no keystore at $KEYSTORE: making a throwaway one"
+    echo "no keystore at $KEYSTORE: making one (its certificate will differ from the committed test.keystore)"
     keytool -genkeypair -keystore "$KEYSTORE" -alias "$KS_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
         -storepass "$KS_PASS" -keypass "$KS_PASS" -dname "CN=Charmera Card" >/dev/null 2>&1
 fi

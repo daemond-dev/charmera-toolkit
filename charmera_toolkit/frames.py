@@ -1274,7 +1274,8 @@ def register(subparsers) -> None:
     p = subparsers.add_parser("frames", help="list, extract, preview or replace the four photo frames")
     p.add_argument("action", choices=["list", "extract", "preview", "replace"])
     p.add_argument("file", help="a 2 MiB dump or a 0x1E0000 update file")
-    p.add_argument("--out", help="output directory (extract), PNG path (preview) or image path (replace)")
+    p.add_argument("--out", help="output directory (extract), PNG path (preview) or image path (replace); preview and replace "
+                                 "never write under a JH_*.bin name or into a folder that holds DCIM or a JH_*.bin")
     p.add_argument("--slot", type=int, help="frame number 0..3 (preview, replace)")
     p.add_argument("--photo", help="preview: an 800x600 RGB or RGBA PNG")
     p.add_argument("--png", help="replace: an 800x600 RGBA PNG; transparent pixels show the photo")

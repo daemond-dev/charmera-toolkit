@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from charmera_toolkit import cli, flash
-from charmera_toolkit.flash import BUILD_STAMPS, FLASH_SIZE, TAIL_START
+from charmera_toolkit import cli, flash, image
+from charmera_toolkit.flash import FLASH_SIZE, TAIL_START
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -75,7 +75,8 @@ def bump_counter(name):
     open(p, "w").write(str(n))
     return n
 
-if mode == "nochip":
+# "writenochip": the reads work, the write then fails while detecting the chip (nothing is erased).
+if mode == "nochip" or (mode == "writenochip" and write_from is not None):
     print("No EEPROM/flash device found.")
     print("Note: flashrom can never write if the flash chip isn't found automatically.")
     sys.exit(1)
@@ -119,12 +120,23 @@ sys.exit(0)
 '''
 
 
+# The public build's marks, as the content finder expects them: the strings with their NUL, a sensor reset table,
+# a 61-write init table (page select first, one more page switch, ff ff marker) and the code literal pointing at it.
+STAMP_OFFSET, BUILD_OFFSET = 0x218C4, 0x18964
+SENSOR_START = 0xF5C6C
+SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                               + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
+
+
 def make_image(fill: int = 0x5A) -> bytes:
-    """A 2 MiB image shaped like a stock dump: magic, both build stamps, a 0xFF tail."""
+    """A 2 MiB image shaped like a stock dump: magic, the build marks, a 0xFF tail."""
     body = bytearray(bytes([fill]) * TAIL_START)
     body[0:4] = b"SPII"
-    for offset, stamp in BUILD_STAMPS:
-        body[offset : offset + len(stamp)] = stamp
+    body[BUILD_OFFSET: BUILD_OFFSET + 17] = b"JH5408  20250520\x00"
+    body[STAMP_OFFSET - 1: STAMP_OFFSET + 13] = b"\x00202505201029\x00"   # NUL-terminated, as in the firmware
+    body[0xF5BFC: 0xF5C02] = image.SENSOR_RESET_TABLE
+    body[SENSOR_START: SENSOR_START + len(SYNTHETIC_SENSOR_TABLE)] = SYNTHETIC_SENSOR_TABLE
+    body[0x7B91C: 0x7B920] = (SENSOR_START - 0x200).to_bytes(4, "little")
     return bytes(body) + b"\xff" * (FLASH_SIZE - TAIL_START)
 
 
@@ -180,6 +192,20 @@ def run(argv: list) -> int:
     flash.register(sub)
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)
+
+
+def restore(image: Path, out_dir: Path, *extra: str) -> int:
+    return run(["restore", "--image", str(image), "--out", str(out_dir)] + list(extra))
+
+
+def flat(text: str) -> str:
+    """Output with its line breaks and indents folded to single spaces, for phrases that wrap."""
+    return " ".join(text.split())
+
+
+def chip_ops(fake) -> list:
+    """The flashrom calls that read or wrote the chip, in order."""
+    return [c for c in fake.calls() if "-r" in c or "-w" in c]
 
 
 # ---------------------------------------------------------------------------------------------- wiring
@@ -355,22 +381,45 @@ def test_write_and_readback_have_no_timeout_and_reads_keep_theirs(fake_flashrom,
 
     monkeypatch.setattr(flash, "run_flashrom", recording)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
+    fake_flashrom.set_chip(make_image(0x00))     # the same sensor table as the image: RESTORE is the only word asked
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
 
     assert run(["probe"]) == 0
     assert run(["backup", "--out", str(tmp_path / "b")]) == 0
-    assert run(["restore", "--image", str(image)]) == 0
+    assert restore(image, tmp_path / "r") == 0
 
     assert all(t == flash.VERSION_TIMEOUT for a, t in seen if a == ["--version"])
     assert [t for a, t in seen if "-r" not in a and "-w" not in a and a != ["--version"]] == [flash.PROBE_TIMEOUT]
-    backup_reads = [t for a, t in seen if "-r" in a][:2]
-    assert backup_reads == [flash.READ_TIMEOUT, flash.READ_TIMEOUT]
+    reads = [t for a, t in seen if "-r" in a]
+    # backup's two reads and the two restore makes before it writes keep the read timeout
+    assert reads[:4] == [flash.READ_TIMEOUT] * 4
     writes = [(a, t) for a, t in seen if "-w" in a]
     assert len(writes) == 1 and writes[0][1] is None
-    readback = [(a, t) for a, t in seen if "-r" in a][2:]
-    assert len(readback) == 1 and readback[0][1] is None
+    assert reads[4:] == [None]          # the read-back after the write
     assert not hasattr(flash, "WRITE_TIMEOUT")
+
+
+def test_the_checklist_comes_before_flashrom_touches_the_chip(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """3.3 V, never an unmodified black CH341A, the battery lead lifted, pin 1 on the dot: printed before the first
+    flashrom call that reaches the programmer, by every command that makes one."""
+    fake_flashrom.set_chip(make_image(0x00))
+    image = tmp_path / "stock.bin"
+    image.write_bytes(make_image())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    for argv in (["probe"], ["backup", "--out", str(tmp_path / "b")],
+                 ["restore", "--image", str(image), "--out", str(tmp_path / "r")]):
+        run(argv)
+        out = capsys.readouterr().out
+        assert out.index(flash.CHECKLIST[0]) < out.index("Running: "), argv
+        text = flat(out)
+        for words in ("the programmer runs at 3.3 V", "Never an unmodified black CH341A board: its data lines run at 5 V",
+                      "the camera's battery lead is lifted from its pad", "the clip's pin 1", "on the chip's dot"):
+            assert words in text, (argv, words)
+    # even when flashrom is still missing, which is when the programmer is first being set up
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert run(["probe"]) == 1
+    assert flash.CHECKLIST[0] in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------------------------- backup
@@ -385,9 +434,9 @@ def test_backup_happy_path(fake_flashrom, tmp_path, capsys):
     bins = sorted(out_dir.glob("mine_*.bin"))
     assert len(bins) == 1, list(out_dir.iterdir())
     final = bins[0]
-    assert ".read" not in final.name
+    assert ".read" not in final.name and "unverified" not in final.name
     assert final.read_bytes() == image
-    assert not list(out_dir.glob("*.read*.bin"))
+    assert not list(out_dir.glob("*.read*.bin")) and not list(out_dir.glob("*unverified*"))
 
     expected_sha = flash.sha256_hex(image)
     sha_file = out_dir / (final.stem + ".sha256")
@@ -395,12 +444,17 @@ def test_backup_happy_path(fake_flashrom, tmp_path, capsys):
 
     manifest = json.loads((out_dir / (final.stem + ".manifest.json")).read_text())
     assert manifest["file"] == final.name
+    assert manifest["command"] == "backup"
     assert manifest["sha256"] == expected_sha
     assert manifest["size"] == FLASH_SIZE
     assert manifest["size_ok"] is True
     assert manifest["magic_ok"] is True
-    assert manifest["build_stamps"] == {"0x18964": "JH5408  20250520", "0x218C4": "202505201029"}
-    assert manifest["build_stamps_ok"] is True
+    assert manifest["build_marks"]["build_string"] == {"offset": "0x18964", "value": "JH5408  20250520"}
+    assert manifest["build_marks"]["stamp"] == {"offset": "0x218C4", "value": "202505201029"}
+    assert manifest["build_marks"]["sensor_table"]["offset"] == "0xF5C6C" and manifest["build_marks"]["sensor_table"]["writes"] == 61
+    assert manifest["build_marks_ok"] is True
+    # laid out like the public build but with a sensor table no known build has: another build, not a changed copy
+    assert manifest["build"] == "charmera-unknown-build"
     assert manifest["tail_blank"] is True
     assert manifest["public_dump"] is None
     assert manifest["reads"] == 2
@@ -435,9 +489,16 @@ def test_backup_single_read_is_not_recorded_as_identical(fake_flashrom, tmp_path
     assert manifest["reads"] == 1
     assert manifest["reads_identical"] is None
     assert len([c for c in fake_flashrom.calls() if "-r" in c]) == 1
+    # one read keeps a name nobody takes for a backup, and the checksum and manifest name that file
+    bins = sorted(p.name for p in out_dir.glob("*.bin"))
+    assert len(bins) == 1 and bins[0].startswith("charmera_") and bins[0].endswith(".unverified-read1.bin")
+    assert manifest["file"] == bins[0]
+    assert next(out_dir.glob("*.sha256")).read_text() == f"{flash.sha256_hex(make_image())}  {bins[0]}\n"
     out = capsys.readouterr().out
     assert "single read was not cross-checked" in out
-    assert "Keep the three files together" in out
+    assert f"It is kept as {bins[0]}, which is not a backup" in flat(out)
+    assert "backup:   " not in out and f"read:     {out_dir / bins[0]}" in out
+    assert "Keep the three files together. One read is not a backup" in out
 
 
 def test_backup_reads_n_times_and_chip_auto(fake_flashrom, tmp_path):
@@ -458,11 +519,12 @@ def test_backup_differing_reads_exits_1_and_keeps_reads(fake_flashrom, tmp_path,
     assert run(["backup", "--out", str(out_dir)]) == 1
     kept = sorted(p.name for p in out_dir.iterdir())
     assert len(kept) == 2
-    assert all(".read" in n and n.endswith(".bin") for n in kept)
+    # kept for diagnosis under names nobody takes for a backup
+    assert [n.rsplit(".", 2)[1:] for n in kept] == [["unverified-read1", "bin"], ["unverified-read2", "bin"]]
     assert not list(out_dir.glob("*.sha256"))
     assert not list(out_dir.glob("*.manifest.json"))
     captured = capsys.readouterr()
-    assert "not identical" in captured.err
+    assert "not identical" in captured.err and "no backup was written" in captured.err
     assert "first difference at 0x1002" in captured.out
 
 
@@ -482,8 +544,9 @@ def test_backup_keeps_blank_chip_with_warnings(fake_flashrom, tmp_path, capsys):
     assert final.read_bytes() == b"\xff" * FLASH_SIZE
     manifest = json.loads((out_dir / (final.stem + ".manifest.json")).read_text())
     assert manifest["magic_ok"] is False
-    assert manifest["build_stamps_ok"] is False
-    assert manifest["build_stamps"] == {"0x18964": None, "0x218C4": None}
+    assert manifest["build_marks_ok"] is False
+    assert manifest["build_marks"] == {"build_string": None, "stamp": None, "sensor_table": None}
+    assert manifest["build"] == "not-charmera"
     assert manifest["tail_blank"] is True
     assert any("SPII" in w for w in manifest["warnings"])
     out = capsys.readouterr().out
@@ -513,12 +576,14 @@ def test_backup_short_read_is_kept_but_exits_1(fake_flashrom, tmp_path, monkeypa
     assert "Keep the three files together" not in captured.out
     assert "backup:   " not in captured.out
     # And restore does refuse exactly that file.
-    assert run(["restore", "--image", str(final)]) == 1
+    assert restore(final, tmp_path / "r") == 1
     assert "Nothing was written" in capsys.readouterr().err
     assert not fake_flashrom.wrote_anything()
 
 
 def test_backup_recognizes_public_dump(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A read identical to a public dump may be this camera after the stock restore flash: the way back to that
+    state, not a reference for which sensor the camera has."""
     image = make_image(0x11)
     fake_flashrom.set_chip(image)
     monkeypatch.setitem(flash.PUBLIC_DUMPS, flash.sha256_hex(image), "example/public-dump")
@@ -526,7 +591,11 @@ def test_backup_recognizes_public_dump(fake_flashrom, tmp_path, monkeypatch, cap
     assert run(["backup", "--out", str(out_dir)]) == 0
     manifest = json.loads(next(out_dir.glob("*.manifest.json")).read_text())
     assert manifest["public_dump"] == "example/public-dump"
-    assert "example/public-dump" in capsys.readouterr().out
+    text = flat(capsys.readouterr().out)
+    assert "this read is byte-identical to the public dump from example/public-dump" in text
+    assert "so this may be this camera after such a flash" in text
+    assert "the way back to that state, not a reference for which image sensor the camera has" in text
+    assert "The app does not take it as a backup" in text
 
 
 def test_backup_label_is_sanitized(fake_flashrom, tmp_path):
@@ -548,12 +617,12 @@ def test_backup_rejects_zero_reads(fake_flashrom, tmp_path, capsys):
 def test_restore_refuses_wrong_size(fake_flashrom, tmp_path, capsys):
     image = tmp_path / "short.bin"
     image.write_bytes(make_image()[:-1])
-    assert run(["restore", "--image", str(image)]) == 1
+    assert restore(image, tmp_path / "r") == 1
     err = capsys.readouterr().err
     assert "2,097,152" in err
     assert "Nothing was written" in err
     assert not fake_flashrom.wrote_anything()
-    assert fake_flashrom.calls() == []
+    assert fake_flashrom.calls() == []          # refused before flashrom runs at all
 
 
 def test_restore_refuses_wrong_magic(fake_flashrom, tmp_path, capsys):
@@ -561,32 +630,41 @@ def test_restore_refuses_wrong_magic(fake_flashrom, tmp_path, capsys):
     data[0:4] = b"XXXX"
     image = tmp_path / "nomagic.bin"
     image.write_bytes(bytes(data))
-    assert run(["restore", "--image", str(image)]) == 1
+    assert restore(image, tmp_path / "r") == 1
     assert "SPII" in capsys.readouterr().err
     assert not fake_flashrom.wrote_anything()
+    assert fake_flashrom.calls() == []
 
 
-def test_restore_refuses_missing_build_stamp_without_flag(fake_flashrom, tmp_path, capsys):
+def test_restore_refuses_missing_build_marks_without_flag(fake_flashrom, tmp_path, capsys):
     data = bytearray(make_image())
-    offset, stamp = BUILD_STAMPS[1]
-    data[offset : offset + len(stamp)] = b"202601010000"
-    image = tmp_path / "other.bin"
-    image.write_bytes(bytes(data))
-    assert run(["restore", "--image", str(image)]) == 1
+    data[STAMP_OFFSET + 12] = ord("Z")      # no NUL after the digits: not a stamp string any more
+    image_path = tmp_path / "other.bin"
+    image_path.write_bytes(bytes(data))
+    assert restore(image_path, tmp_path / "r") == 1
     err = capsys.readouterr().err
-    assert "0x218C4" in err
+    assert "no Charmera build marks" in err and "stamp missing" in err
     assert "--allow-unknown-build" in err
+    # the freeze was seen on one camera; its cause is inferred, as public_image_note says
+    assert ("After a flash, one camera started but froze in photo and video mode; the likely cause is a sensor the firmware "
+            "does not drive (INFERRED)") in flat(err)
+    assert "seen on hardware" not in err
     assert not fake_flashrom.wrote_anything()
+    # another stamp at the same place is still a Charmera build mark: the stamp is not an identity
+    data = bytearray(make_image())
+    data[STAMP_OFFSET: STAMP_OFFSET + 12] = b"202601010000"
+    image_path.write_bytes(bytes(data))
+    assert flash.analyze_image(bytes(data))["build_marks_ok"] is True
+    assert flash.analyze_image(bytes(data))["build"] == "charmera-unknown-build"
 
 
 def test_restore_missing_build_stamp_allowed_with_flag(fake_flashrom, tmp_path, monkeypatch, capsys):
     data = bytearray(make_image())
-    offset, stamp = BUILD_STAMPS[0]
-    data[offset : offset + len(stamp)] = b"X" * len(stamp)
+    data[BUILD_OFFSET: BUILD_OFFSET + 16] = b"X" * 16
     image = tmp_path / "other.bin"
     image.write_bytes(bytes(data))
     monkeypatch.setattr("builtins.input", lambda prompt="": "no")
-    assert run(["restore", "--image", str(image), "--allow-unknown-build"]) == 1
+    assert restore(image, tmp_path / "r", "--allow-unknown-build") == 1
     captured = capsys.readouterr()
     assert "continuing because --allow-unknown-build" in captured.out
     assert "Stopped. Nothing was written." in captured.out
@@ -597,10 +675,12 @@ def test_restore_declined_writes_nothing(fake_flashrom, tmp_path, monkeypatch, c
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
     monkeypatch.setattr("builtins.input", lambda prompt="": "restore")  # wrong case is a refusal
-    assert run(["restore", "--image", str(image)]) == 1
+    out_dir = tmp_path / "r"
+    assert restore(image, out_dir) == 1
     assert "Stopped. Nothing was written." in capsys.readouterr().out
     assert not fake_flashrom.wrote_anything()
     assert not any("-w" in c for c in fake_flashrom.calls())
+    assert len(list(out_dir.glob("before-restore_*.bin"))) == 1     # the read made before asking stays
 
 
 def test_restore_happy_path(fake_flashrom, tmp_path, monkeypatch, capsys):
@@ -615,55 +695,335 @@ def test_restore_happy_path(fake_flashrom, tmp_path, monkeypatch, capsys):
         return "RESTORE"
 
     monkeypatch.setattr("builtins.input", fake_input)
-    assert run(["restore", "--image", str(image)]) == 0
+    assert restore(image, tmp_path / "r") == 0
 
-    assert prompts and "RESTORE" in prompts[0]
+    # the same sensor table on both sides: RESTORE is the only word asked for
+    assert len(prompts) == 1 and "RESTORE" in prompts[0]
     assert fake_flashrom.written() == data
-    calls = fake_flashrom.calls()
-    ops = [c for c in calls if "-w" in c or "-r" in c]
-    assert len(ops) == 2
-    assert ops[0][:4] == ["-p", "ch341a_spi", "-c", "SFDP-capable chip"]
-    assert ops[0][4:] == ["-w", str(image)]
-    assert ops[1][4] == "-r"
+    ops = chip_ops(fake_flashrom)
+    assert [c[4] for c in ops] == ["-r", "-r", "-w", "-r"]
+    assert all(c[:4] == ["-p", "ch341a_spi", "-c", "SFDP-capable chip"] for c in ops)
+    copy = Path(ops[2][5])
+    assert copy != image and copy.name == "image.bin" and copy.parent.name.startswith("charmera-restore-")
     out = capsys.readouterr().out
     assert flash.sha256_hex(data) in out
     assert "Plan:" in out
     exe = flash.find_flashrom(None)
-    assert "  1. " + flash._display([exe, "-p", "ch341a_spi", "-c", "SFDP-capable chip", "-w", str(image)]) in out
+    assert "  1. " + flash._display([exe, "-p", "ch341a_spi", "-c", "SFDP-capable chip", "-w", str(copy)]) in out
     assert "never interrupts it" in out
-    assert "Running: " + flash._display([exe, "-p", "ch341a_spi", "-c", "SFDP-capable chip", "-w", str(image)]) in out
+    assert "Running: " + flash._display([exe, "-p", "ch341a_spi", "-c", "SFDP-capable chip", "-w", str(copy)]) in out
+    assert "The same table: the image sets up the image sensor as the firmware on the chip does" in flat(out)
     assert "Restore verified" in out
-    assert not Path(ops[1][5]).exists()  # the read-back temp file is removed after a verified restore
+    # the private copy and the read-back are removed after a verified restore, with their folder
+    assert not copy.exists() and not Path(ops[3][5]).exists() and not copy.parent.exists()
+
+
+def test_restore_reads_the_chip_twice_and_keeps_it_before_writing(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """No backup of the chip on the clip, no write. restore needs no backup made beforehand: it reads the chip
+    twice itself, before it asks anything, and keeps that read the way backup keeps one."""
+    before = make_image(0x00)
+    fake_flashrom.set_chip(before)
+    data = make_image()
+    image = tmp_path / "stock.bin"
+    image.write_bytes(data)
+    ops_at_prompt = []
+
+    def fake_input(prompt=""):
+        ops_at_prompt.append([c[4] for c in chip_ops(fake_flashrom)])
+        return "RESTORE"
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    out_dir = tmp_path / "before"
+    assert restore(image, out_dir) == 0
+    assert ops_at_prompt == [["-r", "-r"]]
+    assert [c[4] for c in chip_ops(fake_flashrom)] == ["-r", "-r", "-w", "-r"]
+    # the chip as it was before the write, with its checksum and manifest
+    kept = sorted(out_dir.glob("before-restore_*.bin"))
+    assert len(kept) == 1 and kept[0].read_bytes() == before
+    assert not list(out_dir.glob("*unverified*"))
+    sha = flash.sha256_hex(before)
+    assert (out_dir / (kept[0].stem + ".sha256")).read_text() == f"{sha}  {kept[0].name}\n"
+    manifest = json.loads((out_dir / (kept[0].stem + ".manifest.json")).read_text())
+    assert manifest["command"] == "restore" and manifest["file"] == kept[0].name
+    assert manifest["reads"] == 2 and manifest["reads_identical"] is True and manifest["sha256"] == sha
+    assert manifest["before_writing"] == {"image": "stock.bin", "sha256": flash.sha256_hex(data)}
+    out = capsys.readouterr().out
+    assert f"kept:     {kept[0]}" in out
+    assert f"The way back is the read kept above, {kept[0]}" in out
+    # --label names that read
+    fake_flashrom.set_chip(before)
+    assert restore(image, tmp_path / "other", "--label", "cam 2") == 0
+    assert len(list((tmp_path / "other").glob("cam_2_*.bin"))) == 1
+
+
+def test_restore_refuses_when_the_two_reads_differ(fake_flashrom, tmp_path, monkeypatch, capsys):
+    image = tmp_path / "stock.bin"
+    image.write_bytes(make_image())
+    fake_flashrom.set_mode("readvary", monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask when the reads differ"))
+    out_dir = tmp_path / "r"
+    assert restore(image, out_dir) == 1
+    captured = capsys.readouterr()
+    assert "not identical" in captured.err and "nothing was written to the chip" in captured.err
+    assert "run restore again" in captured.err
+    assert not any("-w" in c for c in fake_flashrom.calls())
+    assert not fake_flashrom.wrote_anything()
+    kept = sorted(p.name for p in out_dir.iterdir())
+    assert len(kept) == 2 and all(n.endswith((".unverified-read1.bin", ".unverified-read2.bin")) for n in kept)
+
+
+@pytest.mark.parametrize("mode,said", [("readfail", "flashrom read 1 failed"), ("nochip", "flashrom read 1 failed"),
+                                       ("readshort", "not a full-flash image")])
+def test_restore_writes_nothing_when_the_chip_cannot_be_read_whole(fake_flashrom, tmp_path, monkeypatch, capsys, mode, said):
+    image = tmp_path / "stock.bin"
+    image.write_bytes(make_image())
+    fake_flashrom.set_mode(mode, monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask without a read of the chip"))
+    assert restore(image, tmp_path / "r") == 1
+    err = capsys.readouterr().err
+    assert said in err and ("Nothing was written to the chip" in err or "nothing was written to it" in err)
+    assert not any("-w" in c for c in fake_flashrom.calls())
+    assert not fake_flashrom.wrote_anything()
+
+
+def test_restore_asks_a_second_time_when_the_sensor_tables_differ(fake_flashrom, tmp_path, monkeypatch, capsys):
+    data = make_image()
+    image = tmp_path / "stock.bin"
+    image.write_bytes(data)
+    chip = bytearray(make_image(0x00))
+    chip[SENSOR_START + 3] ^= 0xFF          # one value of the chip's init table differs
+    fake_flashrom.set_chip(bytes(chip))
+    prompts = []
+    answers = []
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    answers[:] = ["RESTORE", "yes"]
+    assert restore(image, tmp_path / "r1") == 1
+    out = capsys.readouterr().out
+    text = flat(out)
+    image_sha = flash.analyze_image(data)["build_marks"]["sensor_table"]["sha256"]
+    chip_sha = flash.analyze_image(bytes(chip))["build_marks"]["sensor_table"]["sha256"]
+    assert image_sha != chip_sha
+    assert f"sensor: image 61 writes at 0xF5C6C, sha256 {image_sha[:16]}... chip 61 writes at 0xF5C6C, sha256 {chip_sha[:16]}..." in text
+    assert "DIFFERENT: the image sets up the image sensor differently from the firmware on the chip" in text
+    assert "Nothing here can tell whether that firmware fits this camera" in text
+    assert len(prompts) == 2 and "RESTORE" in prompts[0] and "Type DIFFERENT" in prompts[1]
+    assert "Stopped. Nothing was written." in out
+    assert not fake_flashrom.wrote_anything()
+    # typed, it is written
+    prompts.clear()
+    answers[:] = ["RESTORE", "DIFFERENT"]
+    assert restore(image, tmp_path / "r2") == 0
+    assert len(prompts) == 2 and fake_flashrom.written() == data
+    # and a "DIFFERENT" never stands in for RESTORE
+    fake_flashrom.set_chip(bytes(chip))
+    (fake_flashrom.state / "written.bin").unlink()
+    answers[:] = ["DIFFERENT", "DIFFERENT"]
+    assert restore(image, tmp_path / "r3") == 1
+    assert not fake_flashrom.wrote_anything()
+
+
+def test_restore_on_a_chip_without_a_sensor_table_asks_a_second_time(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A chip that no longer boots may hold anything, or firmware with another kind of table: a chip without a table of
+    the known kind and an image with one are not the same, so restore asks for DIFFERENT too."""
+    image = tmp_path / "stock.bin"
+    image.write_bytes(make_image())          # the fake chip holds no marks at all
+    prompts = []
+    answers = []
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    answers[:] = ["RESTORE", "RESTORE"]
+    assert restore(image, tmp_path / "r1") == 1
+    out = capsys.readouterr().out
+    text = flat(out)
+    assert "chip none of the kind the known builds use" in text
+    assert "DIFFERENT: the chip holds no sensor table of the kind the known builds use" in text
+    assert "the image has one, so the two are not the same" in text
+    assert "Nothing here can tell whether that firmware fits this camera" in text
+    assert "nothing here can tell whether that firmware fits this camera" in text      # said again before the word is asked
+    assert len(prompts) == 2 and "Type DIFFERENT" in prompts[1]
+    assert "Stopped. Nothing was written." in out and not fake_flashrom.wrote_anything()
+    prompts.clear()
+    answers[:] = ["RESTORE", "DIFFERENT"]
+    assert restore(image, tmp_path / "r2") == 0
+    assert len(prompts) == 2 and fake_flashrom.written() == make_image()
+
+
+def test_restore_compares_nothing_when_neither_side_has_a_sensor_table(fake_flashrom, tmp_path, monkeypatch, capsys):
+    data = bytearray(make_image())
+    data[0xF5BFC: 0xF5C02] = bytes.fromhex("fe0080ffffff")    # not the known builds' reset table
+    image = tmp_path / "other.bin"
+    image.write_bytes(bytes(data))
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompts.append(prompt) or "RESTORE")
+    assert restore(image, tmp_path / "r", "--allow-unknown-build") == 0
+    assert "Neither the image nor the chip holds a sensor table of the kind the known builds use" in flat(capsys.readouterr().out)
+    assert len(prompts) == 1
+
+
+def with_a_second_sensor_program(data: bytes) -> bytes:
+    """The image with a second reset and init table at 0xF7000, one value of the init table changed, and an aligned
+    code literal at 0x7B000 that refers to it: two sensor programs the code refers to, with different tables."""
+    out = bytearray(data)
+    table = bytearray(SYNTHETIC_SENSOR_TABLE)
+    table[3] ^= 0x01
+    out[0xF7000: 0xF7006] = image.SENSOR_RESET_TABLE
+    out[0xF7006: 0xF7006 + len(table)] = table
+    out[0x7B000: 0x7B004] = (0xF7006 - 0x200).to_bytes(4, "little")
+    return bytes(out)
+
+
+def test_restore_refuses_an_image_with_several_sensor_programs(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """S6, as verify: which of several programs sets up the sensor cannot be told, so the image cannot be compared with
+    the chip's table. Refused before flashrom runs, whatever the flags."""
+    data = with_a_second_sensor_program(make_image())
+    assert len(image.find_marks(data).several_sensor_programs) == 2
+    path = tmp_path / "two.bin"
+    path.write_bytes(data)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask: the image is refused"))
+    for flags in ((), ("--allow-unknown-build",)):
+        assert restore(path, tmp_path / "r", *flags) == 2
+        err = flat(capsys.readouterr().err)
+        assert "refusing: the code in two.bin refers to 2 image-sensor set-up tables with different contents" in err
+        assert "61 writes at 0xF5C6C" in err and "referred to from code at 0x7B91C" in err
+        assert "61 writes at 0xF7006" in err and "referred to from code at 0x7B000" in err
+        assert "cannot be compared with the table on the chip, and verify refuses such a file too. No flag accepts it" in err
+        assert "Nothing was written." in err
+    assert fake_flashrom.calls() == [] and not fake_flashrom.wrote_anything()
+    assert not (tmp_path / "r").exists()
+
+
+def test_restore_asks_a_second_time_when_the_chip_has_several_sensor_programs(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A chip whose code refers to several programs with different tables does not hold the image's table, whichever of
+    them it runs: restore asks for DIFFERENT and says why, even though the first of them is the image's."""
+    data = make_image()
+    image_path = tmp_path / "stock.bin"
+    image_path.write_bytes(data)
+    chip = with_a_second_sensor_program(make_image(0x00))
+    assert image.find_marks(chip).sensor.sha256 == image.find_marks(data).sensor.sha256      # the one picked is the same
+    prompts = []
+    answers = []
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    fake_flashrom.set_chip(chip)
+    answers[:] = ["RESTORE", "RESTORE"]
+    assert restore(image_path, tmp_path / "r1") == 1
+    out = capsys.readouterr().out
+    text = flat(out)
+    assert "chip 2 sensor programs the code refers to, with different tables: 61 writes at 0xF5C6C" in text
+    assert "61 writes at 0xF7006" in text and "referred to from code at 0x7B000" in text
+    assert ("DIFFERENT: the code on the chip refers to 2 image-sensor set-up tables with different contents, so which one "
+            "sets up this camera's sensor cannot be told, and the image's table is not the same as the chip's") in text
+    assert "The same table" not in text
+    assert "The code on the chip refers to several image-sensor set-up tables with different contents" in text
+    assert len(prompts) == 2 and "Type DIFFERENT" in prompts[1]
+    assert "Stopped. Nothing was written." in out and not fake_flashrom.wrote_anything()
+    prompts.clear()
+    answers[:] = ["RESTORE", "DIFFERENT"]
+    assert restore(image_path, tmp_path / "r2") == 0
+    assert len(prompts) == 2 and fake_flashrom.written() == data
+
+
+def test_restore_writes_a_private_copy_of_the_checked_bytes(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """flashrom gets a private copy of what was checked, never the file named in --image: a file that changes
+    while the plan waits for RESTORE cannot reach the chip."""
+    data = make_image()
+    image = tmp_path / "stock.bin"
+    image.write_bytes(data)
+    fake_flashrom.set_chip(make_image(0x00))
+
+    def fake_input(prompt=""):
+        image.write_bytes(make_image(0x77))   # another pack run, a sync client, ...
+        return "RESTORE"
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert restore(image, tmp_path / "r") == 0
+    writes = [c for c in fake_flashrom.calls() if "-w" in c]
+    assert len(writes) == 1 and Path(writes[0][5]) != image
+    assert fake_flashrom.written() == data
+    assert "Restore verified" in capsys.readouterr().out
+
+
+def test_restore_checks_the_private_copy_again_before_flashrom_runs(fake_flashrom, tmp_path, monkeypatch, capsys):
+    work = tmp_path / "work"
+
+    def fake_mkdtemp(prefix=None, **kwargs):
+        work.mkdir()
+        return str(work)
+
+    monkeypatch.setattr(flash.tempfile, "mkdtemp", fake_mkdtemp)
+    image = tmp_path / "stock.bin"
+    image.write_bytes(make_image())
+    fake_flashrom.set_chip(make_image(0x00))
+
+    def fake_input(prompt=""):
+        (work / "image.bin").write_bytes(make_image(0x77))
+        return "RESTORE"
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert restore(image, tmp_path / "r") == 1
+    assert "no longer has the SHA-256 checked above" in flat(capsys.readouterr().err)
+    assert not any("-w" in c for c in fake_flashrom.calls())
+    assert not fake_flashrom.wrote_anything()
+    assert not work.exists()                 # the copy is removed, written or not
+
+
+def test_restore_when_the_chip_already_holds_the_image(fake_flashrom, tmp_path, monkeypatch, capsys):
+    data = make_image()
+    image = tmp_path / "stock.bin"
+    image.write_bytes(data)
+    fake_flashrom.set_chip(data)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("nothing to ask: nothing to write"))
+    assert restore(image, tmp_path / "r") == 0
+    out = capsys.readouterr().out
+    assert "identical to the chip as read just now in all 32 blocks" in out
+    assert "nothing to write" in out
+    assert not any("-w" in c for c in fake_flashrom.calls())
 
 
 def test_restore_readback_mismatch_exits_nonzero(fake_flashrom, tmp_path, monkeypatch, capsys):
     data = make_image()
     image = tmp_path / "stock.bin"
     image.write_bytes(data)
+    fake_flashrom.set_chip(make_image(0x00))
     fake_flashrom.set_mode("writecorrupt", monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
-    assert run(["restore", "--image", str(image)]) == 1
+    assert restore(image, tmp_path / "r") == 1
     captured = capsys.readouterr()
     assert "does not match the image after writing" in captured.err
     assert "block 23" in captured.out  # 0x175000 is in the settings store block
     assert "settings store" in captured.out
-    readback = [c for c in fake_flashrom.calls() if "-r" in c][0]
-    assert Path(readback[5]).exists()  # kept for diagnosis
+    readback = chip_ops(fake_flashrom)[-1]
+    assert readback[4] == "-r" and Path(readback[5]).exists()  # kept for diagnosis
+    assert not (Path(readback[5]).parent / "image.bin").exists()   # the private copy is not
 
 
 def test_restore_write_failure_exits_nonzero(fake_flashrom, tmp_path, monkeypatch, capsys):
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
+    fake_flashrom.set_chip(make_image(0x00))
     fake_flashrom.set_mode("writefail", monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
-    assert run(["restore", "--image", str(image)]) == 1
+    assert restore(image, tmp_path / "r") == 1
     captured = capsys.readouterr()
     assert "flashrom -w failed" in captured.err
     assert "FAILED at 0x00010000" in captured.out
     # The erase/write phase had started, so the chip may be half written.
     assert "mix of old and new data" in captured.err
     assert "stopped before touching the chip" not in captured.err
-    assert not any("-r" in c for c in fake_flashrom.calls())
+    assert [c[4] for c in chip_ops(fake_flashrom)] == ["-r", "-r", "-w"]     # no read-back after a failed write
 
 
 def test_restore_write_failure_before_the_chip_was_touched(fake_flashrom, tmp_path, monkeypatch, capsys):
@@ -671,9 +1031,10 @@ def test_restore_write_failure_before_the_chip_was_touched(fake_flashrom, tmp_pa
     'mix of old and new data' warning."""
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
-    fake_flashrom.set_mode("nochip", monkeypatch)
+    fake_flashrom.set_chip(make_image(0x00))
+    fake_flashrom.set_mode("writenochip", monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "RESTORE")
-    assert run(["restore", "--image", str(image)]) == 1
+    assert restore(image, tmp_path / "r") == 1
     captured = capsys.readouterr()
     assert "flashrom -w failed" in captured.err
     assert "stopped before touching the chip" in captured.err
@@ -681,7 +1042,7 @@ def test_restore_write_failure_before_the_chip_was_touched(fake_flashrom, tmp_pa
     assert "`probe`" in captured.err
     assert "No EEPROM/flash device found" in captured.out
     assert not fake_flashrom.wrote_anything()
-    assert not any("-r" in c for c in fake_flashrom.calls())
+    assert [c[4] for c in chip_ops(fake_flashrom)] == ["-r", "-r", "-w"]
 
 
 def test_write_stopped_before_chip_classification():
@@ -713,63 +1074,77 @@ def test_write_stopped_before_chip_classification():
     assert not stopped('Found Unknown flash chip "SFDP-capable chip" (2048 kB, SPI) on ch341a_spi.\n')
 
 
-def test_restore_prints_block_diff_against_backup(fake_flashrom, tmp_path, monkeypatch, capsys):
+def test_restore_prints_block_diff_against_the_chip(fake_flashrom, tmp_path, monkeypatch, capsys):
     stock = make_image()
-    backup = bytearray(stock)
-    backup[0x170000:0x170100] = b"\x01" * 0x100  # a settings record only the owner has
-    backup[0x1A5800:0x1A5810] = b"\x02" * 0x10  # second photo slot
+    chip = bytearray(stock)
+    chip[0x170000:0x170100] = b"\x01" * 0x100  # a settings record only the owner has
+    chip[0x1A5800:0x1A5810] = b"\x02" * 0x10  # second photo slot
+    fake_flashrom.set_chip(bytes(chip))
     image = tmp_path / "stock.bin"
     image.write_bytes(stock)
-    backup_path = tmp_path / "mine.bin"
-    backup_path.write_bytes(bytes(backup))
     monkeypatch.setattr("builtins.input", lambda prompt="": "no")
-    assert run(["restore", "--image", str(image), "--backup", str(backup_path)]) == 1
+    assert restore(image, tmp_path / "r") == 1
     out = capsys.readouterr().out
-    assert "2 of 32 differ" in out
+    assert "against the chip as read just now (64 KiB blocks), 2 of 32 differ" in out
     assert "block 23  0x170000-0x17FFFF      256 bytes differ  (settings store)" in out
     assert "block 26  0x1A0000-0x1AFFFF       16 bytes differ  (internally stored photos)" in out
-    assert "30 blocks are identical between the image and the given backup." in out
-    # Only a fresh read of the chip could promise that identical blocks will not change.
-    assert "will not change" not in out
-    assert flash.sha256_hex(bytes(backup)) in out
+    # the comparison is with a read made a moment ago through the same clip, so the rest stays as it is
+    assert "30 blocks are identical between the image and the chip; the write leaves their content as it is." in out
+    assert flash.sha256_hex(bytes(chip)) in out
 
 
-def test_restore_backup_help_and_prompt_ask_for_a_fresh_backup(fake_flashrom, tmp_path, monkeypatch, capsys):
+def test_restore_help_names_the_read_it_keeps():
     parser = argparse.ArgumentParser(prog="charmera")
     sub = parser.add_subparsers(dest="command")
     flash.register(sub)
-    help_text = " ".join(sub.choices["restore"].format_help().split())  # argparse wraps lines
-    assert "a fresh backup of the chip as it is now, to show what the write will change" in help_text
-    assert "your own backup" not in help_text
-
-    image = tmp_path / "stock.bin"
-    image.write_bytes(make_image())
-    monkeypatch.setattr("builtins.input", lambda prompt="": "")
-    assert run(["restore", "--image", str(image)]) == 1
-    out = capsys.readouterr().out
-    assert "fresh backup of the chip" in out
-    assert "which blocks the write will change" in out
-
-
-def test_restore_identical_backup(fake_flashrom, tmp_path, monkeypatch, capsys):
-    stock = make_image()
-    image = tmp_path / "stock.bin"
-    image.write_bytes(stock)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "")
-    assert run(["restore", "--image", str(image), "--backup", str(image)]) == 1
-    assert "identical to the backup in all 32 blocks" in capsys.readouterr().out
+    help_text = flat(sub.choices["restore"].format_help())  # argparse wraps lines
+    assert "--out DIR" in help_text and "--label NAME" in help_text
+    assert "read the chip twice and keep that read in --out as backup does" in help_text
+    assert "nothing is written when the reads differ" in help_text
+    assert "a private copy of the checked image" in help_text
+    # a backup file from elsewhere is not taken: it could not prove it came from this chip, now
+    assert "--backup" not in help_text and "your own backup" not in help_text
+    # --allow-unknown-build: the freeze was seen on one camera, its cause is inferred; several programs are never written
+    assert ("After a flash, one camera started but froze in photo and video mode; the likely cause, a sensor the firmware "
+            "does not drive, is INFERRED") in help_text
+    assert "It never writes an image whose code refers to several sensor programs" in help_text
+    assert "freezes capture" not in help_text
+    backup_help = flat(sub.choices["backup"].format_help())
+    assert "keep the name <label>_<UTC time>.unverified-read<n>.bin: they are not a backup" in backup_help
 
 
 def test_restore_notes_public_dump(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """The image may be this camera's own read after the stock restore flash: never 'a last resort', and never
+    firmware known to fit."""
     stock = make_image(0x33)
     image = tmp_path / "public.bin"
     image.write_bytes(stock)
     monkeypatch.setitem(flash.PUBLIC_DUMPS, flash.sha256_hex(stock), "example/public-dump")
     monkeypatch.setattr("builtins.input", lambda prompt="": "")
-    assert run(["restore", "--image", str(image)]) == 1
-    out = capsys.readouterr().out
-    assert "public dump from example/public-dump" in out
-    assert "last resort" in out
+    assert restore(image, tmp_path / "r") == 1
+    text = flat(capsys.readouterr().out)
+    assert "this image is byte-identical to the public dump from example/public-dump" in text
+    # it cannot know this camera's history, and the cause of the frozen camera is inferred, not seen
+    assert "such as a camera after the stock restore flash, and then the way back to that state" in text
+    assert "such as this camera after" not in text and "seen on hardware" not in text
+    assert "Either way it is not firmware known to fit this camera" in text
+    assert ("after it was flashed, one camera could no longer take pictures; the likely cause is a sensor it does not drive "
+            "(INFERRED)") in text
+    assert "last resort" not in text
+
+
+def test_restore_notes_a_chip_that_reads_as_a_public_dump(fake_flashrom, tmp_path, monkeypatch, capsys):
+    public = make_image(0x44)
+    fake_flashrom.set_chip(public)
+    monkeypatch.setitem(flash.PUBLIC_DUMPS, flash.sha256_hex(public), "example/public-dump")
+    image = tmp_path / "stock.bin"
+    image.write_bytes(make_image())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    assert restore(image, tmp_path / "r") == 1
+    text = flat(capsys.readouterr().out)
+    assert "this read is byte-identical to the public dump from example/public-dump" in text
+    assert "so this may be this camera after such a flash" in text
+    assert "the way back to that state, not a reference for which image sensor the camera has" in text
 
 
 def test_restore_without_flashrom_stops_before_prompt(tmp_path, monkeypatch, capsys):
@@ -777,7 +1152,7 @@ def test_restore_without_flashrom_stops_before_prompt(tmp_path, monkeypatch, cap
     image = tmp_path / "stock.bin"
     image.write_bytes(make_image())
     monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not prompt without flashrom"))
-    assert run(["restore", "--image", str(image)]) == 1
+    assert restore(image, tmp_path / "r") == 1
     assert "flashrom was not found" in capsys.readouterr().err
 
 
@@ -820,20 +1195,38 @@ def test_powershell_wrappers_fail_closed_without_an_interpreter(name):
     assert text.rstrip().endswith("exit $LASTEXITCODE")
 
 
-@pytest.mark.parametrize("name", ["restore.sh", "restore.ps1"])
-def test_restore_wrappers_describe_backup_as_the_chip_now(name):
+def wrapper_comments(name: str) -> str:
     text = (REPO / "scripts" / name).read_text(encoding="utf-8")
-    assert "--backup <backup of the chip as it is now>" in text
-    assert "--backup <your backup>" not in text
+    return flat(" ".join(line.lstrip("#") for line in text.splitlines() if line.startswith("#")))
+
+
+@pytest.mark.parametrize("name", ["restore.sh", "restore.ps1"])
+def test_restore_wrappers_say_restore_reads_the_chip_first(name):
+    text = (REPO / "scripts" / name).read_text(encoding="utf-8")
+    comments = wrapper_comments(name)
+    assert "--backup" not in text and "It is optional" not in text
+    assert "--image" in text and "--out" in text
+    assert "No backup of the chip on the clip, no write: restore reads the chip twice before it writes" in comments
+    assert "When the two reads differ it writes nothing" in comments
+    assert "nothing here can tell whether that firmware fits this camera" in comments
+    assert "flashrom writes a private copy of the checked image" in comments
+
+
+@pytest.mark.parametrize("name", ["backup.sh", "backup.ps1", "restore.sh", "restore.ps1"])
+def test_wrappers_carry_the_checklist(name):
+    comments = wrapper_comments(name)
+    for words in ("a 3.3 V programmer", "Never an unmodified black CH341A board: its data lines run at 5 V",
+                  "the camera's battery lead lifted from its pad", "the clip's pin 1", "on the chip's dot"):
+        assert words in comments, (name, words)
+    if name.startswith("backup"):
+        assert "unverified-read<n>.bin: they are not a backup" in comments
 
 
 def test_recovery_doc_matches_the_tool():
     text = " ".join((REPO / "docs" / "02-RECOVERY.md").read_text(encoding="utf-8").split())  # unwrap lines
-    assert "--backup <backup of the chip as it is now>.bin" in text
     assert "if flashrom stopped before it reached the erase" in text
     assert "the chip is untouched" in text
     assert "no time limit on the write or on that read-back" in text
-    assert "will not change" not in text
 
 
 # ---------------------------------------------------------------------------------------------- helpers
@@ -842,7 +1235,7 @@ def test_recovery_doc_matches_the_tool():
 def test_analyze_image_and_block_diff():
     stock = make_image()
     info = flash.analyze_image(stock)
-    assert info["size_ok"] and info["magic_ok"] and info["build_stamps_ok"] and info["tail_blank"]
+    assert info["size_ok"] and info["magic_ok"] and info["build_marks_ok"] and info["tail_blank"]
     assert info["public_dump"] is None
     assert flash.image_warnings(info) == []
 
@@ -856,3 +1249,13 @@ def test_analyze_image_and_block_diff():
 
     shorter = flash.block_diff(stock, stock[:FLASH_SIZE - 10])
     assert shorter[-1].index == 31 and shorter[-1].differing_bytes == 10
+
+
+def test_the_notes_say_what_a_cleaned_copy_is():
+    """The cleaned copies (the-dumping-grounds) hold no owner's photos or settings; v012's copy is the OV9732 build."""
+    v006, v012 = flash.public_image_note(flash.CLEAN_V006), flash.public_image_note(flash.CLEAN_V012)
+    assert "no stored photos" in " ".join(v006) and "two internal photos" not in " ".join(v006)
+    assert "OV9732" in " ".join(v012) and "could no longer take pictures" not in " ".join(v012)
+    assert "factory build v012" in " ".join(flash.public_read_note(flash.CLEAN_V012))
+    assert flash.PUBLIC_DUMPS["75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082"] == flash.CLEAN_V006
+    assert flash.PUBLIC_DUMPS["63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c"] == flash.CLEAN_V012

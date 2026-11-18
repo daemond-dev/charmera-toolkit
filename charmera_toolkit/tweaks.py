@@ -1,6 +1,6 @@
 """`tweak`: small, checked byte patches for faster start-up and quieter power-off. Experimental.
 
-Every patch names the exact bytes it expects at its offset (taken from the original 2025-series build) and
+Every patch names the exact bytes it expects at its offset (taken from the public dump's build) and
 is refused when they are not there, so it cannot land in the wrong place on a modified or different build.
 None of these has been tested on a camera yet. They come from the boot and power analysis in
 docs/12-NOTES-boot-and-power.md; the delays are OS ticks of 10 ms passed to the µC/OS-II delay call.
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from .image import ORIGINAL_2025, detect_build
+from .image import PUBLIC_BUILD, detect_build
 from .sounds import GATE_FLAG, _check_output, _write_mod
 
 
@@ -138,8 +138,9 @@ def handler(args) -> int:
               "file is usually a cut-off download.")
         return 2
     build = detect_build(image)
-    if build.build is not ORIGINAL_2025:
-        print("error: these patches are defined for the original 2025 series build only; this image is not that build")
+    if build.build is None or build.build.key != PUBLIC_BUILD.key:
+        print("error: these patches are defined for the public dump's build only (stamp 202505201029, fingerprint "
+              f"{PUBLIC_BUILD.official_sha1[:8]}...); this image is {build.label}")
         return 2
     names = [n.strip() for n in args.enable.split(",") if n.strip()]
     if not names:
@@ -168,7 +169,7 @@ def register(subparsers) -> None:
     p.add_argument("action", choices=["list", "apply"])
     p.add_argument("file", nargs="?", help="apply: a 2 MiB dump or a 0x1E0000 update file of the original series")
     p.add_argument("--enable", help="apply: comma-separated tweak names from `tweak list`, or 'recommended'")
-    p.add_argument("--out", help="apply: output image path")
+    p.add_argument("--out", help="apply: output image path (never named JH_*.bin, never in a folder that holds DCIM or a JH_*.bin)")
     p.add_argument("--accept-high-risk", action="store_true", help="apply: allow tweaks marked high risk")
     p.add_argument("--overwrite", action="store_true", help="allow --out to replace an existing file (never the input)")
     p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the modified image")

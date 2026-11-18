@@ -100,7 +100,7 @@ def register(subparsers) -> None:
     p.add_argument("action", choices=["show", "set"])
     p.add_argument("file", help="a 2 MiB dump or a 0x1E0000 update file")
     p.add_argument("--all", action="store_true", help="show: print every record in the bank")
-    p.add_argument("--out", help="set: output image path")
+    p.add_argument("--out", help="set: output image path (never named JH_*.bin, never in a folder that holds DCIM or a JH_*.bin)")
     p.add_argument("--base-record", choices=["current", "first"], default="current",
                    help="set: start from the record the camera would load, or from the first (factory) record")
     for key, (_off, lo, hi, desc) in FIELDS.items():

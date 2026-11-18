@@ -1,0 +1,1486 @@
+{
+ "format": 1,
+ "catalog": {
+  "version": "v0.27",
+  "stamp": "202611170027"
+ },
+ "dumps": [
+  {
+   "id": "v006-original",
+   "build": "v006",
+   "copy": "original",
+   "prep": "truncate",
+   "size": 2097152,
+   "sha256": "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f",
+   "source": "benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin (commit 209c25a)",
+   "url": "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin"
+  },
+  {
+   "id": "v006-clean",
+   "build": "v006",
+   "copy": "clean",
+   "prep": "truncate",
+   "size": 2097152,
+   "sha256": "75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082",
+   "source": "the-dumping-grounds/charmera-firmware-v006 charmera-v006-2025-10-14-clean.bin",
+   "url": "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v006/123b76a8ead1322678bbb750ac1c85c8d8bd2099/charmera-v006-2025-10-14-clean.bin"
+  },
+  {
+   "id": "v008_test",
+   "build": "v008_test",
+   "copy": "original",
+   "prep": "as-is",
+   "size": 1478656,
+   "sha256": "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f",
+   "source": "the-dumping-grounds/charmera-firmware-v008_test (the Hyperlite-Media/charmera-film-mods restore file, unchanged)",
+   "url": "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v008_test/155571606f4a33e7912fc44f84b0b29f73f25347/charmera-v008_test-2025-11-19.bin"
+  },
+  {
+   "id": "v012-original",
+   "build": "v012",
+   "copy": "original",
+   "prep": "truncate-blank-photos",
+   "size": 2097152,
+   "sha256": "08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce",
+   "source": "the owner's own read of a never-flashed camera (private, not published)",
+   "url": null
+  },
+  {
+   "id": "v012-clean",
+   "build": "v012",
+   "copy": "clean",
+   "prep": "truncate-blank-photos",
+   "size": 2097152,
+   "sha256": "63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c",
+   "source": "the-dumping-grounds/charmera-firmware-v012 charmera-v012-2026-01-12-clean.bin",
+   "url": "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v012/39150fbc584e4cb7c5bf091f56b9888f07379578/charmera-v012-2026-01-12-clean.bin"
+  }
+ ],
+ "mods": [
+  {
+   "id": "v006/sensor-probe",
+   "base": "v006",
+   "name": "sensor-probe",
+   "title": "Sensor-ID probe",
+   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops as before.",
+   "status": "tested",
+   "conflicts": [
+    "v006/ov9732-port",
+    "v006/volume-led"
+   ],
+   "requires": [],
+   "copies": [],
+   "patches": [
+    {
+     "file_offset": 506008,
+     "new": "209affeb",
+     "old_sha256": "4b845cc94c65d5743063526b275bce02cafb68f6e24599dfbe347fc71509cd9c"
+    },
+    {
+     "file_offset": 401696,
+     "new": "f04f2de9e0d04de20040a0e11c519fe504808de2a700a0e30100c8e40100a0e30100c8e40090a0e308a0a0e1018088e20860a0e38600a0e10900c5e50500a0e10010a0e30d20a0e1922effeb000050e31f0000ba040059e31d0000aa0160c8e41000a0e30700c5e50070a0e3ff00a0e30000cde50500a0e1031a87e30d20a0e1842effeb0000dde50100c8e4017087e2200057e3f4ffffba0070a0e3ff00a0e30000cde50500a0e1311c87e30d20a0e1782effeb0000dde50100c8e4017087e2100057e3f4ffffba0800a0e30700c5e5019089e2016086e2780056e3d4ffffba0090cae57800a0e30900c5e50db048e004b04be23c009fe534109fe5660402eb000050e3050000ba0060a0e104108de20b20a0e11a0502eb0600a0e1040302ebe0d08de20400a0e1f04fbde88e6400eaa4831000020600005c200600433a5c53454e534f522e54585400",
+     "old_sha256": "90a197dd79a21bd738864045f8edb36ed9d16822fbca951632c3d94691802319"
+    }
+   ]
+  },
+  {
+   "id": "v006/ov9732-port",
+   "base": "v006",
+   "name": "ov9732-port",
+   "title": "OV9732 port",
+   "description": "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning (v0.23). It's for an OV9732 camera that was flashed with this build.",
+   "status": "tested",
+   "conflicts": [
+    "v006/sensor-probe"
+   ],
+   "requires": [],
+   "copies": [],
+   "patches": [
+    {
+     "file_offset": 506008,
+     "new": "209affeb",
+     "old_sha256": "4b845cc94c65d5743063526b275bce02cafb68f6e24599dfbe347fc71509cd9c"
+    },
+    {
+     "file_offset": 401696,
+     "new": "f0412de934509fe534809fe50010d8e5ff0051e30600000a0100d8e5011480e10220d8e50500a0e1362effeb038088e2f5ffffea0000a0e3f041bde81eff2fe1681f0600721f06001100120000000010086c01030101000001000030071f3008ff30142230813c3084003600f636017236100c3611f0361235365822365922365a0237001f37011037020c37030737043c37058137100c378258380f03380fce350131350a00350b203d82383d83a43d861f3d87034001e040020040034040060140074048000048050048028448193048253248260848271d48215048235048373750000f57080657810057830f38201c51800151810051820151830051840151855001000137030b370551ff",
+     "old_sha256": "add147d700ee4ec9bffe02b9db576ebc6b84b7f32167eb982c57a78d0613ee02"
+    },
+    {
+     "file_offset": 505208,
+     "new": "429bffea",
+     "old_sha256": "27f02ccf7ea5b0a353fb2f440c37bb29bb4594580da3b4c15ec91e8222eaa40e"
+    },
+    {
+     "file_offset": 402056,
+     "new": "080094e5010050e30100a0b3f11fa0e3010050e10100a0c10c3094e54332a0e1100053e31030a0b3f010a0e3010053e10130a0c10040a0e10350a0e15c609fe50600a0e1353ca0e3011083e32422a0e1ff2002e2d12dffeb0600a0e1353ca0e3021083e30422a0e1ff2002e2cb2dffeb0600a0e1353ca0e30a1083e32524a0e1032002e2c52dffeb0600a0e1353ca0e30b1083e3ff2005e2c02dffebc16400ea2c2106001100120000000010086c",
+     "old_sha256": "cfae57b1c3a221db1bb4ef677f7730bfb5bf42a592a234b1382d3393e38c7242"
+    },
+    {
+     "file_offset": 1013634,
+     "new": "9000caffe6ffd5ff9200d9fff8ffc3ff8500",
+     "old_sha256": "acfb1150fd4d2373e3363473eb4dd03cec1c606e1c85ebc644f02624da678fee"
+    },
+    {
+     "file_offset": 1012496,
+     "new": "0112000000000000",
+     "old_sha256": "3f058f6556b1a0a433ca71e0652d6f033044c013791d305c721e84b2cd4414dd"
+    },
+    {
+     "file_offset": 432480,
+     "new": "b010c8e1540e90e5020080e22df5ffeb",
+     "old_sha256": "9316797a1b13e4bf4165d0683ca90505c2c93284e7cdc0f41a9ed7bb708909ae"
+    },
+    {
+     "file_offset": 432668,
+     "new": "540e90e5020080e2fff4ffeb",
+     "old_sha256": "c8c0858f93c2b6288ed7d17b194790a2884b9a4ef83d972326e2ac095c3d1420"
+    }
+   ]
+  },
+  {
+   "id": "v006/volume-led",
+   "base": "v006",
+   "name": "volume-led",
+   "title": "Volume and LED rows",
+   "description": "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
+   "status": "tested",
+   "conflicts": [
+    "v006/sensor-probe"
+   ],
+   "requires": [],
+   "copies": [],
+   "patches": [
+    {
+     "file_offset": 1048057,
+     "new": "3a3f",
+     "old_sha256": "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7"
+    },
+    {
+     "file_offset": 94224,
+     "new": "0910a0e3",
+     "old_sha256": "8d4c08684cc9f6ea09cfba9364c21733216e52e7e304294712fb2f54ece88455"
+    },
+    {
+     "file_offset": 94260,
+     "new": "0910a0e3",
+     "old_sha256": "8d4c08684cc9f6ea09cfba9364c21733216e52e7e304294712fb2f54ece88455"
+    },
+    {
+     "file_offset": 95936,
+     "new": "000057e3b400c411",
+     "old_sha256": "cc2be539c22b56ac99268140ba95393eaa88507c60c9d4226c6cd2173789dfee"
+    },
+    {
+     "file_offset": 95960,
+     "new": "000057e30200001a",
+     "old_sha256": "0ffb6a303e61b84807e582b2af2c5da93cccc5c59118e8af19ebe427955109a2"
+    },
+    {
+     "file_offset": 96116,
+     "new": "02a047e2",
+     "old_sha256": "2cfd892534a83d521b1bc16e6ccaf57101999d9f6036a5b9622543e538d9dc85"
+    },
+    {
+     "file_offset": 96308,
+     "new": "010057e33800008a",
+     "old_sha256": "d355cd18329730dabfdf3e23719e4537d3236f822d94ccadd85db61cb7f8d3eb"
+    },
+    {
+     "file_offset": 96600,
+     "new": "8d2a013b",
+     "old_sha256": "dc7d2fc4ceb83e5ad98d1e41b73c229b728d593fd6d2ecd0033372852725700f"
+    },
+    {
+     "file_offset": 96764,
+     "new": "060057e31500008a",
+     "old_sha256": "eb51a2bed8727f4346618b9e9e256a6d050f81ed0c0c3f187bf41907c586e0dc"
+    },
+    {
+     "file_offset": 97124,
+     "new": "062a01eb",
+     "old_sha256": "3927992133f35328845c617c693c8fbdd295493c5b4f49cb0e164e40de24129b"
+    },
+    {
+     "file_offset": 103872,
+     "new": "7d23010a",
+     "old_sha256": "5cc3f923374f6b57600602e74adc46c2463af7fba29ad5df2c86b3b080f33cd4"
+    },
+    {
+     "file_offset": 104584,
+     "new": "0900a003",
+     "old_sha256": "879314e3c01c7a80452fa951df14b7e72082e9b79fc6fec6a0f5c9467058ad05"
+    },
+    {
+     "file_offset": 123128,
+     "new": "aa10011b",
+     "old_sha256": "f2e5dd7db1c0c78cc261ab28291e636de377622d064ba20b5d55c3d2886bcdaf"
+    },
+    {
+     "file_offset": 123220,
+     "new": "9310011b",
+     "old_sha256": "5f715a7fe9ea21eb7a904eb063e66db30fe7f4606a601c729ecb2fac2d4b0832"
+    },
+    {
+     "file_offset": 402308,
+     "new": "0020d4e5060052e3062042220ef0a0e1060057e32800a0331200a023010056e30ef0a0e16cc09fe560c0dce500005ce30e3bff0a0ef0a0e10b00c9e554109fe56060d1e5000056e30160a0030060a013000054e3430086020cdefe0a010054e30200a0030300c7054300a0030ddefe0a020054e32edffe1a0000d5e5010020e26020d1e5000052e16000c1150100a013fa00c11531dffeeadc071100",
+     "old_sha256": "714b3aaff241e307b3c2f2a25b8b055614db81ef6151014d151a22e05196abea"
+    }
+   ]
+  },
+  {
+   "id": "v012/volume-led",
+   "base": "v012",
+   "name": "volume-led",
+   "title": "Volume and LED rows",
+   "description": "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
+   "status": "tested",
+   "conflicts": [],
+   "requires": [],
+   "copies": [],
+   "patches": [
+    {
+     "file_offset": 94248,
+     "new": "09",
+     "old_sha256": "ca358758f6d27e6cf45272937977a748fd88391db679ceda7dc7bf1f005ee879"
+    },
+    {
+     "file_offset": 94284,
+     "new": "09",
+     "old_sha256": "ca358758f6d27e6cf45272937977a748fd88391db679ceda7dc7bf1f005ee879"
+    },
+    {
+     "file_offset": 95960,
+     "new": "00",
+     "old_sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+    },
+    {
+     "file_offset": 95962,
+     "new": "57",
+     "old_sha256": "18f5384d58bcb1bba0bcd9e6a6781d1a6ac2cc280c330ecbab6cb7931b721552"
+    },
+    {
+     "file_offset": 95967,
+     "new": "11",
+     "old_sha256": "7da59d0dfbe21f43e842e8afb43e12a6445bbac07c2fc26984c71d0de3f99c9c"
+    },
+    {
+     "file_offset": 95984,
+     "new": "00",
+     "old_sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+    },
+    {
+     "file_offset": 95986,
+     "new": "57",
+     "old_sha256": "18f5384d58bcb1bba0bcd9e6a6781d1a6ac2cc280c330ecbab6cb7931b721552"
+    },
+    {
+     "file_offset": 95991,
+     "new": "1a",
+     "old_sha256": "0605d1534eb8995fe8fc7dcf1fac025ea5e26fc26d6b1fc2c79aa0f04159ef41"
+    },
+    {
+     "file_offset": 96142,
+     "new": "47",
+     "old_sha256": "f67ab10ad4e4c53121b6a5fe4da9c10ddee905b978d3788d2723d7bfacbe28a9"
+    },
+    {
+     "file_offset": 96334,
+     "new": "57",
+     "old_sha256": "18f5384d58bcb1bba0bcd9e6a6781d1a6ac2cc280c330ecbab6cb7931b721552"
+    },
+    {
+     "file_offset": 96339,
+     "new": "8a",
+     "old_sha256": "0605d1534eb8995fe8fc7dcf1fac025ea5e26fc26d6b1fc2c79aa0f04159ef41"
+    },
+    {
+     "file_offset": 96624,
+     "new": "8a2a013b",
+     "old_sha256": "dc7d2fc4ceb83e5ad98d1e41b73c229b728d593fd6d2ecd0033372852725700f"
+    },
+    {
+     "file_offset": 96788,
+     "new": "06",
+     "old_sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+    },
+    {
+     "file_offset": 96790,
+     "new": "57",
+     "old_sha256": "18f5384d58bcb1bba0bcd9e6a6781d1a6ac2cc280c330ecbab6cb7931b721552"
+    },
+    {
+     "file_offset": 96795,
+     "new": "8a",
+     "old_sha256": "0605d1534eb8995fe8fc7dcf1fac025ea5e26fc26d6b1fc2c79aa0f04159ef41"
+    },
+    {
+     "file_offset": 97148,
+     "new": "032a01eb",
+     "old_sha256": "3927992133f35328845c617c693c8fbdd295493c5b4f49cb0e164e40de24129b"
+    },
+    {
+     "file_offset": 103896,
+     "new": "7a2301",
+     "old_sha256": "19f3dfed02d98356f137421b9ef37040612957f5ff0f29c2c20be3a0af01fa29"
+    },
+    {
+     "file_offset": 104608,
+     "new": "09",
+     "old_sha256": "beead77994cf573341ec17b58bbf7eb34d2711c993c1d976b128b3188dc1829a"
+    },
+    {
+     "file_offset": 123148,
+     "new": "a81001",
+     "old_sha256": "a07c098a9ae5f4a4476cd47e5e222d8e3850837dd55398bed5140a76dfe1dbfd"
+    },
+    {
+     "file_offset": 123240,
+     "new": "911001",
+     "old_sha256": "db27c0a0b97eba6314534b237b1d4660041a240a7b53c54f69d59a47aaac32c9"
+    },
+    {
+     "file_offset": 402320,
+     "new": "0020d4e5060052e3062042220ef0a0e1060057e328",
+     "old_sha256": "1970186f44d95024deb2e46ad2d4e9a4a093db0bcaa1c23608297fab3375956a"
+    },
+    {
+     "file_offset": 402343,
+     "new": "331200",
+     "old_sha256": "9b42af89d30ab0218a441d009dcaf9be6c13afd87ba122bf8cbab8bb2516d85f"
+    },
+    {
+     "file_offset": 402347,
+     "new": "23010056",
+     "old_sha256": "4fcc206a24b91ea9757b3785b0cb97b60efff6cb1ed0ca223e697faaa5584415"
+    },
+    {
+     "file_offset": 402352,
+     "new": "0ef0a0e16cc09fe560c0dce5",
+     "old_sha256": "ed25e9f83f43bfd635810378e998dd2ba091017466241baff6f273c136e54e20"
+    },
+    {
+     "file_offset": 402366,
+     "new": "5ce30e3bff0a0ef0a0e10b",
+     "old_sha256": "530e12abd2cac762feedf3f3a5a091dccd3eefd1318c24b716c3eab18b7f949f"
+    },
+    {
+     "file_offset": 402378,
+     "new": "c9e554109fe56060d1e500",
+     "old_sha256": "e6196d0414ed8ccb387d94d957eb31b276181acd2da5d7c25e8db9a2adb1cd49"
+    },
+    {
+     "file_offset": 402390,
+     "new": "56e30160",
+     "old_sha256": "bd4f60945f94d0564c57caa095350752a2963c8972106d931e5397369a921ffe"
+    },
+    {
+     "file_offset": 402395,
+     "new": "030060a013",
+     "old_sha256": "1d43b4f77160bbfa8d16c58f5331b1f3c9e7bcd510b26d4eec7491fa9775e16f"
+    },
+    {
+     "file_offset": 402402,
+     "new": "54",
+     "old_sha256": "5c62e091b8c0565f1bafad0dad5934276143ae2ccef7a5381e8ada5b1a8d26d2"
+    },
+    {
+     "file_offset": 402404,
+     "new": "43",
+     "old_sha256": "084fed08b978af4d7d196a7446a86b58009e636b611db16211b65a9aadff29c5"
+    },
+    {
+     "file_offset": 402406,
+     "new": "86020fdefe0a01",
+     "old_sha256": "8aa095d3873391125ea624b35ad97b6cea985d519c6a9bfb927f7dece3cc7135"
+    },
+    {
+     "file_offset": 402414,
+     "new": "54e30200a0030300c70543",
+     "old_sha256": "3856c7c7947079466429441ddbfac74d43247a629aa5d31f0257eb7b7f07013f"
+    },
+    {
+     "file_offset": 402427,
+     "new": "0310defe0a020054e331dffe1a0000d5e5010020e26020d1e5000052e160",
+     "old_sha256": "fe93f84f0c755dfe4bccad3c61705488bc8c983a53b13e7e06cb3bf0bcdf7037"
+    },
+    {
+     "file_offset": 402458,
+     "new": "c1150100",
+     "old_sha256": "d407eecb4f4836117e56bcb548d2de1e3d612ad64542f914f5bc195f01b6ad4b"
+    },
+    {
+     "file_offset": 402463,
+     "new": "13fa00c11534dffeea9c051100",
+     "old_sha256": "563fa8f2f730b39f18e1987ef7dd9047de6fbe7220ba1b73ce0bb4877ff36fc5"
+    },
+    {
+     "file_offset": 1048297,
+     "new": "3a3f",
+     "old_sha256": "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7"
+    }
+   ]
+  },
+  {
+   "id": "v012/exif",
+   "base": "v012",
+   "name": "exif",
+   "title": "EXIF dates",
+   "description": "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26, and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",
+   "status": "tested",
+   "conflicts": [],
+   "requires": [],
+   "copies": [
+    {
+     "from": 1078586,
+     "to": 562962,
+     "len": 622,
+     "old_sha256": "f5315b99965d780e08683bcfeec8894ef57d5973623c42623a92d520f537d062"
+    }
+   ],
+   "patches": [
+    {
+     "file_offset": 36968,
+     "new": "0d0d",
+     "old_sha256": "0f1eb68652d7fbf2877b64d9c8e4aa1f83a2ea5d63ba0b82dab46a37e04d0663"
+    },
+    {
+     "file_offset": 37024,
+     "new": "03",
+     "old_sha256": "dbc1b4c900ffe48d575b5da5c638040125f65db0fe3e24494b76ea986457d986"
+    },
+    {
+     "file_offset": 37028,
+     "new": "40",
+     "old_sha256": "148de9c5a7a44d19e56cd9ae1a554bf67847afb0c58f6e12fa29ac7ddfca9940"
+    },
+    {
+     "file_offset": 37220,
+     "new": "010b",
+     "old_sha256": "1e2b964996c337d6bb12de3ab5570f55bbe29ebd40668345fb4647f81dce3620"
+    },
+    {
+     "file_offset": 37308,
+     "new": "010b",
+     "old_sha256": "1e2b964996c337d6bb12de3ab5570f55bbe29ebd40668345fb4647f81dce3620"
+    },
+    {
+     "file_offset": 446504,
+     "new": "f7",
+     "old_sha256": "265fda17a34611b1533d8a281ff680dc5791b0ce0a11c25b35e11c8e75685509"
+    },
+    {
+     "file_offset": 446512,
+     "new": "4f3f",
+     "old_sha256": "48dbc45a6738318c9e35db13781199f18495e5a61272ff94b60b30b8079da5c1"
+    },
+    {
+     "file_offset": 448200,
+     "new": "409408",
+     "old_sha256": "9aff5b608950f56598530636c29ed2d058d2370b8195dd6450c9c44f8e1a088f"
+    },
+    {
+     "file_offset": 451228,
+     "new": "d7",
+     "old_sha256": "ca358758f6d27e6cf45272937977a748fd88391db679ceda7dc7bf1f005ee879"
+    },
+    {
+     "file_offset": 451236,
+     "new": "d8",
+     "old_sha256": "beead77994cf573341ec17b58bbf7eb34d2711c993c1d976b128b3188dc1829a"
+    },
+    {
+     "file_offset": 451248,
+     "new": "d9",
+     "old_sha256": "2b4c342f5433ebe591a1da77e013d1b72475562d48578dca8b84bac6651c3cb9"
+    },
+    {
+     "file_offset": 451260,
+     "new": "da",
+     "old_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+     "file_offset": 451280,
+     "new": "dd",
+     "old_sha256": "9d1e0e2d9459d06523ad13e28a4093c2316baafe7aec5b25f30eba2e113599c4"
+    },
+    {
+     "file_offset": 451284,
+     "new": "8081",
+     "old_sha256": "b154abfca3e24c96fafc6d08347741dc3b8fd7517aab039cda3e232dc9fd0fd7"
+    },
+    {
+     "file_offset": 451288,
+     "new": "8181",
+     "old_sha256": "f6a2c74d89b7949642c7a17a5cfb3134c830292db8feafd1b6fad376095d0dc0"
+    },
+    {
+     "file_offset": 451464,
+     "new": "7c6d00",
+     "old_sha256": "4b4b19dc6f0e553a921dd442fe55fb9fd67b2b1c56222f8bf57c2e627d10ce2f"
+    },
+    {
+     "file_offset": 451500,
+     "new": "0d2d",
+     "old_sha256": "09a348f60040bcab4bbf5087dad11311035c50b540293213714fda38c8c2ee34"
+    },
+    {
+     "file_offset": 455628,
+     "new": "409408",
+     "old_sha256": "9aff5b608950f56598530636c29ed2d058d2370b8195dd6450c9c44f8e1a088f"
+    },
+    {
+     "file_offset": 562752,
+     "new": "ffd8ff",
+     "old_sha256": "f57865d1f8cad33dee41e4e4be4731f17ab4212de534e6e79980fccc62513f5d"
+    },
+    {
+     "file_offset": 562756,
+     "new": "00ce45786966000049492a000800000005000f010200060000004a00",
+     "old_sha256": "9dc58fbbb36be09a39eac3a321dbee1320205523eca89e9ea67b53e53b4c0ea9"
+    },
+    {
+     "file_offset": 562785,
+     "new": "0010010200090000005000",
+     "old_sha256": "75c5980f823a751dca31c9486470a511b836c9c932e2b5ac1f1634fe6bfeca99"
+    },
+    {
+     "file_offset": 562797,
+     "new": "00310102",
+     "old_sha256": "fa0af9f270c82fff5ac4f47a1f0f7442c35bc3e33a86c244cc5564a8794f0fd2"
+    },
+    {
+     "file_offset": 562802,
+     "new": "060000005a0000",
+     "old_sha256": "532a421397507f03928425e666a3e60d5b2d8d9962909a50e20f30c1ab1f133e"
+    },
+    {
+     "file_offset": 562810,
+     "new": "32010200140000",
+     "old_sha256": "94ced1779d4324c3bc291433c3016e8ef910d8091de2008d60266dacddf1e00c"
+    },
+    {
+     "file_offset": 562818,
+     "new": "6000000069870400010000",
+     "old_sha256": "729766762c5749e69ab751dae32d3b4040a83db1cf6de264bd95ba2bff082b11"
+    },
+    {
+     "file_offset": 562830,
+     "new": "74000000000000004b6f64616b00436861726d657261",
+     "old_sha256": "2493a9706ce4903909e8541a8bdddd19ad6fa2ceaf197595aba8b68beee814c3"
+    },
+    {
+     "file_offset": 562853,
+     "new": "0076302e323600202020203a20203a20",
+     "old_sha256": "1fe66db6faab4638ae087ee486308e266b31e83119feb545671603c3302554d1"
+    },
+    {
+     "file_offset": 562870,
+     "new": "2020203a20203a20200003",
+     "old_sha256": "5d99b566bb13a0c43c00d1c636879f78ae17ef44988698c34c9232e4eafe5948"
+    },
+    {
+     "file_offset": 562882,
+     "new": "009007",
+     "old_sha256": "3022c336d036de3a18e180ad8fbb76b529b0db034ce84edddfc8abb97bb34466"
+    },
+    {
+     "file_offset": 562886,
+     "new": "040000003032333203900200140000009e0000",
+     "old_sha256": "58f06f0328da87f137157fc4e08f2c0d204cf2f5cba83f5ca424baed0a41a597"
+    },
+    {
+     "file_offset": 562906,
+     "new": "04900200140000",
+     "old_sha256": "1baa51cb50cdcb2e72939ab50a0da5785daaf036a205d687264bc8d52b16f892"
+    },
+    {
+     "file_offset": 562914,
+     "new": "b2000000000000",
+     "old_sha256": "b5215bd3f8c305cdb5df0cbb4b106a5695e66b1a6565ced5d2c9a567f3d741a9"
+    },
+    {
+     "file_offset": 562922,
+     "new": "202020203a20203a20202020203a20203a2020",
+     "old_sha256": "a14b65aa82257e9fb5b7e25b84cd2c1fcffd4b50955191b363acfe4ccd68a35a"
+    },
+    {
+     "file_offset": 562942,
+     "new": "202020203a20203a20202020203a20203a202000",
+     "old_sha256": "06cc6c5e7a1931e9c226eb2ee75ca5112c6d7b94eeb27d994c184812c700f5e0"
+    },
+    {
+     "file_offset": 563584,
+     "new": "10402de930d04de214",
+     "old_sha256": "04afa4dd266408976c564f798e7cf6aa0447f3055f5a012a85ea3c7c7b7390db"
+    },
+    {
+     "file_offset": 563594,
+     "new": "8de210dcfdeb24",
+     "old_sha256": "f8df43948f3cf1c5157f10b8eb71c0d1809c930f9979bce9ac58981ba2ccf536"
+    },
+    {
+     "file_offset": 563602,
+     "new": "9de528109de52c209de507",
+     "old_sha256": "ac4792030037510c00e69e19238d4a745dc70c56e649f1d10105d08ec6966183"
+    },
+    {
+     "file_offset": 563614,
+     "new": "8de86c00a0e30c008de510608d",
+     "old_sha256": "56c35d91fcc17f5afe25eaa98d53a2ffbb05fb9f16ae6c1acc602e5d5491546e"
+    },
+    {
+     "file_offset": 563628,
+     "new": "14008de20f0090e82b14feeb6c0086e220",
+     "old_sha256": "0a1ce50f89d95cccb75234fce439860f0c59907535c4d12e31322b2164378942"
+    },
+    {
+     "file_offset": 563646,
+     "new": "a0",
+     "old_sha256": "591b7cc95037822dec5a4d593a2e2e8b19c07ddd2570e5699003d17f14c440a6"
+    },
+    {
+     "file_offset": 563648,
+     "new": "0a10c0",
+     "old_sha256": "c50e3c29fe3b5c577b9d382c42d45b4f706be1fc01c596a98bb0ef6da4ac9f57"
+    },
+    {
+     "file_offset": 563652,
+     "new": "aa1086e2be2086e2",
+     "old_sha256": "23203e56b8ea3ced3ca5dd5d04a2afb128536ad73567f9038ebc1a8726d98b1a"
+    },
+    {
+     "file_offset": 563661,
+     "new": "30a0e303c0d0e703c0c1e703c0c2e7013083e213",
+     "old_sha256": "228832dd2e6a84569a48bc8c4d3fe19cf591597f3ab6349e5caa6bcfdffd3528"
+    },
+    {
+     "file_offset": 563682,
+     "new": "53",
+     "old_sha256": "c19a797fa1fd590cd2e5b42d1cf5f246e29b91684e2f87404b81dc345c7a56a0"
+    },
+    {
+     "file_offset": 563684,
+     "new": "f9ffff3a30d08de21040bde8aa61feea",
+     "old_sha256": "65c8a786c2a63346e23789f4dc98097a209c1303e89b5acb382eba5b8ad556f9"
+    }
+   ]
+  },
+  {
+   "id": "v012/boot-last-mode",
+   "base": "v012",
+   "name": "boot-last-mode",
+   "title": "Boot to the last mode",
+   "description": "Power-on goes straight into the mode you last used, photo or video (photo the first time), instead of the SELECT MODE screen. A short press of the power button still opens it.",
+   "status": "tested",
+   "conflicts": [],
+   "requires": [],
+   "copies": [],
+   "patches": [
+    {
+     "file_offset": 25988,
+     "new": "a96f01eb",
+     "old_sha256": "4e7943a455d70997f7419436ce2407e535e6c949537613c5fad4233a5a5cf6ca"
+    },
+    {
+     "file_offset": 116420,
+     "new": "621701",
+     "old_sha256": "7571b39928eac68722cdde84c254083226dc92634a32dad3f48db356b85469b8"
+    },
+    {
+     "file_offset": 120732,
+     "new": "2c1301",
+     "old_sha256": "a3671b6ef73c762862995af79933f3ccdfb486cb247da83b817e8d603e495f3f"
+    },
+    {
+     "file_offset": 402480,
+     "new": "01402de94dc7fe",
+     "old_sha256": "5a73d1fe1b3b9df009bc083139dd6c3c09d107f8af7148d6f3c3b13d50c61b6f"
+    },
+    {
+     "file_offset": 402488,
+     "new": "0140bde838109fe56110d1",
+     "old_sha256": "87b2803619d62f1c5a5c0497e6b33d3b882c3f63024ac61d1a2046051a94ebd1"
+    },
+    {
+     "file_offset": 402500,
+     "new": "010051",
+     "old_sha256": "f57865d1f8cad33dee41e4e4be4731f17ab4212de534e6e79980fccc62513f5d"
+    },
+    {
+     "file_offset": 402504,
+     "new": "34109f052c109f150ef0a0e120109fe5012c40e201",
+     "old_sha256": "aa2a65532580069a89e22e37f9581b0302ba8f5ee7133e8eecc9c981fccca1c9"
+    },
+    {
+     "file_offset": 402526,
+     "new": "52e300",
+     "old_sha256": "6d228ec051c8b17dcc5d39a20b049bbcddf0ca1f52642480c3fab30d04ced279"
+    },
+    {
+     "file_offset": 402530,
+     "new": "a0136130d1e5020053e16120c1150130a013fa30c11586aafeea9c051100020100000101",
+     "old_sha256": "27b5c05a7a7febac13f95300f66f97fcece6e8a44861c663af93111e50d935e2"
+    },
+    {
+     "file_offset": 402567,
+     "new": "00",
+     "old_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+   ]
+  },
+  {
+   "id": "v012/capture-flash",
+   "base": "v012",
+   "name": "capture-flash",
+   "title": "Capture flash",
+   "description": "When you take a photo, the picture area goes black for 120 ms under the on-screen icons, so you can see the shot was taken even at Volume 0.",
+   "status": "tested",
+   "conflicts": [],
+   "requires": [],
+   "copies": [],
+   "patches": [
+    {
+     "file_offset": 91048,
+     "new": "95cd01",
+     "old_sha256": "90ac4be62464fae2f3a0e5f26c9ff446dc324a6a4c9c2b2d41553a6ed128f1f0"
+    },
+    {
+     "file_offset": 123248,
+     "new": "2eae01",
+     "old_sha256": "cd82212848c6f37ab6e6d396de0575406be715dfbc1205dfe0bab309df95082c"
+    },
+    {
+     "file_offset": 123264,
+     "new": "2eae",
+     "old_sha256": "49637b18d53affc76ca5d69b6485253e7158f5a456e2b790ae89727ef7e93317"
+    },
+    {
+     "file_offset": 563712,
+     "new": "00",
+     "old_sha256": "e52d9c508c502347344d8c07ad91cbd6068afc75ff6292f062a09ca381c89e71"
+    },
+    {
+     "file_offset": 563715,
+     "new": "0020c09fe5",
+     "old_sha256": "fc0bcbc34873950ad1e4d7d96ea67acb673fc90ecfe201c24e4b8f3edb018227"
+    },
+    {
+     "file_offset": 563721,
+     "new": "c0dce500005ce3fd2ffe0a0f402de9",
+     "old_sha256": "f3485e7d1019dc4215e814d9c3a3093aec3888caddd539e891540b26e22c0f65"
+    },
+    {
+     "file_offset": 563737,
+     "new": "10",
+     "old_sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+    },
+    {
+     "file_offset": 563740,
+     "new": "192ba0e321dbfdeb0f40bde8f72ffeea0098080038c09fe501",
+     "old_sha256": "b9c3a9d6bfe719274d52cf0823563c05e7ad6372ba0291a48cccec31f868b194"
+    },
+    {
+     "file_offset": 563766,
+     "new": "a0",
+     "old_sha256": "591b7cc95037822dec5a4d593a2e2e8b19c07ddd2570e5699003d17f14c440a6"
+    },
+    {
+     "file_offset": 563768,
+     "new": "0010cc",
+     "old_sha256": "c50e3c29fe3b5c577b9d382c42d45b4f706be1fc01c596a98bb0ef6da4ac9f57"
+    },
+    {
+     "file_offset": 563772,
+     "new": "0354feea10402de90040a0e10c00a0e3511b00eb18c09f",
+     "old_sha256": "7798770f051ae001993d84e5eee4043da70512f57099d78c2783a6dbd97d1c7b"
+    },
+    {
+     "file_offset": 563797,
+     "new": "00",
+     "old_sha256": "c555eab45d08845ae9f10d452a99bfcb06f74a50b988fe7e48dd323789b88ee3"
+    },
+    {
+     "file_offset": 563800,
+     "new": "0000cce50c",
+     "old_sha256": "951e29991220ed3cc1515e6936ffe5954321ba97c5ca3d9310d7eb1a263748e3"
+    },
+    {
+     "file_offset": 563806,
+     "new": "54e20000a0434b1b00eb1080bde80000a0e100980800",
+     "old_sha256": "10ac3fe56e5a039b7809496dbc9cda584cda9af59fd4c391f21c13751ce3ca95"
+    }
+   ]
+  }
+ ],
+ "sets": [
+  {
+   "base": "v006",
+   "mods": [],
+   "stamp": "202610261427",
+   "status": "tested",
+   "label": "stock v006 (the stock restore file)"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/sensor-probe"
+   ],
+   "stamp": "202611082300",
+   "status": "tested",
+   "label": "v006 + sensor-ID probe"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/ov9732-port"
+   ],
+   "stamp": "202611110023",
+   "status": "tested",
+   "label": "v0.23: v006 + OV9732 port"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/volume-led"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v006 + Volume and LED rows"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/ov9732-port",
+    "v006/volume-led"
+   ],
+   "stamp": "202611120024",
+   "status": "tested",
+   "label": "v0.24: v006 + OV9732 port + Volume/LED"
+  },
+  {
+   "base": "v008_test",
+   "mods": [],
+   "stamp": "202611170027",
+   "status": "tested",
+   "label": "stock v008_test (the film-mods restore file, renamed but unchanged)"
+  },
+  {
+   "base": "v012",
+   "mods": [],
+   "stamp": "202611170027",
+   "status": "tested",
+   "label": "stock v012 (the factory firmware, unchanged)"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led"
+   ],
+   "stamp": "202611130025",
+   "status": "tested",
+   "label": "v0.25: v012 + Volume/LED"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + EXIF dates"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/boot-last-mode"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Boot to the last mode"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Capture flash"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif"
+   ],
+   "stamp": "202611130026",
+   "status": "tested",
+   "label": "v0.26: v012 + Volume/LED + EXIF"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/boot-last-mode"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Volume and LED rows + Boot to the last mode"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Volume and LED rows + Capture flash"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/boot-last-mode"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + EXIF dates + Boot to the last mode"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + EXIF dates + Capture flash"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Boot to the last mode + Capture flash"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/boot-last-mode"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Volume and LED rows + EXIF dates + Boot to the last mode"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Volume and LED rows + EXIF dates + Capture flash"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + Volume and LED rows + Boot to the last mode + Capture flash"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "experimental",
+   "label": "v012 + EXIF dates + Boot to the last mode + Capture flash"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "stamp": "202611170027",
+   "status": "tested",
+   "label": "v0.27: v012 + Volume/LED + EXIF + boot to last mode + capture flash"
+  }
+ ],
+ "builds": [
+  {
+   "base": "v006",
+   "mods": [],
+   "dump": "v006-original",
+   "name": "JH_5408202610261427_0F065D55.bin",
+   "sha256": "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906",
+   "recipe": "4f53cda18c2baa0c"
+  },
+  {
+   "base": "v006",
+   "mods": [],
+   "dump": "v006-clean",
+   "name": "JH_5408202610261427_0FB74C24.bin",
+   "sha256": "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec",
+   "recipe": "4f53cda18c2baa0c"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/sensor-probe"
+   ],
+   "dump": "v006-original",
+   "name": "JH_5408202611082300_0F065C4D.bin",
+   "sha256": "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b",
+   "recipe": "914f35329b75ebf3"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/sensor-probe"
+   ],
+   "dump": "v006-clean",
+   "name": "JH_5408202611082300_0FB74B1C.bin",
+   "sha256": "02e2729cffa4dd835f2b138b4ff4df9be89baecfb96f473665dc4b3411e7d2d5",
+   "recipe": "914f35329b75ebf3"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/ov9732-port"
+   ],
+   "dump": "v006-original",
+   "name": "JH_5408202611110023_0F061F28.bin",
+   "sha256": "f0cced2e9cb2c1925d6d20bc54c8002c1543f9710bf5ab90032db316572507b2",
+   "recipe": "e0931e1494f41328"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/ov9732-port"
+   ],
+   "dump": "v006-clean",
+   "name": "JH_5408202611110023_0FB70DF7.bin",
+   "sha256": "554d3c2fb69185df5020c5521eaaf02f59d9282d51a1384c56a91aec586f1466",
+   "recipe": "e0931e1494f41328"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/volume-led"
+   ],
+   "dump": "v006-original",
+   "name": "JH_5408202611170027_0F0651D9.bin",
+   "sha256": "65f6eee95fb7c237aafa7920215e09780f21274fd47c343d4dfb5d69e046289e",
+   "recipe": "356efb86fd274356"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/volume-led"
+   ],
+   "dump": "v006-clean",
+   "name": "JH_5408202611170027_0FB740A8.bin",
+   "sha256": "3454f333f499c57ac09aa25f258c8e464027c1ebea5e0c4c6fae8c1fffed3ed5",
+   "recipe": "356efb86fd274356"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/ov9732-port",
+    "v006/volume-led"
+   ],
+   "dump": "v006-original",
+   "name": "JH_5408202611120024_0F0613AC.bin",
+   "sha256": "0919c5d857f855b11424407211a132ac61f4c91852e01af583bd6b76c85b1c69",
+   "recipe": "508365a40d72c437"
+  },
+  {
+   "base": "v006",
+   "mods": [
+    "v006/ov9732-port",
+    "v006/volume-led"
+   ],
+   "dump": "v006-clean",
+   "name": "JH_5408202611120024_0FB7027B.bin",
+   "sha256": "8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b",
+   "recipe": "508365a40d72c437"
+  },
+  {
+   "base": "v008_test",
+   "mods": [],
+   "dump": "v008_test",
+   "name": "JH_5408202611170027_0852C329.bin",
+   "sha256": "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f",
+   "recipe": "4f53cda18c2baa0c"
+  },
+  {
+   "base": "v012",
+   "mods": [],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3C99C.bin",
+   "sha256": "76ccada72a0f11a1e0cee7d527a0ad557ae5477cf8a2ec405ddccd796a04fe23",
+   "recipe": "4f53cda18c2baa0c"
+  },
+  {
+   "base": "v012",
+   "mods": [],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB77A4E.bin",
+   "sha256": "8e1a419bf9d3996f21d267e6c3bbdc4fb52297cab5bec6c46645e31f74db754e",
+   "recipe": "4f53cda18c2baa0c"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611130025_0FA3BF37.bin",
+   "sha256": "a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0",
+   "recipe": "c0dee8bdc336f2f7"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611130025_0FB76FE9.bin",
+   "sha256": "bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a",
+   "recipe": "c0dee8bdc336f2f7"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA396E1.bin",
+   "sha256": "035ff691a9ef3a80b637c426aef99ba349b06f579d8aa7359dd31bb3cead5934",
+   "recipe": "be9b01554fb6a699"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB74793.bin",
+   "sha256": "50b612be90881d21188b168c15a65e24ddcb147492dac2d24793a0e3e41c1408",
+   "recipe": "be9b01554fb6a699"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3C17E.bin",
+   "sha256": "a2457d82a039693e37c7f00f520f66d1cf97ed7d27d3a1c976f88fe7d3ec6e0f",
+   "recipe": "6a810ed31bf60f6e"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB77230.bin",
+   "sha256": "764bddccf8e6fae111d1445b7a5a5639211605efecfc4ec30f59ffaea1f1b5a8",
+   "recipe": "6a810ed31bf60f6e"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3CED4.bin",
+   "sha256": "750359d28233f1fa0b421367c927bf4762bef73b06ff35b5e2c9cc7c8bc9eecb",
+   "recipe": "95bcd98ecdbcd530"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB77F86.bin",
+   "sha256": "029b3df3756d549c1de605da83ee1590f4270b83051215e7d8dfebc5ae098740",
+   "recipe": "95bcd98ecdbcd530"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611130026_0FA38C7C.bin",
+   "sha256": "617770c3f3c9d880f93f06043090d3d07909c845633ca08e9c183deb44fa06d2",
+   "recipe": "7faf71beeb000d75"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611130026_0FB73D2E.bin",
+   "sha256": "be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738",
+   "recipe": "7faf71beeb000d75"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3B719.bin",
+   "sha256": "8468ae9eba3209e7fe5ca4c69f65395d11943cbd823f0da3675ce80dbb25b18a",
+   "recipe": "3e7df8c41850aa08"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB767CB.bin",
+   "sha256": "e34ab4469d4b894737070cd41c53b07192e14f7c1f1eb4bc93260ac850f4f686",
+   "recipe": "3e7df8c41850aa08"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3C46F.bin",
+   "sha256": "3ab7fa3c8c1736ec04fe0bfd9d1c0e0281ef2174c0357cf2470ff3e661b3310c",
+   "recipe": "3a691de28031f228"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB77521.bin",
+   "sha256": "af44488707df90c05391e4d9905b73b46c076daa10e6562e94fea6f7652d8204",
+   "recipe": "3a691de28031f228"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA38EC3.bin",
+   "sha256": "8b81d43ec73fb61d63177eeedca8ee408b1ce24686cd95ae643c6266655a8d72",
+   "recipe": "1b722363b2979cd3"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB73F75.bin",
+   "sha256": "520d634889970a1a45050c0ae01408730ce4c66e4dd118535aa46b0520ff7671",
+   "recipe": "1b722363b2979cd3"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA39C19.bin",
+   "sha256": "5641464695fe79c81ef0524de719b656efffe0f45654bd9cfdfde0227cbd08d0",
+   "recipe": "8c6a41e8654bb829"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB74CCB.bin",
+   "sha256": "bc2f136f2e2dab90c9eb2ab4b330e3a4e2795ec9a317f55291afc07316814e3b",
+   "recipe": "8c6a41e8654bb829"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3C6B6.bin",
+   "sha256": "9ded69d645288af9f034f91fadee57e937ba6f083e3e9872a40ea17bd0b44abb",
+   "recipe": "1208380cba0ec979"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB77768.bin",
+   "sha256": "162e6d1fd4cc01a1206bf0e8bf2b2c45a44a36fe24003d521105e9a49226dda3",
+   "recipe": "1208380cba0ec979"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3845E.bin",
+   "sha256": "9e4c02f1963f520cf2e64d2a63fc61bb15ce722531d5b9f40abec6b99e54a2c4",
+   "recipe": "324c6a3402f4fb04"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/boot-last-mode"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB73510.bin",
+   "sha256": "5f62a784419bc612bfeeee95674f6dd9e39aa098e5b1f99c467891805ad0dade",
+   "recipe": "324c6a3402f4fb04"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA391B4.bin",
+   "sha256": "53f007b2b14c8227d932758abb5e017a5e0aa6214fd35c44f3ce63cc8678faa2",
+   "recipe": "c0912187933d8605"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB74266.bin",
+   "sha256": "f3900b9f45128923550e83fb9d2d7494bd7d452b8247060621350628b66463c9",
+   "recipe": "c0912187933d8605"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA3BC51.bin",
+   "sha256": "c2c9eedfd3968b8cc7c6652ccdb30e1f2974535a51861f49493e8bd67d3ac93b",
+   "recipe": "f7b039d1d6951b5e"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB76D03.bin",
+   "sha256": "5eab4925057a1151f11cb38b1b963c38a71618164b8cb7626a15aeb7ba1554e5",
+   "recipe": "f7b039d1d6951b5e"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA393FB.bin",
+   "sha256": "50fa88bd18c8a4b0419b618b60f5d26a71d2aa7cd346ff3984bc6b6ac5cd074b",
+   "recipe": "c817f6de8a1f44c5"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/exif",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB744AD.bin",
+   "sha256": "db890f7d273ea27ea47a96ca063478b6892194a868fe68faf2079e28279f5c25",
+   "recipe": "c817f6de8a1f44c5"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-original",
+   "name": "JH_5408202611170027_0FA38996.bin",
+   "sha256": "108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968",
+   "recipe": "dc76e11713dd59df"
+  },
+  {
+   "base": "v012",
+   "mods": [
+    "v012/volume-led",
+    "v012/exif",
+    "v012/boot-last-mode",
+    "v012/capture-flash"
+   ],
+   "dump": "v012-clean",
+   "name": "JH_5408202611170027_0FB73A48.bin",
+   "sha256": "89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639",
+   "recipe": "dc76e11713dd59df"
+  }
+ ]
+}

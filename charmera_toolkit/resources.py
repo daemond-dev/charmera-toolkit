@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from .image import ORIGINAL_2025, RESOURCE_BASE, ResourceEntry, WavSlot, detect_build, parse_wav_at, resource_directory
+from .image import PUBLIC_BUILD, RESOURCE_BASE, ResourceEntry, WavSlot, detect_build, parse_wav_at, resource_directory
 from .sounds import GATE_FLAG, _check_output, _write_mod
 
 KIND_WAV = "WAV"
@@ -622,9 +622,10 @@ def handler(args) -> int:
     if not (args.name and args.file and args.out):
         print("error: replace needs --name ENTRY, --file JPEG and --out NEW.bin")
         return 2
-    if detect_build(image).build is not ORIGINAL_2025:
-        print("error: the image is not the original 2025 series build (its stamps were not found); "
-              "the resource layout is only known for that build")
+    match = detect_build(image)
+    if match.build is None or match.build.key != PUBLIC_BUILD.key:
+        print(f"error: the image is not the public dump's build or a copy of it; it is {match.label}. The resource "
+              "replacement is defined for that build's pack layout only.")
         return 2
     out = Path(args.out)
     problem = _check_output(src, out, args.overwrite)
@@ -654,7 +655,8 @@ def register(subparsers) -> None:
     p = subparsers.add_parser("resources", help="list, extract or replace entries of the GP+ resource pack")
     p.add_argument("action", choices=["list", "extract", "replace"])
     p.add_argument("image", metavar="IMAGE", help="a 2 MiB dump or a 0x1E0000 update file")
-    p.add_argument("--out", help="output directory (extract) or output image path (replace)")
+    p.add_argument("--out", help="output directory (extract) or output image path (replace; never named JH_*.bin, "
+                                 "never in a folder that holds DCIM or a JH_*.bin)")
     p.add_argument("--name", help="an entry, e.g. POWER_ON_LOGO.JPG (extract: only that one; replace: the slot to change)")
     p.add_argument("--file", help="replace: the JPEG to put into the slot")
     p.add_argument("--strip-metadata", action="store_true",

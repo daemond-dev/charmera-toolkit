@@ -13,6 +13,10 @@ that holds no other JH_*.bin and has room for the file; prints the plan and the 
 camera; waits for the card path to be typed back; then writes to a temporary name the camera ignores,
 fsyncs, renames to the final name, reads the copy back and compares hashes. Without the typed
 confirmation nothing is written. `--plan-only` stops after the plan.
+
+--stock is a read of this camera's own chip, the backup the file is compared with. Without it stage still
+writes once the card path is typed back, and says plainly, among the checks and in the plan, that nothing
+compares the file with the camera's own firmware and that a file that does not fit cannot be undone.
 """
 from __future__ import annotations
 
@@ -51,7 +55,11 @@ CAMERA_STEPS = [
     "3. When the progress has reached 100% and the screen stops changing (the updater waits there; it does not",
     "   restart by itself), take the card out first, then hold the power key about a second to switch off.",
     "4. Delete the update file from the card before the card goes back into the camera: the camera does not",
-    "   delete it and would flash again at every power-on with that card in.",
+    "   delete it and would flash again at every power-on with that card in. Plugging the cable into a",
+    "   switched-off camera switches it on, and with the file on its card it flashes again. So to delete the",
+    "   file through the camera's own USB drive, connect it in this order: camera off, card out, switch the",
+    "   camera on with its power key, wait 10 seconds (it looks for an update file only in the first five",
+    "   seconds after power-on), card in, then the cable. A card reader avoids the camera altogether.",
 ]
 
 
@@ -181,6 +189,27 @@ def windows_volume_info(root: Path) -> Tuple[Optional[str], Optional[str], Optio
         return None, None, None
 
 
+def macos_volume_info(root: Path, run=None) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[bool]]:
+    """(device, filesystem type, label, removable) for a mounted volume, from `diskutil info -plist`, or Nones when
+    macOS does not say. diskutil names FAT32 'msdos' and exFAT 'exfat', as the FAT_FAMILY set does."""
+    import plistlib
+    import subprocess
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, timeout=20).stdout)
+    try:
+        info = plistlib.loads(run(["diskutil", "info", "-plist", str(root)]))
+    except Exception:
+        return None, None, None, None
+    device = info.get("DeviceNode") or None
+    fstype = info.get("FilesystemType") or None
+    label = info.get("VolumeName") or None
+    removable: Optional[bool] = None
+    if info.get("Internal") is False or info.get("RemovableMedia") or info.get("Ejectable") or info.get("Removable"):
+        removable = True                     # a card reader, built in or USB, reports itself as removable or external
+    elif info.get("Internal") is True and info.get("RemovableMedia") is False and not info.get("Ejectable"):
+        removable = False
+    return device, fstype, label, removable
+
+
 def human_size(n: int) -> str:
     if n >= 1024 * MIB:
         return f"{n / (1024 * MIB):.1f} GiB"
@@ -230,7 +259,7 @@ def inspect_card(given: str, override: bool) -> CardInfo:
     if not is_mount:
         if not override:
             raise StageError(f"{given} is not a mount point or drive root. The camera reads only the card root, so give the point "
-                             "where the card is mounted (Linux: /run/media/deck/<label> or /media/<user>/<label>; Windows: E:). "
+                             "where the card is mounted (Linux: /run/media/deck/<label> or /media/<user>/<label>; macOS: /Volumes/<label>; Windows: E:). "
                              f"To test on a plain folder pass {OVERRIDE_FLAG}.", 2)
         notes.append(f"{given} is not a mount point or drive root; going on because of {OVERRIDE_FLAG}")
 
@@ -240,6 +269,8 @@ def inspect_card(given: str, override: bool) -> CardInfo:
     removable: Optional[bool] = None
     if os.name == "nt":  # pragma: no cover - Windows only
         fstype, label, removable = windows_volume_info(root)
+    elif sys.platform == "darwin" and is_mount:  # pragma: no cover - macOS only
+        device, fstype, label, removable = macos_volume_info(root)
     elif is_mount:
         device, fstype = linux_mount_entry(root)
         if device:
@@ -412,20 +443,45 @@ def describe_card(info: CardInfo) -> str:
     return ", ".join(parts)
 
 
-def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path) -> None:
+def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route: bool = False,
+               stock_path: Optional[Path] = None, stock: Optional[bytes] = None) -> None:
     print("Plan")
     print(f"  source:       {src}")
     print(f"  sha256:       {hashlib.sha256(image).hexdigest()}")
     print(f"  byte sum:     {byte_sum(image):08X} (the checksum in the name)")
     print(f"  size:         {len(image):,} bytes ({human_size(len(image))})")
+    if stock is not None:
+        print(f"  backup:       {stock_path}  (--stock, sha256 {hashlib.sha256(stock).hexdigest()}): the file was compared with it")
+    else:
+        print("  backup:       none given (--stock), so the file was compared with nothing from this camera")
     print(f"  card:         {info.given}  ({describe_card(info)})")
     print(f"  destination:  {dest}")
     print(f"  how:          written as {TEMP_NAME}, flushed to the card, renamed to the final name, read back and compared")
     print()
-    print("Only for the original 2025 series (matte body, yellow Kodak boot screen); never a Millennium or CLOT edition.")
+    if stock is None:
+        print("No backup of this camera's own flash chip was given, so nothing above compares the file with the firmware the")
+        print("camera runs. Before you flash, find out what it runs: read its chip (docs/01-FIRST-FLASH.md, step 1) and pass")
+        print("it as --stock, or run `charmera identify` on its photos. If the flash goes wrong, a backup is the only way")
+        print("back. stage still writes the file if you confirm below.")
+    else:
+        print("Keep the --stock file safe. It's the way back if this flash goes wrong. Only a read made before the camera")
+        print("was ever flashed says whether a firmware fits it. A read taken after a flash shows what the camera runs now,")
+        print("and that says nothing about what fits it (see the sensor-table line above).")
+    if donor_route:
+        print("Donor route: this file is another camera's firmware (--donor), for a camera whose own firmware is gone. Nothing")
+        print("here has tested it on this camera. Whether it fits depends on the two cameras having the same image sensor and")
+        print("wiring, which only their sensor markings can suggest. If it does not start far enough to run the card updater,")
+        print("only a chip programmer can bring the camera back (docs/02-RECOVERY.md, sections B and D); if it does, the")
+        print("update file the camera was last flashed with" + (", or a file made from --stock with pack," if stock is not None else "")
+              + " puts it back from a card.")
+    print("A file made from a public dump is never for a Millennium or CLOT edition, and on an original 2025 series camera")
+    print("(matte body, yellow Kodak boot screen) it fits only one whose image sensor its table drives. The body alone")
+    print("proves nothing. A backup of a camera read before it was ever flashed, packed with pack, fits that camera")
+    print("whatever its edition.")
     print("Charge the camera first: a power loss during programming leaves a camera that only a chip programmer can")
-    print("recover (docs/02-RECOVERY.md). The update replaces everything in the camera's own memory, including the")
-    print("photos it stored there without a card; photos on the SD card are not touched. Then, on the camera:")
+    print("recover (docs/02-RECOVERY.md). A 0x1E0000-byte file replaces everything in the camera's own memory, including the")
+    print("photos it stored there without a card; a 0x169000-byte file leaves them but the camera empties its photo list.")
+    print("Photos on the SD card are not touched. Then, on the camera:")
     for line in CAMERA_STEPS:
         print(f"  {line}")
     print()
@@ -447,6 +503,7 @@ def handler(args) -> int:
         print(f"error: cannot read {src}: {exc}")
         return 2
     stock: Optional[bytes] = None
+    stock_path: Optional[Path] = None
     if args.stock:
         stock_path = Path(args.stock)
         if not stock_path.is_file():
@@ -457,15 +514,31 @@ def handler(args) -> int:
         except OSError as exc:
             print(f"error: cannot read --stock {stock_path}: {exc}")
             return 2
+    donor: Optional[bytes] = None
+    if getattr(args, "donor", None):
+        donor_path = Path(args.donor)
+        if not donor_path.is_file():
+            print(f"error: --donor {args.donor} is not a file")
+            return 2
+        try:
+            donor = donor_path.read_bytes()
+        except OSError as exc:
+            print(f"error: cannot read --donor {donor_path}: {exc}")
+            return 2
     override = bool(getattr(args, "i_know_what_i_am_doing", False))
     plan_only = bool(getattr(args, "plan_only", False))
     card_given = (args.card or "").strip()
 
-    # 1. verify, exactly as the verify command would, with modified software allowed (that is what mods are).
-    # Never --allow-unknown-build: an unknown build or a changed image-sensor table is refused here, and no flag
-    # accepts a damaged resource entry.
+    # 1. verify, exactly as the verify command would, with modified software allowed (that is what mods are; the
+    # software line is then a WARN, and a changed vector table still fails). Never --allow-unknown-build or
+    # --allow-odd-size: an unknown build, a changed image-sensor table or a size other than the two the camera takes
+    # is refused here, and no flag accepts a damaged resource entry. The one exception is the donor route, which needs
+    # --stock and a file that is the donor's firmware unchanged, and says that the fit to this camera is unknown.
+    # Without --stock verify adds its WARN that nothing compares the file with this camera, and stage still writes.
     print(f"verify {src.name}:")
-    checks = verify_update(src, image, stock=stock, allow_modified=True, allow_unknown_build=False, allow_odd_size=False)
+    checks = verify_update(src, image, stock=stock, allow_modified=True, allow_unknown_build=False, allow_odd_size=False, donor=donor,
+                           stock_name=stock_path.name if stock_path is not None else None,
+                           donor_name=Path(args.donor).name if donor is not None else None)
     if print_checks(checks):
         print()
         print("RESULT: verify failed; this file does not go on a card.")
@@ -507,7 +580,7 @@ def handler(args) -> int:
         return 1
 
     # 3. the plan and the confirmation.
-    print_plan(src, image, info, dest)
+    print_plan(src, image, info, dest, donor_route=donor is not None, stock_path=stock_path, stock=stock)
     print()
     if plan_only:
         print("plan only: nothing written.")
@@ -558,7 +631,12 @@ def register(subparsers) -> None:
     p.add_argument("file", help="the JH_5408<stamp>_<sum>.bin update file, as written by pack")
     p.add_argument("--card", required=True,
                    help="the card's mount point (Linux: /run/media/deck/<label>, /media/<user>/<label>) or drive (Windows: E: or E:\\)")
-    p.add_argument("--stock", help="your own stock dump, so verify can show which blocks a modified file changes")
+    p.add_argument("--stock", help="a complete 2 MiB read of this camera's own flash chip (your backup): the file's sensor table, vector "
+                                   "table and software are compared with it. Only a read made before the camera was ever flashed says "
+                                   "whether a firmware fits it. Without --stock stage warns that nothing compares the file with this "
+                                   "camera's own firmware, and still writes when you confirm")
+    p.add_argument("--donor", help="the donor route: a read of another, working camera's chip whose firmware the file is, for a camera whose own "
+                                   "firmware is gone and does not fit it; --stock is optional, and the route says that the fit to this camera is unknown")
     p.add_argument("--plan-only", action="store_true", help="run every check and print the plan, then exit without asking or writing")
     p.add_argument(OVERRIDE_FLAG, dest="i_know_what_i_am_doing", action="store_true",
                    help="allow a plain folder that is not a mount point (for testing), a non-removable volume, or a filesystem the camera cannot read")

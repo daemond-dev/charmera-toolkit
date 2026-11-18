@@ -15,6 +15,30 @@ import pytest
 
 from charmera_toolkit import image, resources
 
+# Synthetic images carry no firmware bytes, so they hold stand-ins for the build marks, placed where the public
+# build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL,
+# and a sensor program (the reset table, a 61-write init table that starts with a page select, switches page
+# once more and ends with ff ff, and the code literal that points at it). The init table's hash is not a known
+# build's, so resources replace needs only the layout the marks give (BuildMatch.build), not the table's hash.
+SENSOR_RESET_OFFSET = 0xF5BFC
+SENSOR_START, SENSOR_END = 0xF5C6C, 0xF5CE8
+SENSOR_POINTER = 0x7B91C
+SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                               + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
+assert len(SYNTHETIC_SENSOR_TABLE) == SENSOR_END - SENSOR_START == 124
+
+
+def put_build_marks(img: bytearray) -> None:
+    """The public build's marks at its offsets, so detect_build gives the public build's layout (BuildMatch.build); with
+    this synthetic sensor table the identity is 'charmera-unknown-build'."""
+    b = image.PUBLIC_BUILD
+    img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
+    img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
+    img[0xF3978: 0xF3978 + 12] = b"Oct 14 2025\x00"
+    img[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = image.SENSOR_RESET_TABLE
+    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    img[SENSOR_POINTER: SENSOR_POINTER + 4] = struct.pack("<I", SENSOR_START - image.VA_OFFSET)
+
 # --- synthetic files ------------------------------------------------------------------------------------------------
 
 
@@ -75,10 +99,7 @@ def synthetic_image(entries=ENTRIES, pad=0xFF, stamps=True):
     img = bytearray(b"\xff" * 0x200000)
     img[0:4] = b"SPII"
     if stamps:
-        b = image.ORIGINAL_2025
-        img[b.stamp_offset: b.stamp_offset + 12] = b.stamp.encode()
-        img[b.build_offset: b.build_offset + len(b.build_string)] = b.build_string
-        img[b.compiled_offset: b.compiled_offset + len(b.compiled)] = b.compiled
+        put_build_marks(img)
     base = image.RESOURCE_BASE
     img[base: base + 0x18] = b"GP+\x00" + struct.pack("<H", len(entries)) + b"\x00" * 18
     sector = 4
@@ -428,7 +449,7 @@ def test_replace_handler_gate_build_and_output_rules(tmp_path, capsys):
     unknown = tmp_path / "unknown.bin"
     unknown.write_bytes(synthetic_image(stamps=False))
     assert resources.handler(make_args(**dict(base, image=str(unknown), out=str(tmp_path / "u.bin")), gate=True)) == 2
-    assert "not the original 2025 series" in capsys.readouterr().out and not (tmp_path / "u.bin").exists()
+    assert "not the public dump's build" in capsys.readouterr().out and not (tmp_path / "u.bin").exists()
     # list and extract still work on that image
     assert resources.handler(make_args(image=str(unknown))) == 0
 
@@ -445,6 +466,34 @@ def test_register_wires_the_flags():
     assert b.action == "list" and not b.gate and b.name is None
     with pytest.raises(SystemExit):
         parser.parse_args(["resources", "frobnicate", "x.bin"])
+
+
+def test_replace_never_writes_an_update_name_or_onto_a_card(tmp_path, capsys):
+    """A logo mod is an image, not an update file: never under a JH_*.bin name, in any case, and never into a
+    folder that holds DCIM or a JH_*.bin (a camera card), dry run or not."""
+    img = synthetic_image()
+    src = tmp_path / "in.bin"
+    src.write_bytes(img)
+    jpg = tmp_path / "logo.jpg"
+    jpg.write_bytes(fake_jpeg(scan=b"\x42" * 100))
+    card = tmp_path / "card"
+    (card / "dcim").mkdir(parents=True)
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "Jh_5408202610261427_0F065D55.bin").write_bytes(b"x")
+    base = dict(action="replace", image=str(src), name="POWER_ON_LOGO.JPG", file=str(jpg))
+    for out in (tmp_path / "JH_5408202611061200_00000000.bin", tmp_path / "jh_logo.BIN", card / "logo.bin",
+                staged / "logo.bin"):
+        for gate in (False, True):
+            assert resources.handler(make_args(**base, out=str(out), gate=gate)) == 2, out
+            text = capsys.readouterr().out
+            assert "named like an update file" in text or "looks like a camera card" in text or "holds an update file" in text
+            assert not out.exists()
+    assert sorted(p.name for p in card.iterdir()) == ["dcim"]
+    assert sorted(p.name for p in staged.iterdir()) == ["Jh_5408202610261427_0F065D55.bin"]
+    assert src.read_bytes() == img
+    assert resources.handler(make_args(**base, out=str(tmp_path / "logo.bin"), gate=True)) == 0
+    assert (tmp_path / "logo.bin").exists()
 
 
 # --- real encoder output (Pillow) -----------------------------------------------------------------------------------------

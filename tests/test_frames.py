@@ -1007,6 +1007,39 @@ def test_frames_help_and_registration():
         run("frames", "list", "x.bin", "--slot", "a")
 
 
+def test_replace_and_preview_never_write_an_update_name_or_onto_a_card(tmp_path, capsys):
+    """A frame mod is an image, not an update file: never under a JH_*.bin name, never into a folder that holds
+    DCIM or a JH_*.bin (a camera card), whatever the case of the name."""
+    img = synthetic_frame_image(slot=1)
+    src = tmp_path / "src.bin"
+    src.write_bytes(img)
+    png = tmp_path / "frame.png"
+    frames.png_write(png, W, H, border_frame(), "RGBA")
+    photo = tmp_path / "photo.png"
+    frames.png_write(photo, W, H, gradient_photo(), "RGB")
+    card = tmp_path / "card"
+    (card / "DCIM").mkdir(parents=True)
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "JH_5408202610261427_0F065D55.bin").write_bytes(b"x")
+    replace = ("frames", "replace", str(src), "--slot", "1", "--png", str(png))
+    for out in (tmp_path / "JH_5408202611061200_00000000.bin", tmp_path / "jh_5408x.BIN", card / "frame1.bin",
+                staged / "frame1.bin"):
+        for extra in ((), (GATE,)):
+            assert run(*replace, "--out", str(out), *extra) == 2, out
+            text = capsys.readouterr().out
+            assert "named like an update file" in text or "looks like a camera card" in text or "holds an update file" in text
+            assert not out.exists() and "dry run" not in text
+    assert run("frames", "preview", str(src), "--slot", "1", "--photo", str(photo), "--out", str(card / "p.png")) == 2
+    assert "looks like a camera card" in capsys.readouterr().out
+    assert sorted(p.name for p in card.iterdir()) == ["DCIM"]
+    assert sorted(p.name for p in staged.iterdir()) == ["JH_5408202610261427_0F065D55.bin"]
+    assert src.read_bytes() == img
+    # an ordinary name in an ordinary folder is still written
+    assert run(*replace, "--out", str(tmp_path / "frame1.bin"), GATE) == 0
+    assert (tmp_path / "frame1.bin").exists()
+
+
 # --- Against the stock image --------------------------------------------------------------------------------------
 
 

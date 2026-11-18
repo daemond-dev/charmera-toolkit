@@ -32,12 +32,37 @@ jobs:
           accept-android-sdk-licenses: true
           packages: platform-tools   # the default also asks for the retired "tools" package, which is no longer served
       - run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Public stock dump for the tests (downloaded from upstream, never stored)
+      - name: Public stock dump for the tests (downloaded from the-dumping-grounds' firmware repositories at fixed commits, never stored)
         run: |
           curl -fsSL --retry 5 -o "$RUNNER_TEMP/stock.bin" \
-            "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin"
-          echo "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f  $RUNNER_TEMP/stock.bin" | sha256sum -c -
+            "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v006/123b76a8ead1322678bbb750ac1c85c8d8bd2099/charmera-v006-2025-10-14-clean.bin"
+          echo "75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082  $RUNNER_TEMP/stock.bin" | sha256sum -c -
           echo "CHARMERA_STOCK_IMAGE=$RUNNER_TEMP/stock.bin" >> "$GITHUB_ENV"
+          # The factory build v012's cleaned copy, for the tests that make v0.25 and v0.26 from it. They skip without it.
+          if curl -fsSL --retry 5 -o "$RUNNER_TEMP/factory.bin"                "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v012/39150fbc584e4cb7c5bf091f56b9888f07379578/charmera-v012-2026-01-12-clean.bin"              && echo "63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c  $RUNNER_TEMP/factory.bin" | sha256sum -c -; then
+            echo "CHARMERA_FACTORY_DUMP=$RUNNER_TEMP/factory.bin" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The v012 factory dump could not be fetched or did not match its hash; its tests are skipped."
+          fi
+          # Optional: the film-mods build's public restore file, for the test that the app names it. Its test skips without it.
+          if curl -fsSL --retry 5 -o "$RUNNER_TEMP/film-restore.bin" \
+               "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v008_test/155571606f4a33e7912fc44f84b0b29f73f25347/charmera-v008_test-2025-11-19.bin" \
+             && echo "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f  $RUNNER_TEMP/film-restore.bin" | sha256sum -c -; then
+            echo "CHARMERA_FILM_MODS_RESTORE=$RUNNER_TEMP/film-restore.bin" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The film-mods restore file could not be fetched or did not match its hash; its test is skipped."
+          fi
+      # The app's write gate lives in MainActivity, which the JVM tests in build.sh cannot run. tests/test_android.py
+      # holds it by reading the source, and the flash docs tests hold what the app's pages point to, so they run here,
+      # in the job that publishes, before anything is built.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Source and doc checks (the backup gate, the flash docs)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+          python -m pytest -q tests/test_android.py tests/test_flash_docs.py tests/test_docs.py
       - name: Signing key
         id: key
         env:
@@ -84,7 +109,7 @@ jobs:
           # download link keeps working even if GitHub fails part way. Server errors are retried.
           VER=$(cat android/VERSION)
           TITLE="Charmera Card for Android $VER (build ${{ github.run_number }})"
-          NOTES="Puts a verified Charmera update file on an SD card from an Android phone (7.0 or later). Download charmera-card.apk on the phone, open it, and allow the install. What it does and what it cannot do: android/README.md."
+          NOTES="Puts a verified Charmera update file on an SD card from an Android phone (7.0 or later). It writes nothing without a backup of the camera's flash chip on record (a complete 2 MB dump that is not one of the public copies), and compares the update file with it. Download charmera-card.apk on the phone, open it, and allow the install. What it does and what it cannot do: android/README.md."
           retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i * 15)); done; return 1; }
           # Each step can be repeated safely, so a server error never leaves a half-made release behind:
           # create the release only if it is missing (gh also finds a draft by its tag), replace the APK,

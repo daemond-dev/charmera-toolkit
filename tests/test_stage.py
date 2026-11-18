@@ -19,10 +19,34 @@ import pytest
 from charmera_toolkit import checksum, frames, image, pack, settings, stage
 
 STAMP = "202611041200"
-# Synthetic images carry no firmware bytes, so they hold this stand-in for the image-sensor table, and the
-# synthetic_build fixture makes the build identity accept it. Tests on the real dump use the real identity.
-SENSOR_START, SENSOR_END = image.ORIGINAL_2025.sensor_table
-SYNTHETIC_SENSOR_TABLE = bytes(range(SENSOR_END - SENSOR_START))
+# Synthetic images carry no firmware bytes, so they hold stand-ins for the build marks, placed where the public
+# build has them and shaped like the real ones: the build string and the compile date, the stamp with its NUL, a
+# source path that names the public build's folder, and a sensor program (the reset table, a 61-write init table
+# that starts with a page select, switches page once more and ends with ff ff, and the code literal that points at
+# it). The init table's hash is not a known build's, and neither is the vector table's (one ARM instruction, then
+# 0xFF), so the synthetic_build fixture registers both as the public build's where a test wants a file accepted
+# without --stock. Tests on the real dump use the real identity.
+SENSOR_RESET_OFFSET = 0xF5BFC
+SENSOR_START, SENSOR_END = 0xF5C6C, 0xF5CE8
+SENSOR_POINTER = 0x7B91C
+SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xFF) for r in range(0x20, 0x20 + 58)]
+                               + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
+assert len(SYNTHETIC_SENSOR_TABLE) == SENSOR_END - SENSOR_START == 124
+SYNTHETIC_VECTORS = b"\x18\xf0\x9f\xe5" + b"\xff" * 60      # bytes 0x200..0x240 of synthetic_image()
+
+
+def put_build_marks(img: bytearray) -> None:
+    """The public build's marks at its offsets: detect_build reads 'public-dump-modified' where the synthetic_build
+    fixture registers the synthetic sensor table as that build's, 'charmera-unknown-build' elsewhere."""
+    b = image.PUBLIC_BUILD
+    img[b.stamp_offset: b.stamp_offset + 13] = b.stamp.encode() + b"\x00"
+    img[b.build_offset: b.build_offset + 20] = b"JH5408  20250520\x00\x00\x00\x00"
+    img[0xF3978: 0xF3978 + 12] = b"Oct 14 2025\x00"
+    path = b"G:\\code\\2247\\5408\\" + b.source_tree.encode() + b"\\host\\init.c\x00"   # where the dump's first source path is
+    img[0x3A4C0: 0x3A4C0 + len(path)] = path
+    img[SENSOR_RESET_OFFSET: SENSOR_RESET_OFFSET + 6] = image.SENSOR_RESET_TABLE
+    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    img[SENSOR_POINTER: SENSOR_POINTER + 4] = struct.pack("<I", SENSOR_START - image.VA_OFFSET)
 
 
 # --- synthetic image (same shape as tests/test_core.py builds) -----------------------------------------------
@@ -40,11 +64,8 @@ def synthetic_image(records=(), with_sounds=True):
     """A fake 2 MiB image with a GP+ pack holding five tiny WAVs and the given settings records."""
     img = bytearray(b"\xff" * checksum.FLASH_SIZE)
     img[0:4] = b"SPII"
-    img[0x200:0x204] = b"\x18\xf0\x9f\xe5"
-    img[image.ORIGINAL_2025.stamp_offset: image.ORIGINAL_2025.stamp_offset + 12] = image.ORIGINAL_2025.stamp.encode()
-    img[image.ORIGINAL_2025.build_offset: image.ORIGINAL_2025.build_offset + 16] = image.ORIGINAL_2025.build_string
-    img[image.ORIGINAL_2025.compiled_offset: image.ORIGINAL_2025.compiled_offset + 11] = image.ORIGINAL_2025.compiled
-    img[SENSOR_START: SENSOR_END] = SYNTHETIC_SENSOR_TABLE
+    img[0x200:0x240] = SYNTHETIC_VECTORS
+    put_build_marks(img)
     if with_sounds:
         base = image.RESOURCE_BASE
         img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
@@ -92,8 +113,9 @@ def run(*argv):
 
 @pytest.fixture
 def synthetic_build(monkeypatch):
-    """The original-series identity with the synthetic sensor table in place of the real one."""
-    fake = dataclasses.replace(image.ORIGINAL_2025, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest())
+    """The public build's identity with the synthetic sensor and vector tables in place of the real ones."""
+    fake = dataclasses.replace(image.PUBLIC_BUILD, sensor_table_sha256=hashlib.sha256(SYNTHETIC_SENSOR_TABLE).hexdigest(),
+                               vector_table_sha256=hashlib.sha256(SYNTHETIC_VECTORS).hexdigest())
     monkeypatch.setitem(image.KNOWN_BUILDS, fake.key, fake)
     return fake
 
@@ -107,6 +129,14 @@ def update_file(tmp_path, synthetic_build):
     out.mkdir()
     p = out / name.filename
     p.write_bytes(payload)
+    return p
+
+
+@pytest.fixture
+def backup(tmp_path):
+    """This camera's own backup: the 2 MiB read the update_file fixture's file was made from."""
+    p = tmp_path / "backup.bin"
+    p.write_bytes(synthetic_image([make_record()]))
     return p
 
 
@@ -141,24 +171,46 @@ OVERRIDE = stage.OVERRIDE_FLAG
 # --- tests --------------------------------------------------------------------------------------------------
 
 
-def test_happy_path_copies_and_verifies(update_file, card, confirmed, capsys):
-    assert run(str(update_file), "--card", str(card), OVERRIDE) == 0
+def test_happy_path_copies_and_verifies(update_file, backup, card, confirmed, capsys):
+    assert run(str(update_file), "--card", str(card), OVERRIDE, "--stock", str(backup)) == 0
     out = capsys.readouterr().out
     dest = card / update_file.name
     assert dest.read_bytes() == update_file.read_bytes()
     assert card_files(card) == [update_file.name]           # no temporary file left behind
     assert confirmed == [str(card)]
     assert "PASS filename" in out and "PASS checksum" in out and "PASS stamp" in out
+    assert "PASS sensor-table" in out and "PASS vector-table" in out and "PASS software-region" in out
+    assert "WARN backup" not in out
     assert "WARN resources" in out                          # the synthetic pack has 6 entries, not 43: shown, not blocking
     assert "Plan" in out and f"destination:  {dest}" in out
+    assert f"backup:       {backup}" in out and hashlib.sha256(backup.read_bytes()).hexdigest() in out
     assert "read back sha256 " + hashlib.sha256(update_file.read_bytes()).hexdigest() + ": matches" in out
     assert "not a mount point" in out                       # the override is announced
     low = out.lower()
     assert "delete the update file" in low and "every power-on" in low          # the camera steps are printed
     assert low.index("take the card out first") < low.index("hold the power key about a second")
     assert "millennium" in low and "photos it stored there" in low
+    # a backup fits its camera only when it was read before the camera was ever flashed
+    flat = " ".join(out.split())
+    assert "A backup of a camera read before it was ever flashed, packed with pack, fits that camera whatever its edition." in flat
+    assert "A camera's own backup" not in flat
     # Tags mirror verify: no FAIL line anywhere.
     assert not any(line.startswith("FAIL") for line in out.splitlines())
+
+
+def test_without_a_backup_stage_warns_and_still_writes(update_file, card, confirmed, capsys):
+    """The owner's decision of 2026-11-06: no --stock is a warning, not a refusal, and it is said plainly."""
+    assert run(str(update_file), "--card", str(card), OVERRIDE) == 0
+    out = capsys.readouterr().out
+    assert "WARN backup" in out and "nothing here compares the file with the camera's own firmware" in out
+    assert "a file that does not fit the camera cannot be undone" in out
+    assert "backup:       none given (--stock)" in out
+    assert "No backup of this camera's own flash chip was given" in out and "stage still writes the file" in out
+    assert (card / update_file.name).read_bytes() == update_file.read_bytes() and confirmed == [str(card)]
+    # the file already on the card: nothing to do, and the warning is still there
+    assert run(str(update_file), "--card", str(card), OVERRIDE) == 0
+    out = capsys.readouterr().out
+    assert "nothing to do" in out and "WARN backup" in out
 
 
 def test_refuses_a_verify_fail(update_file, card, confirmed, capsys):
@@ -368,8 +420,10 @@ def test_non_fat_filesystem_is_refused_unless_overridden(update_file, card, conf
     monkeypatch.setattr(stage, "is_drive_root", lambda path: True)
     monkeypatch.setattr(stage, "linux_mount_entry", lambda root, mounts_path="/proc/mounts": ("/dev/sdz1", "ext4"))
     monkeypatch.setattr(stage, "linux_removable", lambda device, sys_root="/sys": True)
+    # macOS asks diskutil instead of /proc/mounts: the same answer through its lookup
+    monkeypatch.setattr(stage, "macos_volume_info", lambda root, run=None: ("/dev/disk9s1", "ext4", "CARD", True))
     if os.name == "nt":
-        pytest.skip("the Linux mount lookup is not used on Windows")
+        pytest.skip("the mount lookups are not used on Windows")
     assert run(str(update_file), "--card", str(card)) == 1
     out = capsys.readouterr().out
     assert "is ext4; the camera reads exFAT and FAT32 only" in out and "docs/05-CARDS.md" in out
@@ -379,11 +433,13 @@ def test_non_fat_filesystem_is_refused_unless_overridden(update_file, card, conf
     # a fixed disk is not a card
     monkeypatch.setattr(stage, "linux_mount_entry", lambda root, mounts_path="/proc/mounts": ("/dev/sdz1", "vfat"))
     monkeypatch.setattr(stage, "linux_removable", lambda device, sys_root="/sys": False)
+    monkeypatch.setattr(stage, "macos_volume_info", lambda root, run=None: ("/dev/disk9s1", "msdos", "CARD", False))
     assert run(str(update_file), "--card", str(card)) == 1
     assert "not on removable media" in capsys.readouterr().out
     # a removable exFAT card passes and the plan names the device and the type
     monkeypatch.setattr(stage, "linux_mount_entry", lambda root, mounts_path="/proc/mounts": ("/dev/mmcblk0p1", "exfat"))
     monkeypatch.setattr(stage, "linux_removable", lambda device, sys_root="/sys": True)
+    monkeypatch.setattr(stage, "macos_volume_info", lambda root, run=None: ("/dev/mmcblk0p1", "exfat", None, True))
     assert run(str(update_file), "--card", str(card), "--plan-only") == 0
     out = capsys.readouterr().out
     assert "exfat, /dev/mmcblk0p1" in out and "warning:" not in out
@@ -482,19 +538,34 @@ def test_refuses_an_erased_or_damaged_resource_entry(update_file, card, confirme
 
 
 def test_stage_a_stock_update_file(stock_image, stock_image_path, card, confirmed, tmp_path, capsys):
-    payload = pack.prepare_payload(stock_image, factory_settings=True, blank_photos=True)
+    # --blank-photos alone: --factory-settings --blank-photos would be candidate C, which stage refuses (below)
+    payload = pack.prepare_payload(stock_image, blank_photos=True)
     name = checksum.build_update_name(payload, STAMP)
     src = tmp_path / "out" / name.filename
     src.parent.mkdir()
     src.write_bytes(payload)
     assert run(str(src), "--card", str(card), OVERRIDE, "--stock", str(stock_image_path)) == 0
     out = capsys.readouterr().out
-    assert "PASS software-region" in out and "INFO resources" in out
+    assert "PASS software-region" in out and "INFO resources" in out and "PASS vector-table" in out
+    # --stock is a public build, as a read of a camera flashed with the public restore file is: a warning, not a pass
+    assert "WARN sensor-table" in out and "proves a fit only if --stock was read before the camera was ever flashed" in out
     assert (card / name.filename).read_bytes() == payload
     assert card_files(card) == [name.filename]
     # once more: identical copy already there, nothing to do
     assert run(str(src), "--card", str(card), OVERRIDE) == 0
     assert "nothing to do" in capsys.readouterr().out
+    # candidate C, made the way docs/03 made it, is the stock restore file made from the cleaned copy: named, not refused
+    c = pack.prepare_payload(stock_image, factory_settings=True, blank_photos=True)
+    if hashlib.sha256(stock_image).hexdigest() == "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f":
+        c_path = tmp_path / "c" / checksum.build_update_name(c, "202611050003").filename
+        c_path.parent.mkdir()
+        c_path.write_bytes(c)
+        empty = tmp_path / "card2"
+        (empty / "DCIM").mkdir(parents=True)   # the first card already holds the file above
+        assert run(str(c_path), "--card", str(empty), OVERRIDE, "--stock", str(stock_image_path), "--plan-only") == 0
+        out = capsys.readouterr().out
+        assert "INFO withdrawn" in out and "cleaned copy" in out and "FAIL withdrawn" not in out
+        assert card_files(card) == [name.filename]
 
 
 def test_undecodable_confirmation_is_not_confirmed(monkeypatch, capsys):
@@ -512,3 +583,168 @@ def test_undecodable_confirmation_is_not_confirmed(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", bad_input)
     assert stage._confirm("/media/card") is False
     assert "Not confirmed" in capsys.readouterr().out
+
+
+# --- the donor route ---------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def donor_case(tmp_path, synthetic_build):
+    """This camera's read, a donor's read with another sensor table, and an official-size file made from the donor."""
+    backup = synthetic_image([make_record()])
+    donor = bytearray(backup)
+    donor[SENSOR_START + 5] ^= 0x01
+    donor = bytes(donor)
+    payload = pack.prepare_payload(donor, official_size=True)
+    out = tmp_path / "out"
+    out.mkdir()
+    src = out / checksum.build_update_name(payload, STAMP).filename
+    src.write_bytes(payload)
+    backup_path, donor_path = tmp_path / "backup.bin", tmp_path / "donor.bin"
+    backup_path.write_bytes(backup)
+    donor_path.write_bytes(donor)
+    return src, backup_path, donor_path
+
+
+def test_stage_refuses_a_donor_file_without_the_donor_route(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    assert run(str(src), "--card", str(card), OVERRIDE, "--stock", str(backup_path)) == 1
+    assert "FAIL sensor-table" in capsys.readouterr().out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_donor_route_writes_without_the_backup(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    assert run(str(src), "--card", str(card), OVERRIDE, "--donor", str(donor_path)) == 0
+    out = capsys.readouterr().out
+    assert "WARN backup" in out and "PASS from-donor" in out and "Donor route:" in out
+    assert (card / src.name).read_bytes() == src.read_bytes() and confirmed == [str(card)]
+
+
+def test_stage_donor_route_writes_and_says_the_fit_is_unknown(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    assert run(str(src), "--card", str(card), OVERRIDE, "--stock", str(backup_path), "--donor", str(donor_path)) == 0
+    out = capsys.readouterr().out
+    assert "WARN sensor-table" in out and "WARN way-back" in out and "PASS from-donor" in out
+    assert "PASS vector-table" in out and "WARN software-region" in out
+    assert "Donor route:" in out and "only a chip programmer can put --stock back" in out
+    assert (card / src.name).read_bytes() == src.read_bytes() and confirmed == [str(card)]
+
+
+def test_stage_donor_route_writes_a_mod_of_the_donor_with_a_warning(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    payload = bytearray(src.read_bytes())
+    payload[0x30000] ^= 1
+    changed = _renamed(src, bytes(payload), "202611041231")
+    assert run(str(changed), "--card", str(card), OVERRIDE, "--stock", str(backup_path), "--donor", str(donor_path)) == 0
+    out = capsys.readouterr().out
+    assert "WARN from-donor" in out and "1 byte(s) changed" in out
+    assert (card / changed.name).read_bytes() == changed.read_bytes() and confirmed == [str(card)]
+
+
+def test_stage_donor_route_refuses_a_donor_with_a_broken_vector_table(donor_case, card, confirmed, tmp_path, capsys):
+    """The donor's firmware goes on unchanged, so a donor whose reset vector is broken never reaches a card, whether it is
+    laid out like --stock or only like a known build."""
+    src, backup_path, donor_path = donor_case
+    donor = bytearray(donor_path.read_bytes())
+    donor[0x200:0x240] = bytes(b ^ 0xFF for b in donor[0x200:0x240])
+    donor_path.write_bytes(bytes(donor))
+    payload = pack.prepare_payload(bytes(donor), official_size=True)
+    broken = _renamed(src, payload, "202611041230")
+    moved = bytearray(backup_path.read_bytes())
+    moved[0x218C3: 0x218D1] = b"\x00" * 14
+    moved[0x218D0: 0x218DD] = b"202505201029\x00"              # this camera's read laid out like no known build
+    moved_path = tmp_path / "moved-backup.bin"
+    moved_path.write_bytes(bytes(moved))
+    for stock, said in ((backup_path, "differs from --stock's"), (moved_path, "whose layout the file has")):
+        assert run(str(broken), "--card", str(card), OVERRIDE, "--stock", str(stock), "--donor", str(donor_path), "--plan-only") == 1
+        out = capsys.readouterr().out
+        assert "FAIL vector-table" in out and said in out and "verify failed" in out and "Plan" not in out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_warns_about_a_stock_named_like_an_unverified_read(update_file, backup, card, confirmed, capsys):
+    read = backup.with_name("charmera_20261106-120000Z.unverified-read1.bin")
+    read.write_bytes(backup.read_bytes())
+    assert run(str(update_file), "--card", str(card), OVERRIDE, "--stock", str(read), "--plan-only") == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert "WARN stock-read" in out and "such a read is not a backup" in out and "plan only: nothing written." in out
+
+
+# --- the gates stage inherits from verify ------------------------------------------------------------------------
+
+
+def test_stage_refuses_a_stock_that_is_not_a_read_of_a_chip(update_file, card, confirmed, capsys):
+    """The update file itself, or any other file that is not a complete 2 MiB read, cannot stand for the camera."""
+    assert run(str(update_file), "--card", str(card), OVERRIDE, "--stock", str(update_file)) == 1
+    out = capsys.readouterr().out
+    assert "FAIL stock" in out and "this is an update file, not a read of a chip" in out and "Plan" not in out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_shows_modified_software_as_a_warning_and_refuses_a_broken_vector_table(update_file, backup, card, confirmed, capsys):
+    data = update_file.read_bytes()
+    beep = next(e for e in image.resource_directory(data) if e.display_name == "BEEP.WAV")
+    mod = bytearray(data)
+    mod[beep.offset + 0x40] ^= 0x01           # one PCM byte: a mod of the resources
+    src = _renamed(update_file, bytes(mod))
+    assert run(str(src), "--card", str(card), OVERRIDE, "--stock", str(backup), "--plan-only") == 0
+    out = capsys.readouterr().out
+    assert "WARN software-region" in out and "PASS software-region" not in out and "accepted because of --allow-modified" in out
+    # the same file with its vector table destroyed: stage passes --allow-modified, and still refuses it
+    broken = bytearray(data)
+    broken[0x200:0x240] = bytes(b ^ 0xFF for b in broken[0x200:0x240])
+    src = _renamed(update_file, bytes(broken), "202611041202")
+    for extra in ((), ("--stock", str(backup))):
+        assert run(str(src), "--card", str(card), OVERRIDE, "--plan-only", *extra) == 1
+        out = capsys.readouterr().out
+        assert "FAIL vector-table" in out and "verify failed" in out and "Plan" not in out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_refuses_every_size_but_the_two(update_file, card, confirmed, capsys):
+    data = update_file.read_bytes()
+    for i, n in enumerate((0x170000, 0x175000, 0x1C0000)):
+        src = _renamed(update_file, data[:n], f"20261104121{i}")
+        assert run(str(src), "--card", str(card), OVERRIDE, "--plan-only") == 1
+        out = capsys.readouterr().out
+        assert "FAIL size" in out and "verify failed" in out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_stage_refuses_a_withdrawn_candidate(update_file, card, confirmed, monkeypatch, capsys):
+    from charmera_toolkit import verify
+    monkeypatch.setitem(verify.WITHDRAWN, hashlib.sha256(update_file.read_bytes()).hexdigest(), "candidate X (a stand-in)")
+    assert run(str(update_file), "--card", str(card), OVERRIDE) == 1
+    assert "FAIL withdrawn" in capsys.readouterr().out
+    assert card_files(card) == [] and confirmed == []
+
+
+def test_the_camera_steps_give_the_safe_way_to_connect_the_camera(update_file, card, confirmed, capsys):
+    """Plugging the cable into a switched-off camera switches it on and runs the updater: the app's order, here too."""
+    assert run(str(update_file), "--card", str(card), OVERRIDE, "--plan-only") == 0
+    low = " ".join(capsys.readouterr().out.lower().split())
+    assert "plugging the cable into a switched-off camera switches it on" in low
+    step = low[low.index("plugging the cable into a switched-off camera"):]
+    order = ["camera off", "card out", "switch the camera on with its power key", "wait 10 seconds", "card in", "then the cable"]
+    at = [step.index(s) for s in order]
+    assert at == sorted(at)
+
+
+def test_stage_help_says_what_stock_is_for():
+    text = " ".join(parser()._subparsers._group_actions[0].choices["stage"].format_help().split())
+    assert "Only a read made before the camera was ever flashed says whether a firmware fits it" in text
+    assert "Without --stock stage warns" in text
+
+
+def test_macos_volume_info_reads_diskutil():
+    """diskutil info -plist for a card in a reader: exFAT, external, ejectable; and an internal APFS disk."""
+    import plistlib
+    card = plistlib.dumps({"DeviceNode": "/dev/disk4s1", "FilesystemType": "exfat", "VolumeName": "CHARMERA",
+                           "Internal": False, "Ejectable": True, "RemovableMedia": True})
+    disk = plistlib.dumps({"DeviceNode": "/dev/disk1s1", "FilesystemType": "apfs", "VolumeName": "Macintosh HD",
+                           "Internal": True, "Ejectable": False, "RemovableMedia": False})
+    assert stage.macos_volume_info(Path("/Volumes/CHARMERA"), run=lambda cmd: card) == (
+        "/dev/disk4s1", "exfat", "CHARMERA", True)
+    assert stage.macos_volume_info(Path("/"), run=lambda cmd: disk) == ("/dev/disk1s1", "apfs", "Macintosh HD", False)
+    assert stage.macos_volume_info(Path("/x"), run=lambda cmd: b"not a plist") == (None, None, None, None)
