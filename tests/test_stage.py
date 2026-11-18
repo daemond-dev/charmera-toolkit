@@ -433,11 +433,13 @@ def test_non_fat_filesystem_is_refused_unless_overridden(update_file, card, conf
     # a fixed disk is not a card
     monkeypatch.setattr(stage, "linux_mount_entry", lambda root, mounts_path="/proc/mounts": ("/dev/sdz1", "vfat"))
     monkeypatch.setattr(stage, "linux_removable", lambda device, sys_root="/sys": False)
+    monkeypatch.setattr(stage, "macos_volume_info", lambda root, run=None: ("/dev/disk9s1", "msdos", "CARD", False))
     assert run(str(update_file), "--card", str(card)) == 1
     assert "not on removable media" in capsys.readouterr().out
     # a removable exFAT card passes and the plan names the device and the type
     monkeypatch.setattr(stage, "linux_mount_entry", lambda root, mounts_path="/proc/mounts": ("/dev/mmcblk0p1", "exfat"))
     monkeypatch.setattr(stage, "linux_removable", lambda device, sys_root="/sys": True)
+    monkeypatch.setattr(stage, "macos_volume_info", lambda root, run=None: ("/dev/mmcblk0p1", "exfat", "CARD", True))
     assert run(str(update_file), "--card", str(card), "--plan-only") == 0
     out = capsys.readouterr().out
     assert "exfat, /dev/mmcblk0p1" in out and "warning:" not in out
