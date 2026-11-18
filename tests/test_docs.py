@@ -79,7 +79,7 @@ def test_the_first_doc_links_to_every_other_doc():
 def test_no_reference_uses_an_old_unnumbered_name():
     stems = [re.sub(r"^\d\d-", "", p.stem) for p in DOCS.glob("[0-9][0-9]-*.md")]
     pattern = re.compile(r"(?<![\w-])(" + "|".join(map(re.escape, stems)) + r")\.md")
-    files = markdown_files() + sorted((REPO / "charmera_toolkit").glob("*.py")) + sorted((REPO / "scripts").glob("*"))
+    files = markdown_files() + sorted((REPO / "charmera_toolkit").glob("*.py")) + sorted(p for p in (REPO / "scripts").glob("*") if p.is_file())
     hits = []
     for f in files:
         for number, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):

@@ -420,8 +420,10 @@ def test_non_fat_filesystem_is_refused_unless_overridden(update_file, card, conf
     monkeypatch.setattr(stage, "is_drive_root", lambda path: True)
     monkeypatch.setattr(stage, "linux_mount_entry", lambda root, mounts_path="/proc/mounts": ("/dev/sdz1", "ext4"))
     monkeypatch.setattr(stage, "linux_removable", lambda device, sys_root="/sys": True)
+    # macOS asks diskutil instead of /proc/mounts: the same answer through its lookup
+    monkeypatch.setattr(stage, "macos_volume_info", lambda root, run=None: ("/dev/disk9s1", "ext4", "CARD", True))
     if os.name == "nt":
-        pytest.skip("the Linux mount lookup is not used on Windows")
+        pytest.skip("the mount lookups are not used on Windows")
     assert run(str(update_file), "--card", str(card)) == 1
     out = capsys.readouterr().out
     assert "is ext4; the camera reads exFAT and FAT32 only" in out and "docs/05-CARDS.md" in out
