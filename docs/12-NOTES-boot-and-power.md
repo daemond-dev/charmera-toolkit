@@ -1,6 +1,6 @@
 # Kodak Charmera (GPCV2247F) stock firmware: boot path, power management, clocks, battery
 
-Reading order: 12 of 13 · previous: [Image layout](11-FORMAT.md) · next: [Research report](13-PHASE1-REPORT.md) · [all docs](README.md)
+Reading order: 12 of 15 · previous: [Image layout](11-FORMAT.md) · next: [Research report](13-PHASE1-REPORT.md) · [all docs](README.md)
 
 Static analysis only, by disassembling the code region of the public stock dump (2 MiB, sha256
 cc3b4b2f...ea42f; see the [Research report](13-PHASE1-REPORT.md) for where it comes from) in ARM mode. Nothing
@@ -193,4 +193,4 @@ VERIFIED static conclusion: **never initialised**.
 
 ---
 
-Reading order: 12 of 13 · previous: [Image layout](11-FORMAT.md) · next: [Research report](13-PHASE1-REPORT.md) · [all docs](README.md)
+Reading order: 12 of 15 · previous: [Image layout](11-FORMAT.md) · next: [Research report](13-PHASE1-REPORT.md) · [all docs](README.md)

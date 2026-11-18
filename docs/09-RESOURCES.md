@@ -1,6 +1,6 @@
 # The resource pack and the `resources` command
 
-Reading order: 9 of 13 · previous: [Photo frames](08-FRAMES.md) · next: [Photo dates (EXIF)](10-EXIF.md) · [all docs](README.md)
+Reading order: 9 of 15 · previous: [Photo frames](08-FRAMES.md) · next: [Photo dates (EXIF)](10-EXIF.md) · [all docs](README.md)
 
 What the GP+ pack at 0x120000 holds, how `resources list` / `extract` / `replace` treat it, and how to make a
 boot logo the camera has a chance of accepting. Every offset and length below was read off the stock
@@ -186,4 +186,4 @@ backup you made before the change.
 
 ---
 
-Reading order: 9 of 13 · previous: [Photo frames](08-FRAMES.md) · next: [Photo dates (EXIF)](10-EXIF.md) · [all docs](README.md)
+Reading order: 9 of 15 · previous: [Photo frames](08-FRAMES.md) · next: [Photo dates (EXIF)](10-EXIF.md) · [all docs](README.md)

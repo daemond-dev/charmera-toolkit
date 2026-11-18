@@ -76,7 +76,8 @@ def test_candidates_reproduce_and_are_refused(stock_image, stock_image_path, bui
         data = path.read_bytes()
         withdrawn = hashlib.sha256(data).hexdigest() in verify.WITHDRAWN
         if is_keychain(stock_image):
-            assert path.name == name and hashlib.sha256(data).hexdigest() == sha and withdrawn, label
+            # C is named, not refused: its bytes are the stock restore file made from the cleaned copy
+            assert path.name == name and hashlib.sha256(data).hexdigest() == sha and withdrawn == (label != "C"), label
         names = [c.name for c in failures(path, data, stock=stock_image, allow_modified=(label == "B"))]
         assert names == (["withdrawn"] if withdrawn else []), label
         by = {c.name: c for c in verify.verify_update(path, data, stock=stock_image, allow_modified=True)}

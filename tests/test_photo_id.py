@@ -2,9 +2,10 @@
 
 tests/fixtures/original-photo-header.jpg-header is the owner's camera's header: the first 624 bytes of a photo
 that camera took on its original firmware, before it was ever flashed, cut at the end of the SOS header, so it
-holds no image data. The other headers are built here, from the parts both templates share (the JPEG standard's
-tables, no firmware bytes), and, when CHARMERA_STOCK_IMAGE points at the public dump, from the templates and the
-two stored photos in it.
+holds no image data. The other headers are built here, from the parts the templates share (the JPEG standard's
+tables, no firmware bytes; the EXIF mod's block from its authored names and lengths only), and, when
+CHARMERA_STOCK_IMAGE points at the public dump, from the templates and the two stored photos in it, and when
+CHARMERA_FACTORY_DUMP points at a v012 dump, from its bare templates.
 """
 import io
 import os
@@ -13,10 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from charmera_toolkit import cli, image, photo_id
+from datetime import datetime
+
+from charmera_toolkit import cli, exif, image, photo_id
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "original-photo-header.jpg-header"
 FILM_MODS_RESTORE = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
+FACTORY_DUMP = Path(os.environ.get("CHARMERA_FACTORY_DUMP", ""))
+# The four bare templates of the factory build v012 (file offsets in its 2 MiB dump).
+V012_BARE = (0xFFC68, 0x107538, 0x1077A8, 0x107A18)
 
 # The templates in the public dump (file offsets), and how far the film-mods build has them moved on.
 T0, T1, T2, T3 = 0xFFB78, 0x107448, 0x1079D8, 0x107C48
@@ -74,6 +80,22 @@ def bare_header(quality=80, width=1440, height=1080, y=0x22):
     return b"\xff\xd8" + sof(width, height, y) + seg(0xFE, b"GPEncoder") + dqt(quality) + DRI + DHT + SOS
 
 
+def exif_mod_app1(software="v0.26"):
+    """An APP1 shaped like our EXIF mod's: 0xD0 bytes with the marker, Make Kodak, Model Charmera and Software."""
+    return exif_app1(make="Kodak", model="Charmera", software=software, size=photo_id.EXIF_MOD_APP1_LEN)
+
+
+def exif_mod_header(quality=80, width=1440, height=1080, app1=None):
+    """Shaped like our EXIF mod's header: SOI, one APP1, then the bare template from SOF0 on, 0x340 bytes."""
+    return b"\xff\xd8" + (exif_mod_app1() if app1 is None else app1) + bare_header(quality, width, height)[2:]
+
+
+def exif_fixed(header: bytes) -> bytes:
+    """What the toolkit's exif-fix makes of a photo with this header (on a copy): its own rebuilt EXIF block."""
+    out, _ = exif.fix_jpeg(header + b"\x12\x34" * 100 + b"\xff\xd9", datetime(2026, 11, 14, 12, 0, 0))
+    return out
+
+
 def header_of(data: bytes) -> photo_id.Header:
     return photo_id.read_header(photo_id._reader(io.BytesIO(data)))
 
@@ -91,9 +113,9 @@ def conclusion(text: str) -> str:
 # --- the owner's camera --------------------------------------------------------------------------------------------
 
 
-def test_the_owners_photo_has_the_bare_header_neither_known_build_writes_for_a_photo(tmp_path, capsys):
-    """The owner's camera, on its original firmware, wrote this photo with the bare template, which both known builds
-    use only for thumbnails, video frames and a Wi-Fi stream: that camera ran another build."""
+def test_the_owners_photo_has_the_factory_build_v012s_bare_header(tmp_path, capsys):
+    """The owner's camera, on its original firmware, wrote this photo with the bare template: the factory build v012's
+    still-photo header (OV9732 cameras), which the v006 family uses only for thumbnails and video frames."""
     data = FIXTURE.read_bytes()
     assert len(data) == 624 and data[-14:-12] == b"\xff\xda"      # the header and nothing after its SOS
     h = header_of(data)
@@ -103,8 +125,8 @@ def test_the_owners_photo_has_the_bare_header_neither_known_build_writes_for_a_p
     assert cli.main(["photo-id", str(FIXTURE)]) == 0
     out = capsys.readouterr().out
     assert "the bare template, no EXIF block, 0x270 bytes" in out and "IJG quality 80" in out and "1440x1080" in out
-    assert conclusion(out) == ("a bare header that neither known build writes for a still photo: if this is a photo as the "
-                               "camera saved it in DCIM, the camera ran another build when it took it")
+    assert conclusion(out) == BARE == photo_id.CONCLUSIONS["bare"]
+    assert photo_id.verdict(header_of(data)) == ("bare", "v012", [])
 
 
 def test_the_owners_header_is_the_bare_template_with_its_size_and_quality(stock_image):
@@ -118,7 +140,14 @@ def test_the_owners_header_is_the_bare_template_with_its_size_and_quality(stock_
     assert bytes(made) == FIXTURE.read_bytes()
 
 
-# --- the two kinds both known builds write -------------------------------------------------------------------------
+# --- the three still-photo headers the known builds write ---------------------------------------------------------
+
+
+STILL = ("the v006 / v008_test family's still-photo header (SP140A builds; our v0.21-v0.24 write it too; a photo cannot "
+         "tell v006 from v008_test)")
+BARE = ("the factory build v012's still-photo header (OV9732 cameras), which our v0.25 keeps; the v006 family writes it "
+        "only for thumbnails and video frames, so a frame taken out of a video has it too")
+EXIF_MOD = "our EXIF mod's still-photo header (v0.26 and later, built on the factory build v012)"
 
 
 def test_the_still_and_the_bare_header(tmp_path):
@@ -128,17 +157,86 @@ def test_the_still_and_the_bare_header(tmp_path):
     assert h.kind == "still" and h.qualities == [80]
     assert (h.exif.make, h.exif.model, h.exif.software) == ("Generalplus", "CBB3", "20150615")
     text = report(tmp_path, still + b"\x12\x34" * 500 + b"\xff\xd9")
-    assert "the EXIF still template, 0x590 bytes (SOI SOF0 COM DQT DQT DRI DHT DHT DHT DHT APP1 SOS)" in text
+    assert "the v006 family's EXIF still template, 0x590 bytes (SOI SOF0 COM DQT DQT DRI DHT DHT DHT DHT APP1 SOS)" in text
     assert "comment:     'GPEncoder      '" in text and "Make 'Generalplus', Model 'CBB3', Software '20150615'" in text
     assert "sampling Y 2x2, Cb 1x1, Cr 1x1 (4:2:0)" in text
-    assert conclusion(text) == "the still-photo header both known builds write"
+    assert conclusion(text) == STILL == photo_id.CONCLUSIONS["still"]
+    assert photo_id.verdict(h) == ("still", "v006-v008_test", [])
     for quality in (85, 80, 75, 45):            # a card photo's three, and the photo taken without a card
         assert header_of(still_header(quality)).qualities == [quality]
         assert header_of(bare_header(quality)).kind == "bare"
+        assert header_of(exif_mod_header(quality)).kind == "exif-mod"
+
+
+def test_the_exif_mods_header(tmp_path):
+    """Our EXIF mod (v0.26 and later): SOI, one 0xD0-byte APP1 with Make Kodak, Model Charmera and a Software tag, then
+    v012's bare template from SOF0 on, 0x340 bytes in all."""
+    data = exif_mod_header()
+    assert len(data) == photo_id.EXIF_MOD_HEADER_LEN
+    h = header_of(data)
+    assert h.kind == "exif-mod" and h.reasons == [] and h.qualities == [80]
+    assert (h.exif.make, h.exif.model, h.exif.software) == ("Kodak", "Charmera", "v0.26")
+    assert photo_id.verdict(h) == ("exif-mod", "v012", [])
+    text = report(tmp_path, data + b"\x12\x34" * 500 + b"\xff\xd9")
+    assert "the EXIF mod's: one Kodak/Charmera EXIF block, then the bare template, 0x340 bytes" in text
+    assert "(SOI APP1 SOF0 COM DQT DQT DRI DHT DHT DHT DHT SOS)" in text
+    assert conclusion(text) == EXIF_MOD == photo_id.CONCLUSIONS["exif-mod"]
+    # a later version names itself in Software, same length
+    assert header_of(exif_mod_header(app1=exif_mod_app1(software="v0.27"))).kind == "exif-mod"
+    # the same layout at another length is not the mod's header
+    longer = header_of(exif_mod_header(app1=exif_app1(make="Kodak", model="Charmera", software="v0.26", size=0xE0)))
+    assert longer.kind == "resave-or-build" and "a Kodak/Charmera EXIF header of 0x350 bytes, not the EXIF mod's 0x340" in longer.reasons
+    # the APP1 after the SOF0, or a second APP1, is not the mod's layout either
+    moved = b"\xff\xd8" + sof() + exif_mod_app1() + bare_header()[2 + len(sof()):]
+    assert header_of(moved).kind == "resave-or-build"
+    two = b"\xff\xd8" + exif_mod_app1() + exif_mod_app1() + bare_header()[2:]
+    assert header_of(two).kind == "resave-or-build"
+
+
+def test_an_exif_fix_copy_is_told_from_the_exif_mod(tmp_path):
+    """The toolkit's exif-fix writes Make Kodak and Model Charmera on copies, with no Software tag, and keeps every
+    other segment: a copy of a v006-family photo keeps the 0x590 layout's segments, a copy of a v012 photo gets its
+    APP1 right after the SOI. Neither is the EXIF mod, and each still names the family of the photo it came from."""
+    from_still = header_of(exif_fixed(still_header()))
+    assert from_still.markers == photo_id.STILL_MARKERS and from_still.length != photo_id.STILL_HEADER_LEN
+    assert (from_still.exif.make, from_still.exif.model, from_still.exif.software) == ("Kodak", "Charmera", "")
+    assert photo_id.verdict(from_still) == ("exif-fix", "v006-v008_test", [])
+    from_bare = header_of(exif_fixed(bare_header()))
+    assert from_bare.markers == photo_id.EXIF_MOD_MARKERS and from_bare.length != photo_id.EXIF_MOD_HEADER_LEN
+    assert photo_id.verdict(from_bare) == ("exif-fix", "v012", [])
+    assert photo_id.verdict(header_of(exif_fixed(exif_mod_header()))) == ("exif-fix", "v012", [])
+    text = report(tmp_path, exif_fixed(still_header()))
+    assert "an exif-fix copy: Kodak/Charmera EXIF without Software" in text
+    assert conclusion(text) == (photo_id.CONCLUSIONS["exif-fix"] + "; that is " + photo_id.FAMILIES["v006-v008_test"])
+    assert "not the EXIF mod" in conclusion(text)
+    # Kodak/Charmera with a Software tag on the v006 family's layout: neither exif-fix nor the EXIF mod writes that
+    h = header_of(still_header(app1=exif_app1(make="Kodak", model="Charmera")))
+    assert h.kind == "resave-or-build" and any("neither the EXIF mod nor exif-fix writes" in r for r in h.reasons)
+
+
+def test_an_exif_fix_keep_make_copy_of_a_v006_family_photo(tmp_path):
+    """exif-fix --keep-make keeps Generalplus/CBB3 on a copy of a 0x590 photo and writes no Software tag: an exif-fix
+    copy of a v006-family photo, not 'unknown' and not the camera's own photo (which always has Software)."""
+    out, res = exif.fix_jpeg(still_header() + b"\x12\x34" * 100 + b"\xff\xd9", datetime(2026, 11, 14, 12, 0, 0),
+                             keep_make=True)
+    assert (res.make, res.model) == ("Generalplus", "CBB3")
+    h = header_of(out)
+    assert h.markers == photo_id.STILL_MARKERS and h.length != photo_id.STILL_HEADER_LEN
+    assert (h.exif.make, h.exif.model, h.exif.software) == ("Generalplus", "CBB3", "")
+    assert photo_id.verdict(h) == ("exif-fix", "v006-v008_test", [])
+    text = report(tmp_path, out)
+    assert "an exif-fix copy: Generalplus/CBB3 (--keep-make) EXIF without Software" in text
+    assert conclusion(text) == (photo_id.CONCLUSIONS["exif-fix"] + "; that is " + photo_id.FAMILIES["v006-v008_test"])
+    # on a bare photo there is no Make to keep, so --keep-make writes Kodak/Charmera: the same exif-fix copy as without
+    out, _ = exif.fix_jpeg(bare_header() + b"\x12\x34" * 100 + b"\xff\xd9", datetime(2026, 11, 14, 12, 0, 0),
+                           keep_make=True)
+    assert photo_id.verdict(header_of(out)) == ("exif-fix", "v012", [])
+    # the camera's own photo, with its Software tag, stays a camera photo
+    assert header_of(still_header()).kind == "still"
 
 
 RESAVED = "re-saved by another program: says nothing about the camera"
-EITHER = ("neither known build writes this header as it is; another program saved it again, or another build wrote it; "
+EITHER = ("no known build writes this header as it is; another program saved it again, or another build wrote it; "
           "nothing here tells which")
 
 
@@ -164,9 +262,10 @@ def test_a_mark_of_an_editor_or_a_re_encode_shows_a_re_saved_photo(tmp_path):
 
 
 def test_what_another_program_or_another_build_could_write_tells_neither(tmp_path):
-    """An EXIF Make other than Generalplus, a JFIF APP0, the still comment without its EXIF block and tables the camera's
-    encoder never writes: neither known build writes such a header, but another build could as well as another
-    program, so nothing here tells which (the round-two review's cases among them)."""
+    """An EXIF Make other than Generalplus (and not the EXIF mod's or exif-fix's Kodak), a JFIF APP0, the still
+    comment without its EXIF block and tables the camera's encoder never writes: no known build writes such a header,
+    but another build could as well as another program, so nothing here tells which (the round-two review's cases
+    among them)."""
     kodak = header_of(still_header(app1=exif_app1(make="KODAK")))            # the still template exactly, Make KODAK
     assert kodak.kind == "resave-or-build" and kodak.reasons == ["EXIF Make 'KODAK'"]
     jfif = header_of(b"\xff\xd8" + JFIF + bare_header()[2:])                  # the bare template and a JFIF APP0
@@ -176,10 +275,11 @@ def test_what_another_program_or_another_build_could_write_tells_neither(tmp_pat
     assert still_comment.kind == "resave-or-build" and still_comment.reasons == alone
     assert header_of(still_header(app1=b"")).reasons == alone
     assert header_of(still_header(before=JFIF)).kind == "resave-or-build"
-    # what the toolkit's own exif-fix writes, a phone photo with no editor's mark, and tables the encoder never writes,
-    # with the GPEncoder comment or without it
-    exif_fix = header_of(still_header(app1=exif_app1(make="Kodak", model="Charmera")))
-    assert exif_fix.kind == "resave-or-build" and "EXIF Make 'Kodak'" in exif_fix.reasons
+    # Make Kodak with another Model, a phone photo with no editor's mark, and tables the encoder never writes, with
+    # the GPEncoder comment or without it
+    other_kodak = header_of(exif_mod_header(app1=exif_app1(make="Kodak", model="EasyShare", software="1.0",
+                                                           size=photo_id.EXIF_MOD_APP1_LEN)))
+    assert other_kodak.kind == "resave-or-build" and "EXIF Make 'Kodak'" in other_kodak.reasons
     phone = (b"\xff\xd8" + JFIF + exif_app1(make="Apple", model="iPhone 15", software="17.1", size=200)
              + seg(0xDB, b"\x00" + bytes(range(2, 66))) + sof(4032, 3024) + DHT + SOS)
     assert header_of(phone).kind == "resave-or-build"
@@ -191,7 +291,7 @@ def test_what_another_program_or_another_build_could_write_tells_neither(tmp_pat
     assert h.kind == "resave-or-build" and "quantisation tables no IJG quality reproduces" in h.reasons
     assert "no GPEncoder comment" in h.reasons
     text = report(tmp_path, still_header(app1=exif_app1(make="KODAK")))
-    assert "header:      neither template as it is, 0x590 bytes" in text and "differs:     EXIF Make 'KODAK'" in text
+    assert "header:      no template as it is, 0x590 bytes" in text and "differs:     EXIF Make 'KODAK'" in text
     assert conclusion(text) == EITHER and photo_id.CONCLUSIONS["resave-or-build"] == EITHER
 
 
@@ -218,7 +318,8 @@ def test_a_header_neither_template_and_no_program_named_is_unknown(tmp_path):
     h = header_of(no_dri)
     assert h.kind == "unknown" and "no DRI 0" in h.reasons and h.qualities == [80]
     text = report(tmp_path, no_dri)
-    assert "header:      neither template, " in text and conclusion(text).startswith("a header neither known build writes")
+    assert "header:      no template, " in text and conclusion(text).startswith("a header no known build writes")
+    assert photo_id.verdict(h)[:2] == ("unknown", None)
 
 
 def test_the_templates_scan_header_and_quantisation_segments_are_part_of_them():
@@ -288,7 +389,7 @@ def test_the_command_line(tmp_path, capsys):
     good.write_bytes(still_header())
     assert cli.main(["photo-id", str(good), str(FIXTURE)]) == 0
     out = capsys.readouterr().out
-    assert out.count("conclusion:") == 2 and "the still-photo header both known builds write" in out
+    assert out.count("conclusion:") == 2 and STILL in out and BARE in out
     assert cli.main(["photo-id", str(good), str(tmp_path / "missing.jpg")]) == 2
     assert "error:       not a file" in capsys.readouterr().out
     other = tmp_path / "notes.txt"
@@ -302,21 +403,22 @@ def test_help_explains_what_the_conclusions_mean():
     sub = next(a for a in parser._actions if a.dest == "command").choices["photo-id"]
     text = " ".join(sub.format_help().split()).replace("- ", "-")     # argparse may wrap a line after a hyphen
     for words in ("only the header", "never more than the first 64 KiB", "Make Generalplus, Model CBB3 and Software 20150615",
-                  "only for thumbnails, video frames and a Wi-Fi stream",
-                  "if the file is a photo as the camera saved it in DCIM, the camera ran another build when it took it",
+                  "The factory build v012 (OV9732 cameras) and our v0.25 write a bare 0x270-byte header",
+                  "Our EXIF mod (v0.26 and later) writes 0x340 bytes", "a photo cannot tell v006 from v008_test",
+                  "the v006 family writes the same bare header for thumbnails and video frames",
+                  "'A copy the toolkit's exif-fix made'", "it is not the EXIF mod",
                   "says nothing about the camera",
                   "an XMP block, an APP2, APP13 or APP14 segment, a progressive frame or a size taller than wide",
-                  "'Neither known build writes this header as it is': an EXIF Make other than Generalplus, a JFIF or "
-                  "other APP0 segment, the still comment without its EXIF block, or tables the camera's encoder never "
-                  "writes",
+                  "'No known build writes this header as it is': an EXIF Make other than these, a JFIF or other APP0 "
+                  "segment, the still comment without its EXIF block, or tables the camera's encoder never writes",
                   "another program may have saved the file again, or another build may have written it, and nothing here "
                   "tells which", "A header without its quantisation tables or its Huffman tables is cut short, or comes from "
                   "an encoder that leaves them out",
-                  "does not tell the known builds apart (INFERRED), any other frame header is not the one they write",
-                  "a JUNK text other than 'GP$322 Generalplus AviPackerV3 20140916', the packer text both carry, shows that "
-                  "other code wrote the file",
-                  "does not show which build it runs", "a frame taken out of a video without re-encoding has the bare header too",
-                  "Nothing here says whether a firmware fits a camera"):
+                  "does not tell the builds apart (INFERRED), any other frame header is not the one they write",
+                  "a JUNK text other than 'GP$322 Generalplus AviPackerV3 20140916', the packer text v006, v008_test and "
+                  "v012 all carry, shows that other code wrote the file",
+                  "a photo taken after a flash shows the flashed firmware", "not a frame taken out of a video",
+                  "Nothing here says whether a firmware fits a camera", "use identify"):
         assert words in text, words
     assert "USB" not in text                                   # the bare template's USB-camera role is not shown
     assert "USB" not in photo_id.__doc__
@@ -351,7 +453,8 @@ def test_the_frame_header_of_a_video_does_not_tell_the_known_builds_apart(tmp_pa
     text = report(tmp_path, data, "MOVI0001.avi")
     assert "an AVI, 1280x720, 'MJPG', 30.00 frames per second" in text and "GP$322 Generalplus AviPackerV3 20140916" in text
     assert "  header:      the bare template" in text
-    video = "the frame header both known builds write for video: it does not tell the known builds apart (INFERRED)"
+    video = ("the bare frame header the v006 family writes for video (v012 holds the same template): it does not tell "
+             "the builds apart (INFERRED)")
     assert conclusion(text) == video == photo_id.VIDEO
     frame_at = data.index(b"00dc") + 8
     assert max(o + n for o, n in reads) == frame_at + len(frame)     # nothing of the frame's image data is read
@@ -401,7 +504,7 @@ def test_a_junk_text_other_than_the_packers_shows_other_code_wrote_the_video(tmp
     text = report(tmp_path, other, "MOVI0005.avi")
     assert "junk text:   'Lavf58.29.100'" in text and "  header:      the bare template" in text
     assert conclusion(text) == ("other code wrote this file: its JUNK text is not 'GP$322 Generalplus AviPackerV3 20140916', "
-                                "the packer text both known builds carry")
+                                "the packer text v006, v008_test and v012 all carry")
     # a JUNK chunk that holds no text says nothing either way
     blank = avi(frame).replace(photo_id.AVI_PACKER, bytes(len(photo_id.AVI_PACKER)))
     assert conclusion(report(tmp_path, blank, "MOVI0006.avi")) == photo_id.VIDEO
@@ -461,3 +564,22 @@ def test_film_mods_build_holds_the_same_templates(stock_image):
     for at, size in ((T0, photo_id.BARE_HEADER_LEN), (T1, photo_id.STILL_HEADER_LEN), (T2, photo_id.BARE_HEADER_LEN),
                      (T3, photo_id.BARE_HEADER_LEN)):
         assert film[at + FILM_MODS_SHIFT: at + FILM_MODS_SHIFT + size] == stock_image[at: at + size], hex(at)
+
+
+@pytest.mark.skipif(not FACTORY_DUMP.is_file(), reason="set CHARMERA_FACTORY_DUMP to a dump of the factory build v012")
+def test_the_factory_build_v012_holds_the_bare_template_and_no_still_one():
+    """v012 holds four copies of the bare template and no 0x590 still template; filled in as the encoder fills it in,
+    the bare one is the 'bare' kind, and with one EXIF mod APP1 put after its SOI, the 'exif-mod' kind."""
+    dump = FACTORY_DUMP.read_bytes()
+    assert b"GPEncoder      " not in dump
+    first = dump[V012_BARE[0]: V012_BARE[0] + photo_id.BARE_HEADER_LEN]
+    for at in V012_BARE:
+        t = dump[at: at + photo_id.BARE_HEADER_LEN]
+        assert t == first, hex(at)
+        segments, end, problem = photo_id.read_segments(photo_id._reader(io.BytesIO(t)))
+        assert problem is None and end == photo_id.BARE_HEADER_LEN and segments[2].payload == b"GPEncoder"
+        assert tuple(s.marker for s in segments) == photo_id.BARE_MARKERS, hex(at)
+    filled = _from_template(first, 80, 1440, 1080)
+    assert header_of(filled).kind == "bare"
+    assert filled == FIXTURE.read_bytes()            # the owner's camera's original photo header, byte for byte
+    assert header_of(b"\xff\xd8" + exif_mod_app1() + filled[2:]).kind == "exif-mod"

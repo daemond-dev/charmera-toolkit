@@ -1249,3 +1249,13 @@ def test_analyze_image_and_block_diff():
 
     shorter = flash.block_diff(stock, stock[:FLASH_SIZE - 10])
     assert shorter[-1].index == 31 and shorter[-1].differing_bytes == 10
+
+
+def test_the_notes_say_what_a_cleaned_copy_is():
+    """The cleaned copies (the-dumping-grounds) hold no owner's photos or settings; v012's copy is the OV9732 build."""
+    v006, v012 = flash.public_image_note(flash.CLEAN_V006), flash.public_image_note(flash.CLEAN_V012)
+    assert "no stored photos" in " ".join(v006) and "two internal photos" not in " ".join(v006)
+    assert "OV9732" in " ".join(v012) and "could no longer take pictures" not in " ".join(v012)
+    assert "factory build v012" in " ".join(flash.public_read_note(flash.CLEAN_V012))
+    assert flash.PUBLIC_DUMPS["75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082"] == flash.CLEAN_V006
+    assert flash.PUBLIC_DUMPS["63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c"] == flash.CLEAN_V012

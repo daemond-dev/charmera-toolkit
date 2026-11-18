@@ -157,6 +157,36 @@ def test_set_ui_sound_rewrites_store():
     assert settings.photo_directory_consistent(fixed) and fixed[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 8] == b"\x00" * 8
 
 
+def test_settings_bank_past_the_photo_directory():
+    """The writer steps over sector 120 (the photo directory) and goes on in 121..126; the loader takes the sector
+    before the first erased one, so a record in 121..126 is current, and only a first-erased 121 lands on 120."""
+    img = bytearray(synthetic_image([make_record(5)]))
+    base, sec, pd = settings.SETTINGS_BASE, settings.SECTOR_SIZE, settings.PHOTO_DIRECTORY
+    def put(n, rec):
+        img[base + n * sec: base + n * sec + sec] = rec + b"\x00" * (sec - len(rec))
+    for n in range(1, 120):
+        put(n, make_record(4))
+    img[pd: pd + sec] = b"\x00" * sec                       # the zeroed photo directory
+    put(121, make_record(3))
+    put(122, make_record(2))
+    recs = settings.parse_settings(bytes(img))
+    assert len(recs) == 122 and all(r.offset != pd for r in recs)
+    assert recs[-1].offset == base + 122 * sec
+    cur = settings.current_record(bytes(img))
+    assert cur.offset == base + 122 * sec and cur.ui_sound == 2
+    # the danger window: a directory write erased 121..127, so 121 is the first erased sector and boot loads 120
+    img[pd + sec: base + 128 * sec] = b"\xff" * (base + 128 * sec - pd - sec)
+    assert settings.firmware_current_sector(bytes(img)) == pd
+    with pytest.raises(ValueError, match="photo directory"):
+        settings.current_record(bytes(img))
+    # rewriting the store keeps the directory and erases stale records past it
+    put(124, make_record(1))
+    out = settings.rewrite_store(bytes(img), settings.SettingsRecord(base, make_record(0)))
+    assert out[pd: pd + sec] == b"\x00" * sec
+    assert out[pd + sec: base + 128 * sec] == b"\xff" * (base + 128 * sec - pd - sec)
+    assert [r.offset for r in settings.parse_settings(out)] == [base] and settings.current_record(out).ui_sound == 0
+
+
 def test_mute_pcm_and_replace(tmp_path):
     img = synthetic_image([make_record()])
     slots = image.sound_slots(img)
@@ -1020,11 +1050,20 @@ def test_a_donor_file_is_refused_against_the_cameras_backup_without_the_donor_ro
     assert by["sensor-table"].severity == "fail" and "DIFFERS from --stock" in by["sensor-table"].detail
 
 
-def test_the_donor_route_needs_the_cameras_own_backup(tmp_path, synthetic_build):
+def test_the_donor_route_without_the_cameras_backup_warns_and_passes(tmp_path, synthetic_build):
     backup, donor, payload, p = _donor_case(tmp_path)
     checks = verify.verify_update(p, payload, donor=donor)
-    assert "donor" in _failed(checks)
-    assert "no backup of your own camera, no flash" in next(c for c in checks if c.name == "donor").detail
+    assert _failed(checks) == []
+    by = {c.name: c for c in checks}
+    assert by["backup"].severity == "warn" and "last flashed with" in by["backup"].detail
+    assert by["from-donor"].ok and by["vector-table"].ok and by["sensor-table"].severity == "warn"
+    assert "software-region" not in by and "way-back" not in by
+    # a broken vector table is still refused without a backup
+    bad = bytearray(payload)
+    bad[0x210] ^= 1
+    bad = bytes(bad)
+    q = _named(tmp_path, bad, "202611061307")
+    assert "from-donor" in _failed(verify.verify_update(q, bad, donor=donor, allow_modified=True))
 
 
 def test_the_donor_route_takes_the_donors_firmware_and_says_the_fit_is_unknown(tmp_path, capsys, synthetic_build):
@@ -1046,6 +1085,20 @@ def test_the_donor_route_takes_the_donors_firmware_and_says_the_fit_is_unknown(t
     assert verify.handler(args) == 0
     out = capsys.readouterr().out
     assert "WARN sensor-table" in out and "Whether it fits this camera is not known" in out
+
+
+def test_the_donor_route_names_a_public_donor_and_blames_only_the_public_build(tmp_path, monkeypatch, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    sha = hashlib.sha256(donor).hexdigest()
+    # a donor that is the public dump: the firmware the trouble started with, a warning
+    monkeypatch.setitem(image.PUBLIC_DUMPS, sha, "example/public-dump")
+    by = {c.name: c for c in verify.verify_update(p, payload, stock=backup, donor=donor)}
+    assert by["donor"].severity == "warn" and "trouble started with" in by["donor"].detail
+    # a donor that is a public copy of another factory build (the cleaned v012): named, not blamed
+    monkeypatch.setattr(verify, "PUBLIC_FACTORY_DUMPS", {sha})
+    by = {c.name: c for c in verify.verify_update(p, payload, stock=backup, donor=donor)}
+    assert by["donor"].severity == "info" and "example/public-dump byte for byte" in by["donor"].detail
+    assert "trouble" not in by["donor"].detail
 
 
 def test_the_donor_route_says_what_the_source_tree_proves(tmp_path, synthetic_build):
@@ -1075,6 +1128,65 @@ def test_the_donor_route_refuses_what_is_not_the_donors_firmware(tmp_path, synth
     assert "donor" in _failed(checks) and "update file" in next(c for c in checks if c.name == "donor").detail
     # and --stock must be a read of a chip
     assert "backup" in _failed(verify.verify_update(p, payload, stock=payload, donor=donor))
+
+
+def test_the_donor_route_takes_a_mod_of_the_donor_only_with_allow_modified(tmp_path, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    changed = bytearray(payload)
+    changed[0x30000] ^= 1
+    changed = bytes(changed)
+    q = _named(tmp_path, changed, "202611061302")
+    assert "from-donor" in _failed(verify.verify_update(q, changed, stock=backup, donor=donor))
+    checks = verify.verify_update(q, changed, stock=backup, donor=donor, allow_modified=True)
+    assert _failed(checks) == []
+    by = {c.name: c for c in checks}
+    assert by["from-donor"].severity == "warn" and "1 byte(s) changed" in by["from-donor"].detail
+    assert "0x30000" in by["from-donor"].detail and by["way-back"].severity == "warn"
+    # the boot header and the vector table stay the donor's, whatever the flag
+    for off, what in ((0x10, "boot header"), (0x210, "vector table")):
+        bad = bytearray(payload)
+        bad[off] ^= 1
+        bad = bytes(bad)
+        r = _named(tmp_path, bad, "202611061303")
+        checks = verify.verify_update(r, bad, stock=backup, donor=donor, allow_modified=True)
+        detail = next(c for c in checks if c.name == "from-donor").detail
+        assert "from-donor" in _failed(checks) and what in detail and detail.count("no flag accepts it") == 1
+
+
+def test_the_donor_route_with_allow_modified_refuses_a_table_no_code_refers_to(tmp_path, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    sensor = image.find_marks(payload).sensor
+    assert sensor.referenced_from is not None
+    bad = bytearray(payload)
+    bad[sensor.referenced_from: sensor.referenced_from + 4] = b"\x00" * 4
+    bad = bytes(bad)
+    q = _named(tmp_path, bad, "202611061305")
+    checks = verify.verify_update(q, bad, stock=backup, donor=donor, allow_modified=True)
+    assert "from-donor" in _failed(checks)
+
+
+def test_the_donor_route_with_allow_modified_still_checks_the_resources(tmp_path, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    entries = image.resource_directory(payload)
+    wav = next(e for e in entries if e.name.upper().endswith("WAV"))
+    bad = bytearray(payload)
+    bad[wav.offset: wav.offset + 4] = b"XXXX"
+    bad = bytes(bad)
+    q = _named(tmp_path, bad, "202611061306")
+    failed = _failed(verify.verify_update(q, bad, stock=backup, donor=donor, allow_modified=True))
+    assert "from-donor" not in failed and ("resource-slots" in failed or "sounds" in failed)
+
+
+def test_the_donor_route_with_allow_modified_keeps_the_donors_sensor_table(tmp_path, synthetic_build):
+    backup, donor, payload, p = _donor_case(tmp_path)
+    sensor = image.find_marks(payload).sensor
+    assert sensor is not None
+    bad = bytearray(payload)
+    bad[sensor.init[0] + 3] ^= 1
+    bad = bytes(bad)
+    q = _named(tmp_path, bad, "202611061304")
+    checks = verify.verify_update(q, bad, stock=backup, donor=donor, allow_modified=True)
+    assert "from-donor" in _failed(checks) and "sensor table" in next(c for c in checks if c.name == "from-donor").detail
 
 
 def test_the_donor_route_takes_a_donor_with_another_kind_of_sensor_table(tmp_path, synthetic_build):
@@ -1171,7 +1283,7 @@ def test_stock_image_donor_route(stock_image, tmp_path):
     checks = verify.verify_update(p, payload, stock=stock_image, donor=donor)
     assert _failed(checks) == []
     by = {c.name: c for c in checks}
-    assert "byte-identical to benbadio/keychain-camera-plus" in by["way-back"].detail
+    assert "byte-identical to " + image.PUBLIC_DUMPS[hashlib.sha256(stock_image).hexdigest()].split(" ")[0] in by["way-back"].detail
     assert by["vector-table"].ok and by["software-region"].severity == "warn"
     for name in ("series", "donor"):
         assert f"source tree v006 at 0x3a4d2 ({image.SOURCE_TREE_PROVES})" in by[name].detail, name
@@ -1593,9 +1705,10 @@ def test_the_withdrawn_candidates_are_refused_by_their_hash(tmp_path, monkeypatc
     app = {kind: sha for kind, sha in re.findall(r'\b([CAB])\(false,.*?"JH_5408\d{12}_[0-9A-F]{8}\.bin", "([0-9a-f]{64})"\)', java, re.S)}
     assert set(app) == {"C", "A", "B"}
     real = {k: v for k, v in verify.WITHDRAWN.items() if not v.startswith("candidate X")}
-    assert set(real) == set(app.values())
+    # C's bytes are also the stock restore file made from the cleaned copy: named (CLEAN_RESTORE), not refused
+    assert set(real) == {app["A"], app["B"]} and set(verify.CLEAN_RESTORE) == {app["C"]}
     for kind, sha in app.items():
-        assert real[sha].startswith(f"candidate {kind} ")
+        assert {**real, **verify.CLEAN_RESTORE}[sha].startswith(f"candidate {kind} ")
 
 
 def test_allow_unknown_build_still_compares_with_stock(tmp_path, capsys, synthetic_build):

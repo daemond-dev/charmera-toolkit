@@ -43,8 +43,8 @@ none of them:
 
 | Build | Source tree | Compiled | Copies | Sensor table |
 |---|---|---|---|---|
-| The public dump's | `v006` | Oct 14 2025 | benbadio/keychain-camera-plus, Khimira/Project-Sirius and aschenbecherwespe/recharmera: three cameras, the same bytes up to 0x170000 | `aea3976b…` |
-| The film-mods author's | `v008_test` | Nov 19 2025 | Hyperlite-Media/charmera-film-mods, release Charmera_Restore (code and resources only) | `aea3976b…`, the same |
+| The public dump's | `v006` | Oct 14 2025 | benbadio/keychain-camera-plus, Khimira/Project-Sirius and aschenbecherwespe/recharmera: three cameras, the same bytes up to 0x170000 (a cleaned copy: [the-dumping-grounds/charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006)) | `aea3976b…` |
+| The film-mods author's | `v008_test` | Nov 19 2025 | Hyperlite-Media/charmera-film-mods, release Charmera_Restore (code and resources only; the same file: [the-dumping-grounds/charmera-firmware-v008_test](https://github.com/the-dumping-grounds/charmera-firmware-v008_test)) | `aea3976b…`, the same |
 | This camera's original | unknown | unknown | gone; its photos show it differed in the photo code | unknown |
 
 So the factory rebuilt the firmware under one stamp at least twice within five weeks in 2025, and a camera sold in

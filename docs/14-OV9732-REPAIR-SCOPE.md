@@ -1,5 +1,7 @@
 # 14 — OV9732 Repair Scope
 
+Reading order: 14 of 15 · previous: [Research report](13-PHASE1-REPORT.md) · next: [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md) · [all docs](README.md)
+
 **Status:** scoping complete; bring-up build in progress.
 **Date:** 2026-11-08.
 **Stock image under analysis:** `stock.bin`, sha256 `cc3b4b2f…` (the public dump). All file offsets below use `file_offset = VA + 0x200`.
@@ -135,3 +137,5 @@ Repurpose the dead read path (wrapper `0x2d850`) to read `0x300A`/`0x300B` and c
 - Target-sensor driver: Ingenic T20 OV9732 — `ov9732_t20.c` (scratchpad). *Note: this is the DVP variant; a 1-lane-MIPI init must be used for this board.*
 - Prior analysis: [13-PHASE1-REPORT.md](13-PHASE1-REPORT.md), [FIRST-FLASH-INCIDENT.md](FIRST-FLASH-INCIDENT.md).
 - OV9732 product brief: https://ovt.com/products/ov9732/
+
+Reading order: 14 of 15 · previous: [Research report](13-PHASE1-REPORT.md) · next: [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md) · [all docs](README.md)

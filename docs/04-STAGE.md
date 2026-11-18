@@ -1,6 +1,6 @@
 # stage: putting the update file on the card
 
-Reading order: 4 of 13 · previous: [Flash candidates](03-FLASH-CANDIDATES.md) · next: [SD card problems](05-CARDS.md) · [all docs](README.md)
+Reading order: 4 of 15 · previous: [Flash candidates](03-FLASH-CANDIDATES.md) · next: [SD card problems](05-CARDS.md) · [all docs](README.md)
 
 `stage` is the last step before the camera. It copies one verified update file to the root of the camera's
 SD card and proves the copy is good, so that the first time the camera sees the file is also the first time
@@ -38,7 +38,8 @@ guarantee.
    file laid out otherwise, from that of the known build whose layout the file has; any size but 0x1E0000 and 0x169000
    bytes (`stage` never passes `--allow-odd-size`), a 2 MiB file included; a wrong checksum; the shared stamp, or with
    `--stock` the stamp found in it (`stamp-camera`); a `--stock` that is not a complete read of a chip; a damaged
-   resource entry; and the withdrawn candidates C, A and B. Outside the donor route these are FAIL too: missing build
+   resource entry; and the withdrawn candidates A and B (C is named in an INFO line: its bytes are the stock restore
+   file made from the cleaned stock dump). Outside the donor route these are FAIL too: missing build
    marks (the donor route takes a donor without a sensor table of the known kind as a WARN); a sensor table that
    differs from `--stock`'s, or a `--stock` with no sensor table of the kind the known builds use (without `--stock`, a
    table that is not the known builds'); and a table the code does not refer to while the one in `--stock` is referred
@@ -142,8 +143,8 @@ backup (`stamp-camera`), which covers a camera that runs another build.
 | `FAIL ...` several sensor programs | The file, or `--stock`, holds more than one sensor table the code refers to, with different contents, so nothing can tell which one the camera would run, or which one to compare with. | Do not use the file; rebuild it from your backup. If `--stock` holds them, look at it with `inspect`. |
 | `FAIL ...` ARM vector table | Bytes 0x200..0x240, where the camera starts, differ from `--stock`'s in a file laid out like it, or from those of the known build whose layout the file has. A camera flashed with it may not start far enough to run the card updater again. | Do not use the file; no flag of `stage` accepts it, on any route. Rebuild it from your backup. |
 | `FAIL stamp-camera` | The stamp in the name is the one found in `--stock`, so the camera would ignore the file. | Rebuild it with `pack`, which gives it a fresh stamp. |
-| `FAIL ...` candidate C, A or B | The file is one of the withdrawn [flash candidates](03-FLASH-CANDIDATES.md), known by its SHA-256. | Do not flash it. Make a file from your own backup instead. |
-| `--donor needs --stock` | The donor route was asked for without a read of this camera's own chip. | Read the chip first ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)) and give it as `--stock`. |
+| `FAIL ...` candidate A or B | The file is one of the withdrawn [flash candidates](03-FLASH-CANDIDATES.md), known by its SHA-256. | Do not flash it. Make a file from your own backup instead. |
+| `INFO withdrawn` candidate C | The file is candidate C's bytes, which are also the stock restore file made from the cleaned stock dump. | Treat it as the stock restore file: only for a camera whose own firmware is the public build. |
 | `FAIL from-donor` | The file is not the donor's firmware unchanged. | Build it from `--donor` with `pack`, and change nothing in it. |
 | `FAIL series` | The build marks (build string, stamp, sensor table) were not found. | Not Charmera firmware, or a damaged copy. Rebuild from a complete dump. |
 | `FAIL resource-slots` | A resource entry is erased, cut off or not the kind its name says, typically from a truncated download or a damaged dump. | Rebuilding from the same input does not help: get a complete dump (check its SHA-256) and build again. |
@@ -217,4 +218,4 @@ Gaming mode formats cards as ext4 for games; such a card is refused, and the cam
 
 ---
 
-Reading order: 4 of 13 · previous: [Flash candidates](03-FLASH-CANDIDATES.md) · next: [SD card problems](05-CARDS.md) · [all docs](README.md)
+Reading order: 4 of 15 · previous: [Flash candidates](03-FLASH-CANDIDATES.md) · next: [SD card problems](05-CARDS.md) · [all docs](README.md)

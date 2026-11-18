@@ -1,6 +1,6 @@
 # Flash candidates
 
-Reading order: 3 of 13 · previous: [Recovery](02-RECOVERY.md) · next: [Putting the file on the card](04-STAGE.md) · [all docs](README.md)
+Reading order: 3 of 15 · previous: [Recovery](02-RECOVERY.md) · next: [Putting the file on the card](04-STAGE.md) · [all docs](README.md)
 
 **Withdrawn after flashes on one camera, and what they showed.** Candidate C was flashed on an original-series camera
 (1987 blind-box design, bought in Japan in November 2026) on 2026-11-06. The update completed and the camera boots,
@@ -16,16 +16,22 @@ details are in [the incident notes](FIRST-FLASH-INCIDENT.md).
 
 C, A and B stay withdrawn, for a different reason than before: they are made from the public dump, and no file made
 from the public dump is known to fit a camera whose own firmware has not been read. Do not flash them; `verify` and
-the Charmera Card app refuse them by their SHA-256. The same goes for the published stock restore file: it puts back
-the public build on a camera that already runs it, and nothing else is known.
+the Charmera Card app refuse A and B by their SHA-256. C they name but no longer refuse: its bytes are also the stock
+restore file made from the public dump's cleaned copy (below), and the stock restore file is not refused. The same
+caution goes for the stock restore file: it puts back the public build on a camera that already runs it, and nothing
+else is known.
 
 **Stock restore (the public build's own file).** `JH_5408202610261427_0F065D55.bin` from
 https://github.com/benbadio/keychain-camera-plus (commit 209c25a, `release/stock/`), SHA-256
-`b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906`. Several owners report flashing it and working
+`b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906`. Made from the public dump's cleaned copy,
+[the-dumping-grounds/charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006)
+(`charmera-v006-2025-10-14-clean.bin`, SHA-256 `75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082`,
+the one the app now downloads), the same first 0x1E0000 bytes are candidate C byte for byte (SHA-256 `9b8841d7…`):
+the same software, the factory settings record and no stored photos. Several owners report flashing it and working
 cameras afterwards; what their cameras ran before is not known. It is exactly the first 0x1E0000 bytes of the stock
-dump below, so the Charmera Card app makes it from that dump and checks this hash. It carries that camera's settings
-records and its two stored photos; the photo list in the file is empty, so a camera flashed with it does not show
-them. Whether it fits your camera only a backup read before the camera was ever flashed can tell:
+dump below, so the Charmera Card app makes it from that dump and checks this hash (from the cleaned copy it checks
+`9b8841d7…`). Made from the original dump, it carries that camera's settings records and its two stored photos; the
+photo list in the file is empty, so a camera flashed with it does not show them. Whether it fits your camera only a backup read before the camera was ever flashed can tell:
 `charmera verify <file> --stock <that backup>` reporting the same sensor table and a byte-identical software region.
 Read both lines. The sensor-table match is a WARN, because such a backup is then the public build itself, and
 `stage` and the app take a different software region with a WARN rather than refusing it. A backup read after the
@@ -37,8 +43,11 @@ pass. They are reproducible byte for byte from the recipe below, so they are not
 committed; the recipe and the hashes stay here so that a copy found later can be recognised.
 
 Input: `charmera_stock_latest.bin` from https://github.com/benbadio/keychain-camera-plus (commit 209c25a),
-SHA-256 `cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f`. The Project-Sirius dump gives the same
-software region; its settings bank and photos differ, so the hashes below are for the keychain dump.
+SHA-256 `cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f`. The Project-Sirius dump and the cleaned
+copy in [the-dumping-grounds/charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006)
+give the same software region. Every candidate rewrites the settings bank to the factory record and blanks the
+photos, so C, A and B come out byte-identical from the keychain dump and the cleaned copy; from the Project-Sirius dump
+the hashes below may differ.
 
 Before any update file goes on a card: a verified full-flash backup of your own camera, made with `backup`, as in
 [The first flash, step 1](01-FIRST-FLASH.md#1-back-up-your-cameras-chip-no-backup-no-flash). No backup, no flash. Then
@@ -67,7 +76,7 @@ video mode as described at the top. A and B were never flashed.
 
 Known limits:
 
-- A settings-only mute is undone if the camera ever falls back to defaults: CRC failure, the stock bug after about 120 settings saves (a fresh bank like these has 119 free sectors before it; the published stock restore has 104), or the SDK's Sys.Reset menu item and network set-by-id paths, which this camera cannot reach. B does not have that weakness.
+- A settings-only mute is undone if the camera ever falls back to defaults: CRC failure, the bank's wrap-around after its 127th sector, which erases the photo directory with it, or a photo-directory update near the end of the bank erasing the current record (see [Format](11-FORMAT.md); inferred from the code, not tested), or the SDK's Sys.Reset menu item and network set-by-id paths, which this camera cannot reach. B does not have that weakness.
 - The speaker amplifier is still switched on around the (now silent) sounds; whether that produces an audible click is unknown until tested.
 - Recovery from any of these is your own backup, packed with `pack`. The stock restore file puts back the public
   build, which is a recovery only for a camera that ran that build.
@@ -88,8 +97,9 @@ python -m charmera_toolkit verify out/B/JH_5408202611050002_0FB0BD3C.bin --stock
 python -m charmera_toolkit verify out/C/JH_5408202611050003_0FB74C24.bin --stock charmera_stock_latest.bin
 ```
 
-Each of the three `verify` runs now gives a FAIL that names the candidate: `verify` knows the three files by their
-SHA-256 and refuses them, as the app does, which is how a rebuilt or found copy is recognised. Its other lines still
+The `verify` runs for A and B now give a FAIL that names the candidate: `verify` knows the files by their SHA-256 and
+refuses them, as the app does, which is how a rebuilt or found copy is recognised. C's run names it in an INFO line
+instead, as the stock restore file made from the cleaned copy. Its other lines still
 show what each file is. B's verify needs `--allow-modified` because `verify` refuses any change to bytes 0..0x170000
 (the code and the resource pack) unless it is told the change is intended, and B changes three resource blocks. A
 and C leave that region byte-identical to stock and need no flag for it.
@@ -141,4 +151,4 @@ keeps the photos stored in the camera. The full sequence, with the backup, stagi
 
 ---
 
-Reading order: 3 of 13 · previous: [Recovery](02-RECOVERY.md) · next: [Putting the file on the card](04-STAGE.md) · [all docs](README.md)
+Reading order: 3 of 15 · previous: [Recovery](02-RECOVERY.md) · next: [Putting the file on the card](04-STAGE.md) · [all docs](README.md)

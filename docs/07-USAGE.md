@@ -1,9 +1,22 @@
 # Using the toolkit
 
-Reading order: 7 of 13 · previous: [Using an Android phone](06-ANDROID.md) · next: [Photo frames](08-FRAMES.md) · [all docs](README.md)
+Reading order: 7 of 15 · previous: [Using an Android phone](06-ANDROID.md) · next: [Photo frames](08-FRAMES.md) · [all docs](README.md)
 
 All commands run as `python -m charmera_toolkit <command>` (or `charmera <command>` after `pip install -e .`).
-Python 3.9 or newer, Windows or Linux, no extra packages.
+Python 3.9 or newer, Windows, Linux or macOS, no extra packages.
+
+## On a computer: from the card to a flash
+
+What the Android app does, at the command line. Put the camera's card in a reader first.
+
+1. `charmera identify <card>`: which stock firmware the camera's photos show, and so the base (v012 for OV9732
+   cameras, v006 for SP140A ones). It assumes a stock camera and says so when the photos show otherwise.
+2. `charmera build --list`, then `charmera build --base <base> --mods <mods> --download --out out/`: the firmware
+   file, made from the base's public cleaned copy and written only when it is the reviewed file.
+3. `charmera verify out/JH_….bin --stock <your backup>`: all the checks; with a backup of this camera's chip, a
+   comparison with it too. Without one it still runs, with a warning.
+4. `charmera stage out/JH_….bin --card <card> --stock <your backup>`: checks it again, copies the file to the card root and reads it back. Then put the card
+   in the camera, switch it on and wait for "Upgrade 100%", and take the file off the card afterwards.
 
 ## Read-only commands
 
@@ -20,6 +33,8 @@ charmera exif-fix --source E:\ --out C:\Photos\charmera
 charmera resources list my_backup.bin                                # all 43 resource entries, kinds and lengths
 charmera resources extract my_backup.bin --out resources/            # each entry trimmed to its real length
 charmera photo-id this-camera/PICT0001.jpg donor/PICT0001.jpg        # which kind of firmware wrote these photos
+charmera identify E:\                                               # which stock firmware the camera runs (the base)
+charmera sensor-read E:\                                            # what the sensor-ID probe's SENSOR.TXT says
 ```
 
 `inspect` tells you what a file is: dump or update file, which build it carries (named by a fingerprint over its
@@ -34,7 +49,8 @@ file laid out like a known build is a build the toolkit does not know, "laid out
 
 `verify` is the gate before a card. It checks the filename checksum, the stamp, the size rule, the magic, the build
 marks, the sensor table, the ARM vector table and the software region, and says what each result proves; it refuses
-the withdrawn candidates C, A and B by their SHA-256. Always give `--stock <a dump of the camera the file goes into>`:
+the withdrawn candidates A and B by their SHA-256 and names C, whose bytes are the stock restore file made from the
+cleaned stock dump. Always give `--stock <a dump of the camera the file goes into>`:
 the sensor table, the ARM vector table and the software region are compared with it, and the stamp in the file's name
 must differ from the one in it (`stamp-camera`); that comparison is the only check that says anything about your
 camera. `--stock` must be a complete read of a chip (exactly 2 MiB, starting with `SPII`, with the build string and
@@ -52,6 +68,8 @@ file.
 
 `--allow-modified` accepts a software region that differs from the reference: any mod of the code or the resources
 needs it, and the line is then a WARN, never a PASS. Settings-only files pass without it. `stage` always uses it.
+With `--donor` it lets through a mod built on the donor's firmware that keeps the donor's boot
+header, vector table (0..0x240) and sensor table, as a WARN.
 `--allow-unknown-build` lets through a file whose build marks are not all found, or, without `--stock`, a sensor table
 that is not the known builds'; the line it lets through is a WARN, and the software comparison with `--stock` still
 runs. Without `--stock`, a file with no sensor table of the kind the known builds use then gets a WARN that says no
@@ -69,8 +87,9 @@ What no flag accepts:
   none of them. No toolkit mod changes that table, and a firmware that drives a sensor the camera does not have
   leaves it unable to take pictures, while a file without such a table leaves nothing to compare with the camera's
   own. The one way past them is the donor route, `--donor <a read of another, working camera's chip>`, for a camera
-  whose own firmware is gone and does not fit it; it needs `--stock`, takes only the donor's firmware unchanged, and
-  says that the fit to this camera is unknown ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
+  whose own firmware is gone and does not fit it; `--stock` is optional there (a WARN without it), it takes the
+  donor's firmware unchanged, or with `--allow-modified` (which `stage` always gives) a mod built on it that keeps its
+  boot header, vector table and sensor table, as a WARN, and says that the fit to this camera is unknown ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 - More than one sensor program that the code refers to, with different contents, in the file or in `--stock`, on
   every route (`several sensor programs`): which one sets up the sensor cannot be told. Outside the donor route, with
   `--stock`, also a file whose sensor table the code does not refer to while the one in `--stock` is referred to.
@@ -93,37 +112,111 @@ named (`ERASED in B`, `MISSING from B`) instead of being skipped.
 `photo-id` says what a photo's header shows about the firmware that wrote it, from the photo alone: it reads each file
 only up to the start of the image data (the SOS segment), never past its first 64 KiB, and reports the kind of
 header, the size, the colour sampling, the JPEG quality on the IJG scale, the comment (COM) and the EXIF Make, Model
-and Software, then a conclusion for each file. Both known builds write a still photo with a 1,424-byte header that
-holds an EXIF block (Make `Generalplus`, Model `CBB3`, Software `20150615`) and the comment `GPEncoder` padded with
-spaces (VERIFIED in the public dump; the film-mods build holds the same header template and the code that fills it,
-VERIFIED by comparing the bytes). They keep a bare 624-byte header, with no EXIF block and the comment `GPEncoder`
-alone, for thumbnails, video frames and a Wi-Fi stream, never for a still photo (VERIFIED in the public dump by
-static analysis; the film-mods build holds the same templates). A photo the 2026-11-06 camera took on its original
-firmware has that bare header: still photos with it come from neither known build, so a camera whose photos look like
-this ran another build when it took them. Give `photo-id` the files as they came off the card's `DCIM` folder, since
-a frame taken out of a video without re-encoding has the bare header too. The size and the quality follow the
-camera's settings and whether a card was in (VERIFIED in the public build), so they say nothing on their own.
+and Software, then a conclusion for each file. Three still-photo headers are known, and the conclusion names the one
+it found:
+
+- **the v006 / v008_test family's** (the SP140A builds; our v0.21 to v0.24 are built on v006 and write it too): a
+  1,424-byte (0x590) header with an EXIF block (Make `Generalplus`, Model `CBB3`, Software `20150615`) and the
+  comment `GPEncoder` padded with spaces (VERIFIED in v006; v008_test holds the same template and the code that fills
+  it, VERIFIED by comparing the bytes). A photo cannot tell v006 from v008_test.
+- **the factory build v012's** (OV9732 cameras; our v0.25 keeps it): a bare 624-byte (0x270) header, no EXIF block
+  and the comment `GPEncoder` alone. v012 holds this template four times and no 0x590 one (VERIFIED by search of the
+  v012 dump). The v006 family holds the same bare template, byte for byte, but uses it only for thumbnails, video
+  frames and a Wi-Fi stream. A photo the 2026-11-06 camera took on its original firmware has this header.
+- **our EXIF mod's** (v0.26 and later): an 832-byte (0x340) header, the start marker, one EXIF block of 0xD0 bytes
+  with Make `Kodak`, Model `Charmera` and Software naming the version, then v012's bare header (VERIFIED in the v0.26
+  update file).
+
+The toolkit's own `exif-fix` also writes Make `Kodak` and Model `Charmera`, on copies, with no Software tag and the
+rest of the header kept. `photo-id` names such a copy an exif-fix copy, not the EXIF mod, and says which family the
+photo it came from shows. Give `photo-id` the files as they came off the card's `DCIM` folder, since a frame taken
+out of a video without re-encoding has the bare header too. The size and the quality follow the camera's settings and
+whether a card was in (VERIFIED in v006), so they say nothing on their own. A photo shows the firmware that took it,
+not the one that fits the camera: a photo taken after a flash shows the flashed firmware.
 
 Any other header says less. `photo-id` calls a photo re-saved by another program only when its header carries a mark
 an editor leaves: an XMP block, an APP2, APP13 or APP14 segment, a progressive frame, or a rotated size (taller than
-wide). A header with a JFIF or other APP0 segment (the known builds write none, not even MJPEG's `AVI1`), an EXIF
-Make other than `Generalplus`, the still header's comment without its EXIF block, or tables the camera's encoder does
-not write may have been saved again by another program or written by another build, and nothing in it tells which. A header that differs from both templates in other ways gets
-"nothing here can tell what wrote it", and one without its quantisation or Huffman tables is cut short or comes from
-an encoder that leaves them out, with nothing to conclude. The still
-header does not show the same build either: two builds can share a header, and no header says anything about the
-image sensor. For a video, `photo-id` reads the AVI's chunk headers and its first frame's header. Both known builds
-copy the whole bare template into each frame and fill in its size and its tables, one IJG quality for both, which
-the rate control moves from frame to frame (VERIFIED by static analysis). A frame header that is the template as
-filled in does not tell them apart (INFERRED: no video of either was examined); any other frame header is not the one
-they write. The text the AVI
-packer puts in the `JUNK` chunk can show other code: the public build writes
-`GP$322 Generalplus AviPackerV3 20140916` there (VERIFIED by static analysis), the film-mods build carries the same
-text (VERIFIED by search), and any other text shows that other code wrote the file. That is how a would-be donor's
+wide). A header with a JFIF or other APP0 segment (the v006 family writes none, not even MJPEG's `AVI1`), an EXIF
+Make other than these, the still header's comment without its EXIF block, or tables the camera's encoder does not
+write may have been saved again by another program or written by another build, and nothing in it tells which. A
+header that differs from all the templates in other ways gets "nothing here can tell what wrote it", and one without
+its quantisation or Huffman tables is cut short or comes from an encoder that leaves them out, with nothing to
+conclude. Two builds can share a header, and no header says anything about the image sensor itself. For a video,
+`photo-id` reads the AVI's chunk headers and its first frame's header. v006 copies the whole bare template into each
+frame and fills in its size and its tables, one IJG quality for both, which the rate control moves from frame to
+frame (VERIFIED by static analysis). A frame header that is the template as filled in does not tell the builds apart
+(INFERRED: no video of any build was examined, and v012's video writer was not analysed); any other frame header is
+not the one they write. The text the AVI packer puts in the `JUNK` chunk can show other code: v006 writes
+`GP$322 Generalplus AviPackerV3 20140916` there (VERIFIED by static analysis), v008_test and v012 carry the same text
+(VERIFIED by search), and any other text shows that other code wrote the file. That is how a would-be donor's
 photos are compared with this camera's own pre-flash photos without opening anything
 ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 
+`identify` does the same for a whole card, and answers one question: which stock firmware does this camera run, so
+which base to build on? It assumes a stock camera that was never flashed or modded; a flashed or modded camera is the
+exception, which it detects and says so, without letting it weaken the normal stock answer. Give it the card's root
+folder (it then searches only `DCIM`), a `DCIM` folder, any other folder, or photo and video files. It reads only
+headers. Photos with no file time (0 or missing) are left out of the dating and of the change detection, and listed
+("N photos have no file time and were left out of the dating"). It picks the oldest and the newest dated photo by
+modification time that the camera wrote as it is, and skips, by name, photos another program saved again, exif-fix
+copies and files it cannot read. It reads the kind of every dated photo, up to `--cap` (500 by default; when there
+are more it reads that many, evenly spaced by date, plus the oldest and newest camera-written photos it chose, and
+says so), and shows the newest video's verdict without using it.
+
+The families: the v006 family is the 0x590-byte Generalplus header (stock v006 or v008_test, on SP140A cameras), the
+v012 family the bare 0x270-byte one (stock v012, on OV9732 cameras). The 0x340-byte EXIF-mod header is ours (v0.26 and
+later, built on v012), so a camera that writes it is not stock, and it is of the v012 family.
+
+- All dated camera-written photos of one family: "This camera runs stock v012" (base `v012`) or "This camera runs
+  stock v006 or v008_test" (base `v006`). Confidence `high` when the scan was not capped and at least two
+  camera-written photos agree, `medium` for a single photo or a capped scan. v006-family photos are not doubted for
+  our v0.21-v0.24 writing the same header; one line says "If this camera was ever flashed with our v0.21-v0.24, its
+  photos look like this too."
+- Any EXIF-mod photo: "This camera does not look stock: our EXIF mod (v0.26 or later) is installed", with "installed
+  between <date> and <date>" when bare photos come before them. The base is `v012` (the mod is built on it),
+  confidence `high`. Bare and EXIF-mod photos are one family, not a change of family.
+- Photos of both families: "This camera does not look stock: photos from two firmware families: <older> up to
+  <date>, <newer> from <date>: the camera was flashed in between, or the card holds photos from two cameras". The
+  base is the OLDEST family's, since photos from before a flash show the stock firmware, never the newest one's;
+  confidence `low`.
+
+It always adds the two caveats: a photo cannot tell v006 from v008_test (both stock builds for SP140A cameras; either
+base works the same for our purposes), and photos show the firmware that took them. The dates are the files'
+modification times, which the camera's clock set. `--json` prints the same as JSON, with `stock`, `not_stock`,
+`base`, `family` (the base's family), `confidence`, `notes` and `undated`. Exit code 0 when it reached a conclusion,
+1 when no usable photo was found.
+
+`sensor-read` decodes the `SENSOR.TXT` the sensor-ID probe writes to the card's top folder when Photo mode opens, with
+the same decoder as the app. Give it the card's root folder or the file. It reads all four layouts the probe has
+written: the current 16-bit ID read (`A7 01`), which names the part from its chip-ID registers (an OV9732 reads
+`97 32` at 0x300A/0x300B), the 8-bit fingerprint (`A6 01`), the bus scan (`A5 01`) and an older probe's two bytes.
+It says whether a sensor answered at the SP140A's address 0x3C (bus 0x78), the one the probe's firmware drives, or
+elsewhere, or nowhere. The file says what the probe read when it ran, not when that was. Exit code 0 when a file was
+decoded, 1 when there is no `SENSOR.TXT`, 2 when it cannot be read.
+
 ## Commands that write files on your computer
+
+### Build a firmware file from a base and mods (charmera build)
+
+The same recipes the Android app builds from, on Windows, Linux or macOS. A base is the stock firmware of one build:
+`v012` for OV9732 cameras, `v006` (or `v008_test`) for SP140A cameras; `charmera identify` says which one a camera's
+photos point to. Mods are the changes we wrote for that base.
+
+```
+charmera build --list                                                # every base, mod and combination
+charmera build --base v012 --mods volume-led,exif --download --out out/
+charmera build --dump charmera_flash_....bin --mods volume-led,exif,boot-last-mode,capture-flash --out out/
+```
+
+- `--download` fetches the base's public cleaned copy from the-dumping-grounds' repositories at a fixed commit and
+  uses it only if its SHA-256 matches. `--dump` takes a dump you have: your own read of the chip, or a public copy.
+- The file is written only when it is, byte for byte, the reviewed file listed for that combination in
+  `charmera_toolkit/recipes.json`, and every mod checks the bytes it replaces first. Combinations not yet tried on a
+  camera are built with a warning (`[experimental]` in `--list`).
+- Then it runs `verify` on the result and prints the `verify --stock` and `stage` commands to run next. `verify`
+  knows these files by SHA-256: it says which build a file is and does not refuse it for being modded.
+- Our versions are combinations too: v0.24 is `--base v006 --mods ov9732-port,volume-led`, v0.25 `--base v012
+  --mods volume-led`, v0.26 adds `exif`, v0.27 adds `boot-last-mode,capture-flash`.
 
 ```
 charmera pack --input my_backup.bin --out out/restore/               # prints the plan only
@@ -212,4 +305,4 @@ several sensor programs, and has flashrom write a private copy of the bytes it c
 
 ---
 
-Reading order: 7 of 13 · previous: [Using an Android phone](06-ANDROID.md) · next: [Photo frames](08-FRAMES.md) · [all docs](README.md)
+Reading order: 7 of 15 · previous: [Using an Android phone](06-ANDROID.md) · next: [Photo frames](08-FRAMES.md) · [all docs](README.md)

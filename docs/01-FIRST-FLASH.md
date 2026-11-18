@@ -1,6 +1,6 @@
 # The first flash, end to end
 
-Reading order: 1 of 13 · next: [Recovery](02-RECOVERY.md) · [all docs](README.md)
+Reading order: 1 of 15 · next: [Recovery](02-RECOVERY.md) · [all docs](README.md)
 
 The order of operations for putting a modified firmware on a Charmera for the first time, with the point of
 no return marked. Every step links to a longer document; read those before the step, not during it. The
@@ -111,7 +111,8 @@ until you pass its gate flag:
   [Boot and power notes](12-NOTES-boot-and-power.md) says what each patch changes and why it is a guess.
 
 The three candidates C, A and B in [Flash candidates](03-FLASH-CANDIDATES.md) are withdrawn; `verify` and the app
-refuse them by their SHA-256. The published stock restore file on the same page fits only a camera whose own firmware
+refuse A and B by their SHA-256, and name C, whose bytes are also the stock restore file made from the cleaned stock
+dump. The published stock restore file on the same page fits only a camera whose own firmware
 is the public build, and only a backup read before the camera was ever flashed can show that it is yours: with that
 backup as `--stock`, the `software-region` line says byte-identical and the `sensor-table` line says the same table
 (as a WARN, because the backup is then the public build itself; see [After a flash](#after-a-flash)). Read both lines
@@ -249,8 +250,8 @@ exactly what you had. If the camera does not boot far enough to read the card:
 You do not need these to flash, but they are where every claim above comes from:
 [Image layout](11-FORMAT.md) for what is where in the flash,
 [Boot and power notes](12-NOTES-boot-and-power.md) for the start-up and power-off analysis, and the
-[Research report](13-PHASE1-REPORT.md) for the sources, with each finding labelled verified, reported or inferred.
+[Research report](13-PHASE1-REPORT.md) for the sources, with each finding labelled verified, reported or inferred. If a camera was already flashed with firmware for the other image sensor, the [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md) and [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md) cover the repair.
 
 ---
 
-Reading order: 1 of 13 · next: [Recovery](02-RECOVERY.md) · [all docs](README.md)
+Reading order: 1 of 15 · next: [Recovery](02-RECOVERY.md) · [all docs](README.md)

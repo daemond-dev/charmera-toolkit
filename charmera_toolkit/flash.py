@@ -83,12 +83,17 @@ CHECKLIST = (
     "If any of these is not so, press Ctrl+C and unplug the programmer: stopping a read harms nothing.",
 )
 
-# SHA-256 of the two public stock dumps. They are identical in the code and resource area and differ only
-# in the settings store (0x170000) and two internally stored photos (0x180000, 0x1A5800) that belong to
-# those owners. The owner's own backup is always the preferred restore source. A camera flashed with the
+# SHA-256 of the public dumps: the two public stock dumps and the cleaned copies of v006 and v012 published in
+# the-dumping-grounds' repositories. The stock dumps and the v006 copy are identical in the code and resource area
+# and differ only in the settings store (0x170000) and the internally stored photos (0x180000, 0x1A5800) that
+# belong to those owners; the cleaned copies keep only the factory settings record and no photos. The owner's own backup is always the preferred restore source. A camera flashed with the
 # public restore file reads exactly like the first of them until a setting changes, so a match can be this
 # camera's own read after that flash (public_read_note).
+CLEAN_V006 = "the-dumping-grounds/charmera-firmware-v006 (cleaned)"
+CLEAN_V012 = "the-dumping-grounds/charmera-firmware-v012 (cleaned)"
 PUBLIC_DUMPS: Dict[str, str] = {
+    "75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082": CLEAN_V006,
+    "63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c": CLEAN_V012,
     "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f": "benbadio/keychain-camera-plus",
     "720ed0b65c91b149b0916498732b0ecf40227736ef5e3c126c487a7b5253436c": "Khimira/Project-Sirius",
 }
@@ -508,6 +513,13 @@ def _note(lines: Sequence[str], first: str = "note: ") -> None:
 
 def public_read_note(source: str) -> List[str]:
     """What a read of the chip that is byte-identical to a public dump is, and what it is not."""
+    if source == CLEAN_V012:
+        return [
+            f"this read is byte-identical to {source}: the OV9732 cameras' factory build v012 with only",
+            "its factory settings record and no stored photos. It may be this camera after it was flashed with",
+            "a file made from that copy, or someone else's copy of it. The app does not take it as a backup:",
+            "byte for byte it cannot be told from someone else's copy.",
+        ]
     return [
         f"this read is byte-identical to the public dump from {source}. A camera flashed with the",
         "public restore file, or with another file made from that dump, reads exactly like that until a",
@@ -519,6 +531,19 @@ def public_read_note(source: str) -> List[str]:
 
 def public_image_note(source: str) -> List[str]:
     """What an image to be written that is byte-identical to a public dump is, and the risk it carries."""
+    if source == CLEAN_V012:
+        return [
+            f"this image is byte-identical to {source}: the factory build v012, which drives the",
+            "OmniVision OV9732, with only its factory settings record and no stored photos. It fits a camera with",
+            "that sensor; on a camera with an SP140A-class sensor it is not expected to take pictures (not tested).",
+        ]
+    if source == CLEAN_V006:
+        return [
+            f"this image is byte-identical to {source}: the public dump's build v006, with only its",
+            "factory settings record and no stored photos. It is not firmware known to fit this camera: after it",
+            "was flashed, one camera could no longer take pictures; the likely cause is a sensor it does not drive",
+            "(INFERRED).",
+        ]
     return [
         f"this image is byte-identical to the public dump from {source}. It is that dump, or the read",
         "of a camera flashed with the public restore file (or another file made from that dump) that changed",

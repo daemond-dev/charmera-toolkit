@@ -113,7 +113,7 @@ final class CardState {
         if (!updateFiles.isEmpty()) {
             return "The card already holds " + names() + ". Remove " + (updateFiles.size() == 1 ? "it" : "them")
                     + " first, so that the new update file is the only one on the card. Tap \"" + REMOVE_BUTTON
-                    + "\" (under step 5), then write again.";
+                    + "\", then write again.";
         }
         return null;
     }
@@ -136,8 +136,8 @@ final class CardState {
                     + "• If the camera is off: take the card out, switch the camera on with its power key, wait 10"
                     + " seconds, and put the card back in.\n"
                     + "• Connect the camera to the phone.\n"
-                    + "• Tap \"" + CHOOSE_BUTTON + "\" and pick the camera's drive again. Step 2 then shows what is on"
-                    + " the card.\n"
+                    + "• Tap \"" + CHOOSE_BUTTON + "\" and pick the camera's drive again. The Camera drive step then"
+                    + " shows what is on the card.\n"
                     + "• If it lists an update file, tap \"" + REMOVE_BUTTON + "\".\n"
                     + "With a card reader or a computer: delete any file named JH_….bin or charmera-stage.part in the"
                     + " card's top folder.";
@@ -149,7 +149,7 @@ final class CardState {
         return "The app looked at the card again: its top folder " + (removing ? "still holds " : "holds ") + names()
                 + ". " + (removing ? "Tap \"" + REMOVE_BUTTON + "\" again. If it fails again, delete "
                 + (one ? "the file" : "the files") + " with the Files app or on a computer."
-                : "Tap \"" + REMOVE_BUTTON + "\" (under step 5).")
+                : "Tap \"" + REMOVE_BUTTON + "\".")
                 + " Do not switch the camera on with this card in it until " + (one ? "that file is" : "those files are")
                 + " gone.";
     }
@@ -193,7 +193,7 @@ final class CardState {
                 sb.append("  ").append(f.describe()).append('\n');
             }
             sb.append(updateFiles.size() == 1 ? "Remove it" : "Remove them").append(" with \"").append(REMOVE_BUTTON)
-                    .append("\" (under step 5) after the flash, or before you write a different file.\n");
+                    .append("\" after the flash, or before you write a different file.\n");
         }
         return sb.toString().trim();
     }

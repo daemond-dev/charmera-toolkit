@@ -92,8 +92,9 @@ class KnownBuild:
 
 PUBLIC_BUILD = KnownBuild(
     key="public-dump",
-    label="the public dump's build (benbadio/keychain-camera-plus and Khimira/Project-Sirius dumps, stamp 202505201029)",
-    source="benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin at commit 209c25a; Khimira/Project-Sirius Original_Firmware.bin",
+    label="the public dump's build (v006: the-dumping-grounds/charmera-firmware-v006, from the benbadio/keychain-camera-plus and Khimira/Project-Sirius dumps, stamp 202505201029)",
+    source=("the-dumping-grounds/charmera-firmware-v006 charmera-v006-2025-10-14-clean.bin (the cleaned copy); "
+            "benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin at commit 209c25a; Khimira/Project-Sirius Original_Firmware.bin"),
     status="VERIFIED",
     stamp="202505201029",
     official_sha1="d1f21227ab402bc842134070acc29a77041b4a63",
@@ -113,7 +114,8 @@ PUBLIC_BUILD = KnownBuild(
 FILM_MODS_BUILD = KnownBuild(
     key="film-mods",
     label="the charmera-film-mods author's build (same stamp 202505201029, different bytes, compiled Nov 19 2025)",
-    source=("Hyperlite-Media/charmera-film-mods release Charmera_Restore, JH_5408202505201029_0852C329.bin: bytes 0..0x169000 of "
+    source=("the-dumping-grounds/charmera-firmware-v008_test charmera-v008_test-2025-11-19.bin, the same bytes as "
+            "Hyperlite-Media/charmera-film-mods release Charmera_Restore, JH_5408202505201029_0852C329.bin: bytes 0..0x169000 of "
             "the author's factory dump, with the SHA-1 and byte sum the author reported in issue #1 (2026-11-06)"),
     status="VERIFIED",
     stamp="202505201029",
@@ -137,6 +139,12 @@ SHARED_STAMP = "202505201029"
 
 # Public full dumps, for reference only. Never redistributed by this toolkit.
 PUBLIC_DUMPS: Dict[str, str] = {
+    "75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082":
+        "the-dumping-grounds/charmera-firmware-v006 charmera-v006-2025-10-14-clean.bin (the public dump's build, "
+        "cleaned: factory settings record only, no stored photos)",
+    "63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c":
+        "the-dumping-grounds/charmera-firmware-v012 charmera-v012-2026-01-12-clean.bin (factory build v012 for the "
+        "OV9732, cleaned: factory settings record only, no stored photos)",
     "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f":
         "benbadio/keychain-camera-plus dumps/charmera_stock_latest.bin (the public dump's build)",
     "720ed0b65c91b149b0916498732b0ecf40227736ef5e3c126c487a7b5253436c":

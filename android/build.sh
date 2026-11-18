@@ -29,15 +29,31 @@ done
 rm -rf out/build out/test
 mkdir -p out/build/classes out/build/gen out/test
 
-echo "1/4 checker, write gate and card tests"
+echo "1/4 checker, write gate, card, flash log, flash steps, photo header, identify, date repair and recipe tests"
 javac -encoding UTF-8 -d out/test src/io/github/daemonddev/charmera/UpdateCheck.java \
     src/io/github/daemonddev/charmera/CardState.java src/io/github/daemonddev/charmera/Candidates.java \
-    src/io/github/daemonddev/charmera/WriteGate.java \
-    test/UpdateCheckTest.java test/CardStateTest.java test/CandidatesTest.java test/WriteGateTest.java
+    src/io/github/daemonddev/charmera/WriteGate.java src/io/github/daemonddev/charmera/FlashLog.java \
+    src/io/github/daemonddev/charmera/FlashFlow.java \
+    src/io/github/daemonddev/charmera/PhotoId.java src/io/github/daemonddev/charmera/DateFix.java \
+    src/io/github/daemonddev/charmera/ZipCheck.java src/io/github/daemonddev/charmera/Identify.java \
+    src/io/github/daemonddev/charmera/Recipes.java src/io/github/daemonddev/charmera/Recipe.java \
+    test/UpdateCheckTest.java test/CardStateTest.java test/CandidatesTest.java test/CandidatesFactoryTest.java \
+    test/WriteGateTest.java \
+    test/FlashLogTest.java test/FlashFlowTest.java test/PhotoIdTest.java test/DateFixTest.java test/ZipCheckTest.java \
+    test/IdentifyTest.java test/RecipesTest.java test/RecipeTest.java
 java -cp out/test UpdateCheckTest
 java -cp out/test io.github.daemonddev.charmera.CardStateTest
 java -cp out/test CandidatesTest
+java -cp out/test io.github.daemonddev.charmera.CandidatesFactoryTest
 java -cp out/test io.github.daemonddev.charmera.WriteGateTest
+java -cp out/test io.github.daemonddev.charmera.FlashLogTest
+java -cp out/test io.github.daemonddev.charmera.FlashFlowTest
+java -cp out/test io.github.daemonddev.charmera.PhotoIdTest
+java -cp out/test io.github.daemonddev.charmera.DateFixTest
+java -cp out/test io.github.daemonddev.charmera.ZipCheckTest
+java -cp out/test io.github.daemonddev.charmera.IdentifyTest
+java -cp out/test io.github.daemonddev.charmera.RecipesTest
+java -cp out/test io.github.daemonddev.charmera.RecipeTest
 
 echo "2/4 resources"
 "$BT/aapt2" compile --dir res -o out/build/res.zip

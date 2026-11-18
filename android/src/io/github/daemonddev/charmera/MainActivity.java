@@ -3,8 +3,11 @@ package io.github.daemonddev.charmera;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.database.Cursor;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -25,17 +28,35 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.CRC32;
+import java.util.zip.Deflater;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 /**
  * Puts a verified Charmera update file in the root of an SD card the phone can see, through Android's own folder
@@ -43,7 +64,7 @@ import java.util.concurrent.Executors;
  * flashes itself from the card. Also removes update files from the card afterwards.
  *
  * No backup of the camera, no flash: the app writes to the card only while a dump of that camera's own flash chip is
- * on record (step 0), and only an update file that it has compared with that dump; WriteGate decides, from the check
+ * on record, and only an update file that it has compared with that dump; WriteGate decides, from the check
  * and the backup on record now. A file identical to the public dump proves nothing about the camera it goes into; the
  * comparison with the firmware in a dump read before the camera was ever flashed is the one check that does.
  *
@@ -64,18 +85,16 @@ public class MainActivity extends Activity {
     private static final String BACKUP = "Choose this camera's backup";
     private static final String DOWNLOAD = "Download the stock restore file";
     private static final String MAKE_PROBE = "Make the sensor-ID probe";
-    private static final String MAKE_BRINGUP = "Make the OV9732 bring-up";
     private static final String READ_RESULT = "Read the sensor result from the card";
     private static final String USE_FILE = "Use a file on the phone";
     private static final String SAVE = "Save a copy to the phone";
     private static final String CHOOSE = CardState.CHOOSE_BUTTON;
     private static final String WRITE = "Write the update file to the card";
-    private static final String EJECT = "Eject the drive (opens Android's storage settings)";
+    private static final String EJECT = "Eject the drive";
     private static final String REMOVE = CardState.REMOVE_BUTTON;
     /** Where new versions of the app are published; the footer links to it. */
     private static final String RELEASES_PAGE = "https://github.com/daemond-dev/charmera-toolkit/releases";
     private static final String UPDATE_APK_URL = "https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk";
-    private static final String OPEN_SETTINGS = "Open storage settings";
     /** fetch's failure when GitHub answered, but not with the file; the download's message tells it apart. */
     private static final String GITHUB_REFUSED = "GitHub did not send the file";
     /** How a write that worked begins; write() offers the eject screen only after it. */
@@ -116,8 +135,15 @@ public class MainActivity extends Activity {
         String outcome;
         /** A write that put the file on the card, or a removal that removed every file it named. */
         boolean succeeded;
-        /** A screen has shown how it ended and offered the eject screen; a later screen does not show it again. */
+        /** A screen has shown how it ended; a later screen does not show it again. */
         boolean shown;
+        /** For a write: the SHA-256 of the file it writes, so the route knows which firmware went on the card. */
+        String sha256;
+        /** For a write: the name it has on the card, to tell it from another update file there. */
+        String cardName;
+        /** The route it was started on, and the drive it runs on (its volume UUID, or null). */
+        Route route;
+        String uuid;
 
         Operation(boolean write, int files, String backupSha256, String backupName) {
             this.write = write;
@@ -138,6 +164,9 @@ public class MainActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private TextView backupStatus;
+    /** The backup's SHA-256, behind its Details toggle. */
+    private TextView backupDetail;
+    private TextView backupDetailToggle;
     private Button backupButton;
     private TextView fileStatus;
     /** The technical part under fileStatus: the checks, sums and Android's error words. Behind a "Details" toggle. */
@@ -146,6 +175,11 @@ public class MainActivity extends Activity {
     private TextView fileDetailToggle;
     private TextView saveStatus;
     private TextView cardStatus;
+    /** The rest of the card's readout (name, free space, DCIM), behind its Details toggle. */
+    private TextView cardDetail;
+    private TextView cardDetailToggle;
+    /** A note about the drive pick, shown with the card's readout. */
+    private String cardNote;
     private TextView writeStatus;
     private Button writeButton;
     private Button cleanButton;
@@ -155,7 +189,23 @@ public class MainActivity extends Activity {
     private TextView cleanStatus;
     private Button saveButton;
     private Button probeButton;
-    private Button bringupButton;
+    private Button repairButton;
+    /**
+     * The Repair route's version menu (the presets, Recipe.presets(): Candidates.repairVersions(), newest first, then
+     * "Custom: pick base and mods") and the base and mods it makes (a preset's set, or the owner's own pick).
+     */
+    private android.widget.Spinner repairChoice;
+    private Recipe.Selection repairSel = Recipe.presets()[0];
+    /** Whether the menu shows Custom (the base menu and the mod boxes) rather than a preset. */
+    private boolean repairCustom;
+    /** Custom's base menu, its mod boxes and the warning line for an experimental or stock pick. */
+    private android.widget.Spinner baseChoice;
+    private LinearLayout customPanel;
+    private LinearLayout modBoxes;
+    private TextView customWarning;
+    /** Shown in the Repair write step while the version picked needs the factory dump and none is kept. */
+    private TextView factoryHint;
+    private Button factoryFileButton;
     private Button readResultButton;
     private TextView sensorStatus;
     /** A read of SENSOR.TXT is running; it blocks a second read until it ends. */
@@ -175,17 +225,23 @@ public class MainActivity extends Activity {
     private volatile boolean loadingBackup;
     /** The public stock dump once downloaded or picked and checked; kept so choosing again needs no new download. */
     private byte[] stockDump;
+    /** The owner's factory dump once picked or read back from the phone and checked (Candidates.factoryDump). */
+    private byte[] factoryDump;
+    /** Build v008_test's public file once downloaded and checked (Recipes.DUMPS), for a Custom v008_test pick. */
+    private byte[] v008Dump;
     private boolean downloading;
 
     private byte[] fileData;
     private UpdateCheck.Result fileCheck;
-    /** How the file in step 1 is described above its checks, and whether the owner chose it, for checking it again. */
+    /** How the file step describes the file above its checks, and whether the owner chose it, for checking again. */
     private String fileName;
     private String fileOrigin;
     private boolean fileChosen;
+    /** The file step shows fileCheck's verdict (showChecked), so its next line is worded again for another route. */
+    private boolean checkShown;
     /** Bumped by every loadFile, so a slow read of an earlier file cannot replace a later one. */
     private int fileRequest;
-    /** The file in step 1 is being checked again, against the backup on record now; nothing is written meanwhile. */
+    /** The file is being checked again, against the backup on record now; nothing is written meanwhile. */
     private volatile boolean checking;
     /** Bumped by every check of the file again, so only the latest one is shown. */
     private int checkRequest;
@@ -194,13 +250,22 @@ public class MainActivity extends Activity {
     /** Bumped by every inspectCard, so only the latest look at the card is shown. */
     private int cardRequest;
     private boolean inspecting;
+    /**
+     * The listing held before the look at the card running now: on the routes that only read the card, the drive step
+     * stays done on it while the same drive, still mounted, is listed again (after a zip), so no step flickers locked.
+     * Buttons still go by card, which is null until the new listing is back.
+     */
+    private Card relistedFrom;
+    /** A zip's result to scroll into view once the look at the card running now is back (archiveShown). */
+    private TextView revealAfterLook;
     /** A comparison of the update file with the copy on the card is running (a write or removal is an Operation). */
     private boolean comparing;
     /** The write or removal whose progress this screen shows, until it has shown how it ended. */
     private Operation watching;
     /**
-     * The backup (SHA-256 and name) the file step 3 says is on the card was checked against, and the one the copy
-     * step 1 says was saved was checked against: once another backup is on record, those messages no longer hold.
+     * The backup (SHA-256 and name) the file the write step says is on the card was checked against, and the one
+     * the copy the file step says was saved was checked against: once another backup is on record, those messages
+     * no longer hold.
      */
     private String writtenWith;
     private String writtenName;
@@ -250,195 +315,368 @@ public class MainActivity extends Activity {
         }
     }
 
-    // --- layout -------------------------------------------------------------------------------------------------
+    // --- screens ------------------------------------------------------------------------------------------------
+
+    /**
+     * The screens. One Activity shows one route at a time in its scroll column, so the steps of different jobs are
+     * never on one screen; Back and "‹ Home" go Home, and Back on Home leaves the app.
+     */
+    private enum Route { HOME, BACKUP_PHOTOS, REPAIR, PROBE, RESTORE, TEST_SHOTS, FLASH_LOG, ADVANCED, IDENTIFY }
+
+    private static final String STATE_ROUTE = "route";
+    /** The saved drive's name as Android last described it, for the drive bar while it is not connected. */
+    private static final String KEY_DRIVE_NAME = "driveName";
+    private static final String KEY_FLASH_LOG = "flashLog";
+    /** DocumentsContract.ACTION_DOCUMENT_ROOT_SETTINGS (a system API, so spelled out): the drive's own storage page. */
+    private static final String DOCUMENT_ROOT_SETTINGS = "android.provider.action.DOCUMENT_ROOT_SETTINGS";
+    private static final String SYNCED = "Synced to the camera ✓";
+    private static final String EJECTED = "Ejected ✓ — unplug the cable.";
+    private static final String NO_FILE = "No update file yet.";
+
+    /*
+     * What a flashing route has done is a FlashFlow run, one per drive and route, kept in the preferences on every
+     * event (KEY_FLASH_RUN) and read back after Android ends the process. Only explicit events move a run on: a write
+     * that worked or the same file found on the card, the answer to the flash question, a removal that worked, a
+     * listing of the card, the flash check or sensor read. Whether the drive is plugged in now moves no step. The
+     * flags below are about the drive and its eject line, not about a route's progress. Main thread only.
+     */
+    /** The flash runs as last loaded or changed, by preference key; each change is kept in the preferences at once. */
+    private static final Map<String, FlashFlow> RUNS = new HashMap<>();
+    private static final String KEY_FLASH_RUN = "flashRun.";
+    /** The saved drive was seen ejected since the last write (the Eject steps of Back up photos and Advanced). */
+    private static boolean progressEjected;
+    /**
+     * The saved drive was seen unmounted and has not been mounted since, nor a write, removal or zip started: the only
+     * state in which the app says "Ejected". Cleared whenever the drive is seen mounted again.
+     */
+    private static boolean ejectedThisMount;
+    /** "Continue" was tapped under the repair route's "Before you start". */
+    private static boolean repairStarted;
+    /**
+     * The document IDs of the card's DCIM photos just after the last write (listed on the worker), or null, and the
+     * run and write they belong to (runId), for the flash check.
+     */
+    private static volatile Set<String> dcimAtWrite;
+    private static volatile String dcimAtWriteFor;
+    /** The SENSOR.TXT the worker read just after a write, waiting to go into that write's run (applySnapshot). */
+    private static final java.util.concurrent.atomic.AtomicReference<Snapshot> SENSOR_SNAPSHOT =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    /**
+     * The flash check's last result as shown and the run and write it was made for (runId), for a new screen too; and
+     * its verdict: TRUE for the public-build family's header, FALSE for another header, null for none (no new photo
+     * yet, or the card could not be read).
+     */
+    private static volatile String photoCheck;
+    private static volatile String photoCheckFor;
+    private static volatile Boolean photoCheckOk;
+    private static volatile boolean checkingPhoto;
+    /**
+     * The Identify route (routeTitle(Route.IDENTIFY)): a reading of the card's photos is running; its last result as shown
+     * (the conclusion with its caveats, and the evidence) and the drive it was read from (treeUuid).
+     */
+    private static volatile boolean identifying;
+    private static volatile String identifyText;
+    private static volatile String identifyEvidence;
+    private static volatile String identifyFor;
+    /**
+     * The firmware base the last identification suggested, or null before any. Kept for a later version to preselect
+     * on the Repair route; nothing reads it yet.
+     */
+    private static volatile Identify.Base identifiedBase;
+    /** A verified backup zip was saved this run, from the drive with this UUID. */
+    private static volatile boolean backupSaved;
+    private static volatile String backupSavedFrom;
+    /**
+     * When the test-shot set began (step 1 tapped), 0 before; and the DCIM photos on the card then, or null. Both are
+     * kept in the preferences too, so the set's shots are still found after Android ends the app's process.
+     */
+    private static volatile long shotsSince;
+    private static volatile Set<String> shotsBefore;
+    /** A light was picked for the set begun at shotsSince. */
+    private static boolean lightChosen;
+    /** When the app last said "Ejected" (elapsedRealtime), and progressEjected as it was just before it. */
+    private static long ejectedAt;
+    private static boolean progressEjectedBefore;
+    private static final String KEY_SHOTS_SINCE = "shotsSince";
+    /** The KEY_SHOTS_SINCE value of the set a light was picked for (lightChosen), kept beside it. */
+    private static final String KEY_LIGHT_FOR = "lightChosenFor";
+    private static final String KEY_SHOTS_BEFORE = "shotsBefore";
+    private static final String KEY_SHOTS_BEFORE_FOR = "shotsBeforeFor";
+    private static final String KEY_STANDING_VOLUMES = "standingVolumes";
+    /** How long after Android reports the drive unmounted the app looks again before it calls it ejected. */
+    private static final int UNMOUNT_SETTLE_MS = 1500;
+    /** How many more one-second looks the settle check takes while Android still says "ejecting". */
+    private static final int EJECTING_LOOKS = 15;
+    /** Android said the saved drive is being ejected (broadcast or state), since it was last mounted. */
+    private boolean ejectingSeen;
+    /** An eject the app reported this recently is taken back when Android then reports the drive pulled out. */
+    private static final long UNDO_EJECT_MS = 2000;
+    /** The folder in a backup zip that holds the untouched original of each copy whose dates were fixed. */
+    private static final String ORIGINALS = "originals/";
+
+    /**
+     * A zip of the camera's photos: a backup, or a set of test shots. Like Operation it belongs to the process, so a
+     * screen made while it runs shows its progress and how it ended. It runs on the worker, so no write, removal or
+     * look at the card runs alongside it.
+     */
+    private static final class Archive {
+        final boolean shots;
+        volatile String progress = "Getting ready…";
+        /** How it ended; null while it runs. */
+        volatile String outcome;
+        /** A screen has taken in how it ended (revealed it, and looked at the card again). Main thread only. */
+        boolean shown;
+        /**
+         * The owner has had how it ended on screen with the drive listed. Until then its step stays open, so a drive
+         * pulled mid-zip never hides the result behind the drive step. Main thread only.
+         */
+        boolean seen;
+        /** The card's listing it started from: a screen made while it runs shows that, not a new look behind the zip. */
+        final Card card;
+
+        Archive(boolean shots, Card card) {
+            this.shots = shots;
+            this.card = card;
+        }
+    }
+
+    /** The last backup zip and the last set of test shots: each keeps its own result, so one never erases the other. */
+    private static volatile Archive backupArchive;
+    private static volatile Archive shotsArchive;
+
+    private static Archive archiveOf(boolean shots) {
+        return shots ? shotsArchive : backupArchive;
+    }
+
+    /** The zip running now, or null. Only one runs at a time (startArchive refuses a second). */
+    private static Archive runningArchive() {
+        Archive b = backupArchive;
+        if (b != null && b.outcome == null) {
+            return b;
+        }
+        Archive s = shotsArchive;
+        return s != null && s.outcome == null ? s : null;
+    }
+
+    private static boolean archiving() {
+        return runningArchive() != null;
+    }
+
+    /** Its step holds a zip running now, or one whose end the owner has not yet had on screen with the drive listed. */
+    private static boolean unseen(Archive a) {
+        return a != null && !a.seen;
+    }
+
+    /** What the card's SENSOR.TXT was just after a write, read on the worker, for that write's run. */
+    private static final class Snapshot {
+        final String uuid;
+        final FlashFlow.Route route;
+        final long writtenAt;
+        /** Its identity (sensorIdentity), "" for no such file, null when the card could not be read. */
+        final String sensor;
+
+        Snapshot(String uuid, FlashFlow.Route route, long writtenAt, String sensor) {
+            this.uuid = uuid;
+            this.route = route;
+            this.writtenAt = writtenAt;
+            this.sensor = sensor;
+        }
+    }
+
+    private static final int SAVE_ZIP = 6;
+    private static final int SAVE_SHOTS = 7;
+    private static final String KEY_FIX_DATES = "fixDates";
+    private static final String KEY_DATE_NAMES = "dateNames";
+    /** The Repair pick (Recipe.Selection.serialize(): base and mods) and whether it was made with Custom. */
+    private static final String KEY_REPAIR_SET = "repairSet";
+    private static final String KEY_REPAIR_CUSTOM = "repairCustom";
+    /** The Repair version an app before 0.28 remembered, by Kind name: read once, moved to KEY_REPAIR_SET. */
+    private static final String KEY_REPAIR_OLD = "repairVersion";
+    private static final String STATE_WIPE = "wipe";
+    private static final String STATE_SHOTS_WIPE = "shotsWipe";
+    private static final String STATE_LIGHTING = "lighting";
+    private static final String STATE_OTHER_LIGHT = "otherLight";
+    private static final String STATE_SHOT_COUNT = "shotCount";
+    private static final String STATE_PENDING_ZIP = "pendingZip";
+    private static final String STATE_PENDING_ZIP_SHOTS = "pendingZipShots";
+    private static final String STATE_EJECT_ASKED = "ejectAsked";
+    /**
+     * The save place of the zip running now, kept in the preferences until it has been read back (before any delete
+     * from the camera): still there at start-up, with no zip running, it was left unfinished when Android ended the
+     * app's process. KEY_ZIP_RUNNING_SHOTS says which kind it was.
+     */
+    private static final String KEY_ZIP_RUNNING = "zipRunning";
+    private static final String KEY_ZIP_RUNNING_SHOTS = "zipRunningShots";
+    private static final String ZIP_BUTTON = "Choose where to save the zip";
+    private static final String SHOTS_BUTTON = "Save the shots";
+    private static final String CHECK_PHOTO = "Check the newest photo";
+    private static final String IDENTIFY_BUTTON = "Identify from the photos on the card";
+    /** A Charmera photo is a few hundred KB; a larger file is copied as it is, without its dates fixed. */
+    private static final int MAX_PHOTO = 32 * 1024 * 1024;
+    /** How much of a video's start is read for its date chunks, which sit in its header before the frames. */
+    private static final int AVI_HEAD = 256 * 1024;
+
+    private Button zipButton;
+    private TextView zipStatus;
+    private android.widget.CheckBox fixDatesBox;
+    /** Name the zip's copies by capture time (20261111_114931.jpg) instead of the camera's counter. */
+    private android.widget.CheckBox dateNamesBox;
+    private android.widget.CheckBox wipeBox;
+    private Button shotsButton;
+    private TextView shotsStatus;
+    private TextView shotsStartStatus;
+    private android.widget.CheckBox shotsWipeBox;
+    private android.widget.RadioGroup lightingGroup;
+    private android.widget.RadioButton[] lightingChoices;
+    private android.widget.EditText otherLighting;
+    private android.widget.EditText shotCount;
+    private TextView shotCountToggle;
+    private TextView lightingStatus;
+    private Button checkPhotoButton;
+    private TextView checkStatus;
+    private Button identifyButton;
+    private TextView identifyStatus;
+    private TextView identifyDetail;
+    private TextView identifyDetailToggle;
+
+    private Route route = Route.HOME;
+    /** The work route whose shared result lines are on screen; another one clears them (go()). */
+    private Route lastWorkRoute;
+    /** "Back up photos first" was tapped on this route: Back up photos offers the way back to it. */
+    private Route returnTo;
+    private static final String STATE_RETURN = "returnTo";
+    /** The route the file in fileData was asked for; another flashing route drops it, so it is never written there. */
+    private Route fileFor;
+    private final List<Step> steps = new ArrayList<>();
+    private FlashLog flashLog;
+
+    private LinearLayout driveBar;
+    private TextView driveText;
+    private TextView driveChange;
+    /** The drive step's one line: what to do about the saved drive now. */
+    private TextView driveHint;
+    private TextView ejectStatus;
+    /** Eject under "Remove the update file", shown once the removal worked. */
+    private Button removeEjectButton;
+    /** How FlashFlow.goneLine() begins, so updateButtons can take that line back once it no longer holds. */
+    private static final String GONE_LINE = "The card no longer lists ";
+    /** "Flash again" under a flashing route's header, shown only while its run is finished (updateButtons). */
+    private TextView flashAgainLink;
+    private Button useFileButton;
+    private TextView downloadPageLink;
+    /** The eject page was opened for the saved drive; onResume and the volume broadcasts look whether it went. */
+    private boolean ejectAsked;
+    private boolean volumesWatched;
+    /** Bumped by every volume broadcast for the saved drive, so only the latest unmount is looked at again. */
+    private int unmountCheck;
+    /**
+     * An unmount of the saved drive, seen mounted before it, waits for its second look (the unmountCheck it posted is
+     * pendingUnmount); a pull, a mount or that look clears it.
+     */
+    private boolean unmountPending;
+    private int pendingUnmount;
+    /** The saved drive was seen mounted since it was last seen gone (refreshDrive). */
+    private boolean driveSeenMounted;
+    /** The saved drive was mounted while a dialog was open: the card is looked at once the dialog goes. */
+    private boolean inspectAfterDialog;
+    /** A zip's save place chosen while the card was not listed yet (the screen was recreated): it starts once it is. */
+    private Uri pendingZip;
+    private boolean pendingZipShots;
+    /** The route "Use a file on the phone" was tapped on, for the file the picker returns. */
+    private Route pendingFileFor;
+    /** The answer line under "Did the camera show Upgrade 100%?" on screen now, or null. */
+    private TextView flashAnswerView;
+    /** The flashing route's "Eject, then flash" and "Remove the update file" steps on screen now, or null. */
+    private Step ejectStepNow;
+    private Step removeStepNow;
+
+    /** Android's word that a drive was mounted, ejected, unmounted or pulled out; registered while the screen shows. */
+    private final BroadcastReceiver volumes = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final String action = intent.getAction();
+            android.os.storage.StorageVolume v = null;
+            try {
+                v = intent.getParcelableExtra(android.os.storage.StorageVolume.EXTRA_STORAGE_VOLUME);
+            } catch (RuntimeException ignored) {
+                // no volume named: the drive bar is looked at again all the same
+            }
+            final String uuid = v == null ? null : v.getUuid();
+            ui.post(() -> {
+                if (gone()) {
+                    return;
+                }
+                volumeEvent(action, uuid);
+            });
+        }
+    };
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         setTitle(R.string.app_name);
+        if (getActionBar() != null) {
+            getActionBar().hide();        // every screen has its own title; the bar only repeated "Charmera Card"
+        }
         resolveTheme();
-        LinearLayout col = new LinearLayout(this);
+        // The status bar takes the page colour instead of the theme's blue; dark icons on the light page.
+        getWindow().setStatusBarColor(windowBg);
+        if (android.os.Build.VERSION.SDK_INT >= 23 && (getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                != android.content.res.Configuration.UI_MODE_NIGHT_YES) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
+        col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setBackgroundColor(windowBg);
         int pad = dp(16);
         col.setPadding(pad, pad, pad, pad);
-        this.col = col;
-
-        banner();
-
-        LinearLayout s0 = stepCard("0", "Back up the camera", "Read this camera's flash to a 2 MB file (CH341A clip on"
-                + " a computer) and choose it here. Required before any write.");
-        backupButton = primary(BACKUP, v -> pickBackup());
-        s0.addView(backupButton);
-        backupStatus = body("");
-        s0.addView(backupStatus);
-        expander(s0, "Why a backup is required", "Firmware that does not fit cannot be reversed without a chip dump"
-                + " taken before the first flash. Cameras of the same series can use different image sensors, and"
-                + " nothing on screen shows which. The app accepts only a full dump that is not a public copy or an"
-                + " \"unverified-read\", and cannot tell which camera a dump came from — so make sure it is this"
-                + " one's. A dump read after a flash holds what was flashed, not what fits; when that is a public"
-                + " build, the app says so.");
-
-        LinearLayout s1 = stepCard("1", "Get the update file", "Download the public 2 MB dump; the stock restore file"
-                + " is built from it.");
-        downloadButton = primary(DOWNLOAD, v -> downloadDump(Candidates.Kind.RESTORE));
-        s1.addView(downloadButton);
-        s1.addView(linkText("Open the download page \u2197", Candidates.STOCK_DUMP_PAGE));
-        s1.addView(button(USE_FILE, v -> pickFile()));
-        saveButton = button(SAVE, v -> saveCopy());
-        s1.addView(saveButton);
-        saveStatus = body("");
-        s1.addView(saveStatus);
-        fileStatus = body("");
-        s1.addView(fileStatus);
-        fileDetail = mono();
-        fileDetail.setVisibility(View.GONE);
-        fileDetailToggle = detailToggle(fileDetail, "Details");
-        s1.addView(fileDetailToggle);
-        s1.addView(fileDetail);
-        expander(s1, "Already have the file, or using the phone's SD slot?", "Have the dump or an update file already?"
-                + " Tap " + q(USE_FILE) + " and choose it. Android 11+ with the card in the phone's own slot: tap "
-                + q(SAVE) + ", copy the file onto the card with the Files app (step 2), then " + q(USE_FILE) + " to check"
-                + " it. The stock restore file is a public copy of a working camera's memory under its published name;"
-                + " matching it says nothing about your camera, so the app still checks it against your step 0 backup"
-                + " before writing.");
-        divider(s1);
-        s1.addView(subTitle("Identify the image sensor"));
-        s1.addView(body("Diagnostic only: writes the sensor's ID to SENSOR.TXT. It does not repair. No backup needed."));
-        probeButton = primary(MAKE_PROBE, v -> confirmMakeProbe());
-        s1.addView(probeButton);
-        expander(s1, "Details", "When the camera next enters photo mode it scans the sensor bus, writes the result to"
-                + " SENSOR.TXT, and stops as it does now. Read it with " + q(READ_RESULT) + " in step 4. It changes no"
-                + " boot or update code, only a dead debug routine and one sensor-setup call, so the stock restore file"
-                + " reverses it.");
-        divider(s1);
-        s1.addView(subTitle("Try the OV9732 bring-up — firmware " + bringupFirmwareVersion() + " (experimental)"));
-        s1.addView(body("Drives the OV9732 so the camera can take photos. The stock restore file reverts it. No backup"
-                + " needed."));
-        bringupButton = primary(MAKE_BRINGUP, v -> confirmMakeBringup());
-        s1.addView(bringupButton);
-        expander(s1, "Details", "Once the probe names the sensor as an OmniVision OV9732, this drives it in place of the"
-                + " SP140A the firmware expects, then lets the camera run so you can try a photo. It may not be right on"
-                + " the first try, but it cannot damage the camera; like the probe it changes no boot or update code, so"
-                + " the stock restore file puts it back.");
-
-        LinearLayout s2 = stepCard("2", "Connect the camera", null);
-        s2.addView(caution("Plugging the cable into a switched-off camera turns it on, and it will flash any update file"
-                + " on the card. Connect it in this order:"));
-        s2.addView(body("1. Switch the camera off and take the card out.\n"
-                + "2. Switch it on with the power key; wait 10 seconds (it only looks for an update file in the first"
-                + " five).\n"
-                + "3. Put the card back in, then connect the camera to the phone with a USB-C data cable.\n"
-                + "4. Tap " + q(CHOOSE) + ", open the camera's drive, and tap \"Use this folder\" in its top folder"
-                + " — not inside DCIM."));
-        chooseButton = primary(CHOOSE, v -> pickCard());
-        s2.addView(chooseButton);
-        cardStatus = body("");
-        s2.addView(cardStatus);
-        expander(s2, "Card reader or the phone's SD slot", "A USB card reader works the same way. The phone's own slot"
-                + " works only on Android 7–10; from Android 11 the system will not let an app pick a card's top"
-                + " folder in the slot. For the slot on Android 11+: tap " + q(SAVE) + " in step 1, copy that file onto"
-                + " the card with the Files app, then tap " + q(USE_FILE) + " and choose the copy to have it checked."
-                + " No drive in the picker? See the last card.");
-
-        LinearLayout s3 = stepCard("3", "Write to the card", "Tap " + q(WRITE) + " once step 0 has a backup, step 1 says"
-                + " \"OK to put on the card\", and step 2 shows the card is ready. The file is copied to the card's top"
-                + " folder and read back to verify. Nothing changes on the camera yet.");
-        writeButton = primary(WRITE, v -> confirmWrite());
-        s3.addView(writeButton);
-        writeStatus = body("");
-        s3.addView(writeStatus);
-        ejectButton = button(EJECT, v -> openStorageSettings());
-        s3.addView(ejectButton);
-
-        LinearLayout s4 = stepCard("4", "Flash", "Eject the drive before unplugging: tap " + q(EJECT) + " in step 3, tap"
-                + " the USB drive, then \"Eject\" (or use Android's USB notification). With a reader or the slot, eject"
-                + " and put the card in the camera.");
-        s4.addView(body("1. Confirm the backup is safe, it is an original 2025-series camera, and the battery is full.\n"
-                + "2. Switch the camera off, then on with the power key, card in it. It shows \"Upgrade\" with a"
-                + " percentage for about 15–20 seconds — do not touch anything until 100%."));
-        s4.addView(caution("At 100% the camera stays on its last screen; it does not switch off or delete the update"
-                + " file. Take the card out first, then hold the power key about a second to switch off."));
-        expander(s4, "No \"Upgrade\" screen, or \"Program error\"", "No \"Upgrade\" and it starts normally? It did not"
-                + " find the file — reconnect as in step 2, confirm step 2 lists the update file, then eject and"
-                + " retry; if it is not listed, write it again in step 3. \"Program error\" means the camera found the"
-                + " file damaged and ignored it; nothing was erased. Remove the file (step 5) and write it again.");
-        divider(s4);
-        s4.addView(subTitle("Read the sensor result"));
-        s4.addView(body("Flashed the sensor-ID probe? Take the update file off the card (step 5) so the camera boots the"
-                + " probe instead of re-flashing, open photo mode so it writes SENSOR.TXT, then tap " + q(READ_RESULT)
-                + "."));
-        expander(s4, "Details", "While an update file is on the card the camera re-flashes it every boot instead of"
-                + " running it. With it gone, the probe boots; photo mode stops as before but scans the sensor bus and"
-                + " writes SENSOR.TXT first. Bring the card back and tap " + q(CHOOSE) + " in step 2 if needed.");
-        readResultButton = primary(READ_RESULT, v -> readSensorResult());
-        s4.addView(readResultButton);
-        sensorStatus = body("");
-        s4.addView(sensorStatus);
-
-        LinearLayout s5 = stepCard("5", "Clean up", null);
-        s5.addView(caution("The update file is still on the card, and the camera would flash it again at every"
-                + " power-on. Remove it now."));
-        s5.addView(body("1. Keep the card out of the camera. Switch the camera on with the power key (not by plugging"
-                + " in the cable) and wait 10 seconds.\n"
-                + "2. Put the card in, connect the camera, and tap " + q(REMOVE) + ". Greyed out? Tap " + q(CHOOSE)
-                + " and pick the drive again."));
-        cleanButton = primary(REMOVE, v -> confirmClean());
-        s5.addView(cleanButton);
-        cleanStatus = body("");
-        s5.addView(cleanStatus);
-        TextView after = body("Once it is gone: eject, unplug, switch the camera off and on, and check the boot screen,"
-                + " live view, and a test photo.");
-        after.setPadding(0, dp(10), 0, dp(2));
-        s5.addView(after);
-        expander(s5, "Phone's own SD slot (Android 11+)", "Put the card in the phone, delete the update file from its"
-                + " top folder with the Files app, and eject the card before removing it.");
-
-        LinearLayout tools = card();
-        tools.addView(subTitle("Compare test shots"));
-        tools.addView(body("A fixed reference card to photograph after each flash, so colour and orientation are always"
-                + " compared against the same image."));
-        tools.addView(primary("Open calibration target", v ->
-                startActivity(new Intent(this, CalibrationActivity.class))));
-        expander(tools, "How to use it", "In a dark room, turn off auto-brightness and night-light, fill the frame with"
-                + " the card, and keep the phone flat. It is a consistent target, not a lab-calibrated one.");
-
-        LinearLayout help = card();
-        expander(help, "The drive does not show up", "Check the cable first — some USB-C cables only charge."
-                + " Android may refuse a card the camera has used (it leaves a flag set on the card) and offer to"
-                + " format it; formatting erases everything, so copy your photos off first. On a computer, the toolkit"
-                + " can clear the flag without erasing. See docs/05-CARDS.md and docs/06-ANDROID.md.");
-
-        TextView footer = body("Charmera Card " + appVersion());
-        footer.setTextColor(disabledText);
-        footer.setPadding(dp(4), dp(10), dp(4), 0);
-        col.addView(footer);
-        TextView check = body("Check for updates");
-        check.setTextColor(accent);
-        check.setTypeface(Typeface.DEFAULT_BOLD);
-        check.setTextIsSelectable(false);
-        check.setPadding(dp(4), dp(4), dp(4), dp(2));
-        check.setOnClickListener(v -> checkForUpdate());
-        col.addView(check);
-        updateStatus = body("");
-        updateStatus.setPadding(dp(4), 0, dp(4), dp(2));
-        col.addView(updateStatus);
-        col.addView(linkText("Open the releases page \u2197", RELEASES_PAGE));
-
         scroll = new ScrollView(this);
         scroll.setFitsSystemWindows(true);
+        scroll.setBackgroundColor(windowBg);
         scroll.addView(col);
         setContentView(scroll);
+        makeViews();
+        if (state != null) {
+            wipeBox.setChecked(state.getBoolean(STATE_WIPE, false));
+            shotsWipeBox.setChecked(state.getBoolean(STATE_SHOTS_WIPE, false));
+            int light = state.getInt(STATE_LIGHTING, 0);
+            lightingChoices[light >= 0 && light < lightingChoices.length ? light : 0].setChecked(true);
+            otherLighting.setText(state.getString(STATE_OTHER_LIGHT, ""));
+            shotCount.setText(state.getString(STATE_SHOT_COUNT, ""));
+            // The eject page was open when the screen was made again: onResume still looks whether the drive went.
+            ejectAsked = state.getBoolean(STATE_EJECT_ASKED, false);
+        }
+        flashLog = FlashLog.parse(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_FLASH_LOG, null));
+        if (shotsSince == 0 && state != null) {
+            // Android ended the process while the set ran and brought this screen back: its start is in the
+            // preferences. A fresh start of the app (no saved state) begins with no set, so photos taken since an old
+            // set are never swept into a new save.
+            restoreShots();
+        }
 
         String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_TREE, null);
         if (saved != null && hasPermission(Uri.parse(saved))) {
             tree = Uri.parse(saved);
             setStatus(cardStatus, "Looking at the card…");
+            Archive running = runningArchive();
+            if (running != null && running.outcome == null && running.card != null
+                    && tree.equals(running.card.tree)) {
+                // A zip holds the card: this screen shows the listing the zip started from, so its progress shows, and
+                // looks at the card again once the zip ends (archiveShown).
+                card = running.card;
+            }
         } else {
             setStatus(cardStatus, "No drive chosen yet.");
         }
-        showFile("No update file yet.", null);
-        setStatus(backupStatus, "No backup on record. The app will not write to the card without one.");
+        String pending = state == null ? null : state.getString(STATE_PENDING_ZIP);
+        if (pending != null) {
+            // A save place chosen for a zip that waited for the card's listing when the screen was made again.
+            pendingZip = Uri.parse(pending);
+            pendingZipShots = state.getBoolean(STATE_PENDING_ZIP_SHOTS, false);
+        }
+        showFile(NO_FILE, null);
+        setStatus(backupStatus, "No backup on record. The app will not write the stock restore file without one.");
         String savedBackup = state == null ? null : state.getString(STATE_BACKUP_URI);
         if (savedBackup != null) {
             loadBackup(Uri.parse(savedBackup));     // the screen was recreated (dark mode, font size): read it again
@@ -447,8 +685,23 @@ public class MainActivity extends Activity {
         if (last != null && !last.shown) {
             watching = last;
         }
+        route = routeNamed(state == null ? null : state.getString(STATE_ROUTE));
+        lastWorkRoute = route;
+        String back = state == null ? null : state.getString(STATE_RETURN);
+        returnTo = back == null || route != Route.BACKUP_PHOTOS ? null : routeNamed(back);
+        freshRunIfStale(flowRoute(route));     // the first render of this route: entering it, as go() does
+        render();
         updateButtons();
-        uiReady = true;     // from here a new file result scrolls itself into view (not the initial empty state)
+        unfinishedZip();
+        if (pendingZip != null) {
+            if (tree == null || busy() || archiving()) {
+                startPendingZip();      // it cannot wait for a listing: refused now, its empty file deleted
+            } else {
+                clearOutcome(pendingZipShots);
+                setStatus(pendingZipShots ? shotsStatus : zipStatus, "Looking at the card before saving the zip…");
+            }
+        }
+        uiReady = true;     // from here a new result scrolls itself into view (not the initial empty state)
         // A file the app was opened with is handled once: not again by a recreated screen (state != null), and not
         // when Recents starts the app again with the intent it was first opened with.
         Intent first = getIntent();
@@ -460,9 +713,24 @@ public class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
+        out.putString(STATE_ROUTE, route.name());
+        if (returnTo != null) {
+            out.putString(STATE_RETURN, returnTo.name());
+        }
+        out.putBoolean(STATE_WIPE, wipeBox.isChecked());
+        out.putBoolean(STATE_SHOTS_WIPE, shotsWipeBox.isChecked());
+        out.putInt(STATE_LIGHTING, lightingIndex());
+        out.putString(STATE_OTHER_LIGHT, otherLighting.getText().toString());
+        out.putString(STATE_SHOT_COUNT, shotCount.getText().toString());
         if (backupUri != null && backup != null) {
             out.putString(STATE_BACKUP_URI, backupUri.toString());   // 2 MB do not fit a Bundle; the file is read again
         }
+        if (pendingZip != null) {
+            // Still waiting for the card's listing: the next screen starts it, or refuses it and deletes its file.
+            out.putString(STATE_PENDING_ZIP, pendingZip.toString());
+            out.putBoolean(STATE_PENDING_ZIP_SHOTS, pendingZipShots);
+        }
+        out.putBoolean(STATE_EJECT_ASKED, ejectAsked);
     }
 
     @Override
@@ -473,23 +741,76 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // The broadcasts carry the drive's path as a file: URI; without the scheme none of them arrives.
+        IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_MEDIA_MOUNTED);
+        f.addAction(Intent.ACTION_MEDIA_UNMOUNTED);
+        f.addAction(Intent.ACTION_MEDIA_EJECT);
+        f.addAction(Intent.ACTION_MEDIA_REMOVED);
+        f.addAction(Intent.ACTION_MEDIA_BAD_REMOVAL);
+        f.addDataScheme("file");
+        try {
+            registerReceiver(volumes, f);
+            volumesWatched = true;
+        } catch (RuntimeException e) {
+            volumesWatched = false;     // onResume still looks at the drive each time the screen comes back
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        if (volumesWatched) {
+            volumesWatched = false;
+            try {
+                unregisterReceiver(volumes);
+            } catch (RuntimeException ignored) {
+                // not registered after all
+            }
+        }
+        super.onStop();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         screen = this;
+        applySnapshot();  // a SENSOR.TXT read after a write while no screen was open goes into its run
         catchUp();
-        // The card may have been inserted, removed or changed while the app was in the background.
-        if (tree != null && !busy() && !inspecting && dialog == null) {
+        // The card may have been inserted, removed or changed while the app was in the background. Not while a zip
+        // runs: it holds the card, and archiveShown() looks at the card again once it ends.
+        if (tree != null && !busy() && !inspecting && dialog == null && !archiving()) {
             inspectCard();
         }
+        refreshDrive();
+        checkEject();     // back from the drive's storage page: was it ejected?
+        archiveShown();   // a zip that ended while no screen was open
+        photoShown();
     }
 
     @Override
     protected void onDestroy() {
         dismissDialog();
+        if (pendingZip != null && isFinishing()) {
+            // Closed for good before the card was listed: no zip starts, so the save screen's empty file goes.
+            final Uri dest = pendingZip;
+            pendingZip = null;
+            WORKER.execute(() -> delete(dest));
+        }
         if (screen == this) {
             screen = null;
         }
         super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (route != Route.HOME) {
+            go(returnTo != null ? returnTo : Route.HOME);
+        } else {
+            super.onBackPressed();
+        }
     }
 
     /** True once this screen is closing; work that finishes later must not touch its views or open dialogs. */
@@ -510,6 +831,8 @@ public class MainActivity extends Activity {
     /** Starts a write or removal as the process's operation; this screen shows its progress. */
     private Operation start(boolean write, int files) {
         Operation op = new Operation(write, files, write ? backupSha256 : null, write ? backupName : null);
+        op.route = route;
+        op.uuid = treeUuid();
         last = op;
         watching = op;
         return op;
@@ -533,7 +856,7 @@ public class MainActivity extends Activity {
 
     /**
      * Shows the write or removal this screen is watching: while it runs, that it runs, with Eject and the card buttons
-     * off; once it has ended, how, under its button, then the card is looked at again and the eject screen offered.
+     * off; once it has ended, how, under its button, then the card is looked at again and the next step shown.
      */
     private void catchUp() {
         Operation op = watching;
@@ -549,72 +872,3753 @@ public class MainActivity extends Activity {
         watching = null;
         boolean first = !op.shown;
         op.shown = true;
-        setStatus(status, op.outcome);
+        // writeFully syncs the file to the card before a write can succeed, so a write that worked is synced.
+        setStatus(status, op.write && op.succeeded && op.outcome.startsWith(WRITTEN)
+                ? WRITTEN + " " + SYNCED + op.outcome.substring(WRITTEN.length()) : op.outcome);
+        reveal(status);
         if (op.write && op.succeeded) {
             writtenWith = op.backupSha256;
             writtenName = op.backupName;
         }
-        inspectCard();
         if (op.succeeded && first) {
             if (op.write) {
-                done("The update file is on the card", "After ejecting, unplug the cable, or take the card out of"
-                        + " the reader, and go on with step 4.");
+                // writeFully synced it: the run's synced claim starts here and nowhere else (a removal claims no sync)
+                newRun(op.uuid, op.sha256, op.cardName, true, op.backupSha256);
             } else {
-                done(op.files == 1 ? "Update file removed" : "Update files removed", "If you have just"
-                        + " flashed: after ejecting, unplug the cable. Then switch the camera off and on again, and"
-                        + " check the boot screen, the live view and a test photo.\n"
-                        + "If you removed an old update file before writing: tap \"Later\" and go on with step 3.");
+                ejectedThisMount = false;
+                noteRemoval(op.uuid, op.route);
+                logFlash(FlashLog.Event.FILE_REMOVED, null);
+                placeEjectStatus();     // the next eject's result belongs under the Remove step's Eject now
             }
+        }
+        inspectCard();
+        if (op.succeeded && first) {
+            done(op.write ? "The update file is on the card" : op.files == 1 ? "Update file removed"
+                    : "Update files removed");
         }
         updateButtons();
     }
 
     /**
-     * Android does not let an app eject a drive, so this opens the storage settings, where the USB drive or card has
-     * an Eject entry.
+     * A write that worked (wrote), or the same file found on the card already: a new run for the flashing route that
+     * writes this file, whatever that run had reached, with checkedWith the backup the file's check was made against.
+     * The other flashing routes' runs on this drive start over too, and count the card as holding an update file until
+     * the next listing (FlashFlow.reset), so their drive line gives the safe order: the card holds this file now. What
+     * an earlier flash left (its eject line, its answer, its photo check) no longer applies.
      */
-    private void openStorageSettings() {
-        String[] actions = {android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS,
-                android.provider.Settings.ACTION_MEMORY_CARD_SETTINGS, android.provider.Settings.ACTION_SETTINGS};
-        for (String action : actions) {
-            try {
-                startActivity(new Intent(action));
-                return;
-            } catch (ActivityNotFoundException | SecurityException ignored) {
-                // try the next, more general settings screen
+    private void newRun(String uuid, String sha, String cardName, boolean wrote, String checkedWith) {
+        FlashFlow.Route r = routeOfFile(sha);
+        long now = System.currentTimeMillis();
+        for (FlashFlow.Route x : FlashFlow.Route.values()) {
+            FlashFlow f = runOf(uuid, x);
+            if (x == r && wrote) {
+                f.written(sha, cardName, true, now, checkedWith, firmwareLabel(sha));
+            } else if (x == r) {
+                f.foundOnCard(sha, cardName, now, checkedWith, firmwareLabel(sha));
+            } else {
+                f.reset();
             }
+            keep(uuid, f);
         }
-        android.widget.Toast.makeText(this, "Android's storage settings did not open. Open Settings yourself, then"
-                + " Storage, and eject the drive there.", android.widget.Toast.LENGTH_LONG).show();
+        progressEjected = false;
+        ejectedThisMount = false;
+        ejectAsked = false;
+        photoCheck = null;
+        photoCheckFor = null;
+        photoCheckOk = null;
+        if (!checkingPhoto) {
+            checkStatus.setText("");
+        }
+        ejectStatus.setText("");
+        // The eject result belongs under this flash's Eject again, not in a Remove step an earlier flash left it in.
+        placeUnder(ejectButton, ejectStatus);
+        // Which photos predate the flash, for the flash check, and the SENSOR.TXT there now, for the sensor read.
+        snapshotAtWrite(uuid, r, now);
+        if (wrote) {
+            logFlash(FlashLog.Event.WRITTEN, sha);
+        } else {
+            // Nothing was written: the log says the file was on the card, and when the app found it there.
+            flashLog = appendLog(this, FlashLog.Event.WRITTEN, firmwareLabel(sha), sha,
+                    "found on the card already; the app wrote nothing");
+        }
     }
 
-    /** After a write or a removal: say it where the owner is looking, then offer the eject screen. */
-    private void done(String message, String next) {
-        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show();
+    /** After a write or a removal: say it where the owner is looking; the route's next step is Eject. */
+    private void done(String message) {
+        android.widget.Toast.makeText(this, message + ". Eject the drive before you unplug it.",
+                android.widget.Toast.LENGTH_LONG).show();
+    }
+
+    /** Android's storage settings, the last place to eject from; false when none of them opened. */
+    private boolean openStorageSettings() {
+        String[] actions = {android.provider.Settings.ACTION_MEMORY_CARD_SETTINGS,
+                android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS, android.provider.Settings.ACTION_SETTINGS};
+        for (String action : actions) {
+            if (open(new Intent(action))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Starts another app's screen; false when there is none, or it refused. */
+    private boolean open(Intent i) {
+        try {
+            startActivity(i);
+            return true;
+        } catch (ActivityNotFoundException | SecurityException e) {
+            return false;
+        }
+    }
+
+    // --- the camera drive: identity, connected state, eject -------------------------------------------------------
+
+    /** The saved drive's volume UUID: the tree's document ID up to ':' ("1234-ABCD"), or null. */
+    private String treeUuid() {
+        return uuidOf(tree);
+    }
+
+    /** A drive tree's volume UUID, as treeUuid() reads it, or null. */
+    private static String uuidOf(Uri t) {
+        if (t == null || !EXTERNAL_STORAGE.equals(t.getAuthority())) {
+            return null;
+        }
+        try {
+            String id = DocumentsContract.getTreeDocumentId(t);
+            int colon = id.indexOf(':');
+            return colon <= 0 || id.startsWith("primary:") ? null : id.substring(0, colon);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** The phone's volume with this UUID (any case), or null when no such drive is attached. */
+    private android.os.storage.StorageVolume volume(String uuid) {
+        if (uuid == null) {
+            return null;
+        }
+        try {
+            android.os.storage.StorageManager sm =
+                    (android.os.storage.StorageManager) getSystemService(STORAGE_SERVICE);
+            if (sm != null) {
+                for (android.os.storage.StorageVolume v : sm.getStorageVolumes()) {
+                    if (uuid.equalsIgnoreCase(v.getUuid())) {
+                        return v;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // read as not attached
+        }
+        return null;
+    }
+
+    private static boolean mounted(android.os.storage.StorageVolume v) {
+        return v != null && android.os.Environment.MEDIA_MOUNTED.equals(v.getState());
+    }
+
+    /**
+     * Android reports the drive unmounted: ejected, and still attached. Checking (just plugged in), ejecting (not
+     * finished) and unmountable are not an eject.
+     */
+    private static boolean unmounted(android.os.storage.StorageVolume v) {
+        return v != null && android.os.Environment.MEDIA_UNMOUNTED.equals(v.getState());
+    }
+
+    private static boolean ejecting(android.os.storage.StorageVolume v) {
+        return v != null && android.os.Environment.MEDIA_EJECTING.equals(v.getState());
+    }
+
+    /** For a drive that is attached but neither mounted nor unmounted: what Android reports, and what to do. */
+    private static String notReady(android.os.storage.StorageVolume v) {
+        return ejecting(v) ? "Ejecting…" : "The drive is not ready (Android reports it " + v.getState() + "). Wait a"
+                + " few seconds, then tap " + q(EJECT) + " again.";
+    }
+
+    /** The drive bar and the drive step's line: the saved drive's name, and whether it is connected now. */
+    private void refreshDrive() {
+        String uuid = treeUuid();
+        android.os.storage.StorageVolume v = volume(uuid);
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (mounted(v)) {
+            if (!driveSeenMounted && !ejectAsked && !busy()) {
+                ejectStatus.setText("");  // back after being gone: a line about that eject or unplug is stale
+            }
+            driveSeenMounted = true;
+            noteStandingVolumes(uuid);
+        } else if (v == null) {
+            driveSeenMounted = false;     // gone: an unmount seen next is one on the way in
+            noteDriveGone(uuid);          // the mount a write was synced on is over
+        }
+        String name = null;
+        if (v != null) {
+            name = v.getDescription(this);
+            if (name != null && !name.isEmpty()) {
+                prefs.edit().putString(KEY_DRIVE_NAME, name).apply();
+            }
+        }
+        if (name == null || name.isEmpty()) {
+            name = prefs.getString(KEY_DRIVE_NAME, null);
+        }
+        if (name == null || name.isEmpty()) {
+            name = uuid != null ? "USB drive " + uuid : "the chosen folder";
+        }
+        String text;
+        if (tree == null) {
+            text = "Camera drive: none chosen";
+        } else if (uuid == null) {
+            text = "Camera drive: " + name + " · not a USB drive or card";
+        } else if (mounted(v)) {
+            if (ejectedThisMount) {
+                ejectStatus.setText("");  // the line about that eject no longer holds either
+            }
+            ejectedThisMount = false;     // mounted again: an eject seen before no longer holds
+            text = "Camera drive: " + name + " · Connected ✓";
+        } else {
+            text = "Camera drive: " + name + " · Not connected";
+        }
+        // A saved drive that is only unplugged: plugging it back in re-reads it by itself (volumeEvent), so the hint
+        // is all that is needed. No pick button and no stale "cannot find the card" under it; "Change" stays.
+        boolean away = driveAway();
+        chooseButton.setVisibility(away ? View.GONE : View.VISIBLE);
+        cardStatus.setVisibility(away || cardStatus.length() == 0 ? View.GONE : View.VISIBLE);
+        if (away) {
+            cardDetailToggle.setVisibility(View.GONE);
+            cardDetail.setVisibility(View.GONE);
+        }
+        driveText.setText(text);
+        driveChange.setText(tree == null ? "Choose" : "Change");
+        showDriveLine();
+    }
+
+    /**
+     * The drive step's one line: what to do about the saved drive now. Empty while it is connected (the bar says so,
+     * and the step shows the card). While it is away: on a flashing route what its run says (flash as the flash step
+     * says, or how to connect the camera), and elsewhere how to connect it; in the safe order whenever an update file
+     * may be on the card (FlashFlow, by the run and the last listing), never "switch on and connect" with it in.
+     */
+    private String driveLine() {
+        String uuid = treeUuid();
+        if (tree == null) {
+            return "Tap " + q(CHOOSE) + ", open the camera's drive and tap \"Use this folder\" in its top folder.";
+        }
+        if (uuid == null) {
+            return "Tap " + q(CHOOSE) + " and pick the camera's drive.";
+        }
+        android.os.storage.StorageVolume v = volume(uuid);
+        if (mounted(v)) {
+            return "";
+        }
+        // Ejected (or ejecting) with the cable still in: unplugging comes first, whatever another drive does.
+        boolean ejectedIn = unmounted(v) || ejecting(v);
+        android.os.storage.StorageVolume other = ejectedIn ? null : otherDrive();
+        if (other != null) {
+            String otherName = other.getDescription(this);
+            return "A different drive is connected" + (otherName == null || otherName.isEmpty() ? ""
+                    : " (" + otherName + ")") + ", not the saved one. If it is the camera's drive, tap " + q(CHOOSE)
+                    + " (or Change in the drive bar) and pick it.";
+        }
+        FlashFlow f = flow();
+        return f != null ? f.unpluggedHint(live(), ejectedIn)
+                : FlashFlow.unpluggedHint(mayHoldUpdateFile(uuid), ejectedIn);
+    }
+
+    /** Puts the drive line in the drive step; an event that moves the run on changes it too (updateButtons). */
+    private void showDriveLine() {
+        String hint = driveLine();
+        if (!hint.contentEquals(driveHint.getText())) {
+            driveHint.setText(hint);
+        }
+        driveHint.setVisibility(hint.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    // --- the flash runs (FlashFlow): one per drive and flashing route ------------------------------------------------
+
+    /** The preference key of a drive's run for a flashing route. */
+    private static String runKey(String uuid, FlashFlow.Route r) {
+        return KEY_FLASH_RUN + uuid.toUpperCase(Locale.ROOT) + "." + r.name();
+    }
+
+    /** A run and the write it is at, so a result made for one write is never taken for another's. */
+    private static String runId(String uuid, FlashFlow.Route r, long writtenAt) {
+        return uuid == null ? null : runKey(uuid, r) + "@" + writtenAt;
+    }
+
+    /** The id of the write the run is at, or null when it has none (runId). */
+    private static String runId(String uuid, FlashFlow f) {
+        return f.past() ? runId(uuid, f.route, f.writtenAt()) : null;
+    }
+
+    /**
+     * The flash check's result for the Repair run on the saved drive: the last check made for that run's write, or
+     * the result the run keeps (after a restart); "" when there is none for this write.
+     */
+    private String checkShown() {
+        String uuid = treeUuid();
+        FlashFlow f = runOf(uuid, FlashFlow.Route.REPAIR);
+        String id = runId(uuid, f);
+        String p = photoCheck;
+        return p != null && id != null && id.equals(photoCheckFor) ? p : f.checkText();
+    }
+
+    /**
+     * The drive's run for route r: as last changed, or as kept in the preferences (after Android ended the process).
+     * With no drive (uuid null) a run with nothing done, kept nowhere: nothing can be written without a drive.
+     */
+    private FlashFlow runOf(String uuid, FlashFlow.Route r) {
+        if (uuid == null) {
+            return new FlashFlow(r);
+        }
+        String key = runKey(uuid, r);
+        FlashFlow f = RUNS.get(key);
+        if (f == null) {
+            f = FlashFlow.parse(getSharedPreferences(PREFS, MODE_PRIVATE).getString(key, null), r);
+            RUNS.put(key, f);
+        }
+        // Never replaced here, while a screen may be showing it (its removal's result, its Eject): a stale run starts
+        // over only when its route is entered (freshRunIfStale) or on "Flash again" (startNewRun).
+        return f;
+    }
+
+    /**
+     * The file a flashing route writes now: Repair the version picked in its menu, Probe the probe; null for Restore
+     * (this camera's).
+     */
+    private String wantedSha(FlashFlow.Route r) {
+        return r == FlashFlow.Route.REPAIR ? repairSel.sha256()
+                : r == FlashFlow.Route.PROBE ? Candidates.Kind.PROBE.sha256 : null;
+    }
+
+    /**
+     * Entering a flashing route: a finished run of a file the route no longer writes (an older firmware version) says
+     * nothing about the file offered now, so the route starts a new run. A run still under way is kept (FlashFlow).
+     */
+    private void freshRunIfStale(FlashFlow.Route r) {
+        String uuid = treeUuid();
+        FlashFlow run = r == null || uuid == null ? null : runOf(uuid, r);
+        String want = wantedSha(r);
+        // the same version made from the other copy of the dump (original or cleaned) is the same firmware: not stale
+        Recipe.Selection wantKind = r == FlashFlow.Route.REPAIR ? repairSel
+                : r == FlashFlow.Route.PROBE ? Recipe.of(Candidates.Kind.PROBE) : null;
+        if (run != null && wantKind != null && wantKind.matches(run.sha())) {
+            want = run.sha();
+        }
+        if (r == null || uuid == null || !FlashFlow.staleRun(run, want)) {
+            return;
+        }
+        String key = runKey(uuid, r);
+        RUNS.put(key, new FlashFlow(r));
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(key).apply();
+    }
+
+    /** "Flash again": a finished run is put aside and the route starts over; a run still under way never is. */
+    private void startNewRun() {
+        FlashFlow.Route r = flowRoute(route);
+        String uuid = treeUuid();
+        if (r == null || uuid == null || busy() || !FlashFlow.finished(runOf(uuid, r))) {
+            return;
+        }
+        String key = runKey(uuid, r);
+        RUNS.put(key, new FlashFlow(r));
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(key).apply();
+        render();
+    }
+
+    /** Keeps a run in the preferences after an event, so it survives the process; only when it changed. */
+    private void keep(String uuid, FlashFlow f) {
+        if (uuid == null) {
+            return;
+        }
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String key = runKey(uuid, f.route);
+        String text = f.serialize();
+        if (!text.equals(prefs.getString(key, null))) {
+            prefs.edit().putString(key, text).apply();
+        }
+    }
+
+    /** The flashing route of a screen, or null for any other. */
+    private static FlashFlow.Route flowRoute(Route r) {
+        switch (r) {
+            case REPAIR:
+                return FlashFlow.Route.REPAIR;
+            case PROBE:
+                return FlashFlow.Route.PROBE;
+            case RESTORE:
+                return FlashFlow.Route.RESTORE;
+            default:
+                return null;
+        }
+    }
+
+    /** The flashing route a file belongs to: every Repair version and the probe their own; any other is Restore's. */
+    private static FlashFlow.Route routeOfFile(String sha) {
+        return Candidates.isRepairFile(sha) ? FlashFlow.Route.REPAIR
+                : Candidates.Kind.PROBE.matches(sha) ? FlashFlow.Route.PROBE : FlashFlow.Route.RESTORE;
+    }
+
+    /** The run of the flashing route on screen, for the saved drive; null on any other screen. */
+    private FlashFlow flow() {
+        FlashFlow.Route r = flowRoute(route);
+        return r == null ? null : runOf(treeUuid(), r);
+    }
+
+    /**
+     * What the screen knows now that is not the run's progress (FlashFlow.Live): the steps before the write, and
+     * whether a file this route writes, ready to write, is loaded that is not the one written. The gate (a SHA-256 of
+     * the file) is asked only when that answer matters.
+     */
+    private FlashFlow.Live live() {
+        FlashFlow.Live l = new FlashFlow.Live();
+        l.started = repairStarted;
+        l.backupOnRecord = backupSha256 != null;
+        l.driveReady = card != null && card.state.writable() && mounted(volume(treeUuid()));
+        FlashFlow f = flow();
+        boolean fits = fileCheck != null && fileCheck.ok && fitsRoute(fileCheck);
+        boolean other = fits && f != null && f.past() && !fileCheck.sha256.equals(f.sha());
+        boolean passes = (route == Route.RESTORE || other) && fits && gateShown(fileCheck, fileData) == null;
+        l.fileReady = route == Route.RESTORE && passes;     // Restore's file step; the others make theirs in the write step
+        l.loadedOther = other && passes;
+        return l;
+    }
+
+    /**
+     * gate() for the steps' display, kept while nothing it reads changes, since it hashes the whole file and the steps
+     * ask often. Write, Save and every write path ask gate() itself (updateButtons, confirmWrite, write, the worker).
+     */
+    private String gateShown(UpdateCheck.Result check, byte[] data) {
+        GateMemo m = gateMemo;
+        if (m == null || m.check != check || m.data != data || !Objects.equals(m.backup, backupSha256)
+                || m.loading != loadingBackup || m.checking != checking) {
+            m = new GateMemo(check, data, backupSha256, loadingBackup, checking, gate(check, data));
+            gateMemo = m;
+        }
+        return m.answer;
+    }
+
+    /** gateShown()'s last answer, and what it was worked out from. */
+    private static final class GateMemo {
+        final UpdateCheck.Result check;
+        final byte[] data;
+        final String backup;
+        final boolean loading;
+        final boolean checking;
+        final String answer;
+
+        GateMemo(UpdateCheck.Result check, byte[] data, String backup, boolean loading, boolean checking,
+                String answer) {
+            this.check = check;
+            this.data = data;
+            this.backup = backup;
+            this.loading = loading;
+            this.checking = checking;
+            this.answer = answer;
+        }
+    }
+
+    private GateMemo gateMemo;
+
+    /** Whether the saved drive's card may hold an update file, as its runs and the last listing know it. */
+    private boolean mayHoldUpdateFile(String uuid) {
+        for (FlashFlow.Route r : FlashFlow.Route.values()) {
+            if (runOf(uuid, r).mayHoldUpdateFile()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A listing of the saved drive's card: each of its runs takes in which update files it holds. */
+    private void noteListing(Card c) {
+        if (!readable(c)) {
+            return;     // a card that could not be listed says nothing about what it holds
+        }
+        String uuid = uuidOf(c.tree);
+        String[] names = new String[c.state.updateFiles.size()];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = c.state.updateFiles.get(i).name;
+        }
+        for (FlashFlow.Route r : FlashFlow.Route.values()) {
+            FlashFlow f = runOf(uuid, r);
+            f.listing(names);
+            keep(uuid, f);
+        }
+    }
+
+    /** A removal worked on the drive, started on route on: every run with a file on that card takes it in. */
+    private void noteRemoval(String uuid, Route on) {
+        for (FlashFlow.Route r : FlashFlow.Route.values()) {
+            FlashFlow f = runOf(uuid, r);
+            f.removalWorked(flowRoute(on));
+            keep(uuid, f);
+        }
+    }
+
+    /** The saved drive went: the mount a write was synced on is over (nothing kept: the synced claim never is). */
+    private void noteDriveGone(String uuid) {
+        for (FlashFlow.Route r : FlashFlow.Route.values()) {
+            runOf(uuid, r).driveLeft();
+        }
+    }
+
+    /** The saved drive was mounted anew: nothing was written on this mount yet. */
+    private void noteMount(String uuid) {
+        for (FlashFlow.Route r : FlashFlow.Route.values()) {
+            runOf(uuid, r).mountChanged();
+        }
+    }
+
+    /** A SENSOR.TXT the worker read just after a write goes into that write's run (if it is still that write). */
+    private void applySnapshot() {
+        Snapshot s = SENSOR_SNAPSHOT.getAndSet(null);
+        if (s == null) {
+            return;
+        }
+        FlashFlow f = runOf(s.uuid, s.route);
+        f.sensorRead(s.writtenAt, s.sensor);
+        keep(s.uuid, f);
+    }
+
+    /**
+     * A drive is saved but not mounted now, and no other drive is: plugging it back in is all that is needed. With
+     * another drive mounted (a different card in the camera, say) the owner may need to choose it, so Choose shows.
+     */
+    private boolean driveAway() {
+        String uuid = treeUuid();
+        return tree != null && uuid != null && !mounted(volume(uuid)) && otherDrive() == null;
+    }
+
+    /**
+     * A removable drive mounted now that is not the saved one, or null. A drive that was mounted while the saved one
+     * was mounted too (the phone's own SD card, say) is not counted: it stays put, so it is not the camera's.
+     */
+    private android.os.storage.StorageVolume otherDrive() {
+        String mine = treeUuid();
+        Set<String> standing = standingVolumes();
+        for (android.os.storage.StorageVolume v : otherMounted(mine)) {
+            if (!standing.contains(v.getUuid().toUpperCase(Locale.ROOT))) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    /** The removable drives mounted now, other than the one with this UUID, each with a UUID; empty when unknown. */
+    private List<android.os.storage.StorageVolume> otherMounted(String mine) {
+        List<android.os.storage.StorageVolume> out = new ArrayList<>();
+        try {
+            android.os.storage.StorageManager sm =
+                    (android.os.storage.StorageManager) getSystemService(STORAGE_SERVICE);
+            if (sm != null) {
+                for (android.os.storage.StorageVolume v : sm.getStorageVolumes()) {
+                    String id = v.getUuid();
+                    if (!v.isPrimary() && v.isRemovable() && mounted(v) && id != null && !id.equalsIgnoreCase(mine)) {
+                        out.add(v);
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // read as none
+        }
+        return out;
+    }
+
+    /** The UUIDs (upper case) of drives seen mounted alongside the saved drive, kept in the preferences. */
+    private Set<String> standingVolumes() {
+        Set<String> s = getSharedPreferences(PREFS, MODE_PRIVATE).getStringSet(KEY_STANDING_VOLUMES, null);
+        return s == null ? new HashSet<String>() : new HashSet<>(s);
+    }
+
+    /** The saved drive is mounted now: every other drive mounted with it is one that stays (see otherDrive). */
+    private void noteStandingVolumes(String mine) {
+        Set<String> known = standingVolumes();
+        boolean added = false;
+        for (android.os.storage.StorageVolume v : otherMounted(mine)) {
+            added |= known.add(v.getUuid().toUpperCase(Locale.ROOT));
+        }
+        if (added) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putStringSet(KEY_STANDING_VOLUMES, known).apply();
+        }
+    }
+
+    /**
+     * A volume broadcast: the saved drive mounted, ejected or pulled out. Android reports a drive "unmounted" on its
+     * way out when it is pulled out too (then "bad removal"), and on its way in: that alone is never an eject.
+     */
+    private void volumeEvent(String action, String uuid) {
+        final String mine = treeUuid();
+        if (mine != null && mine.equalsIgnoreCase(uuid)) {
+            boolean zipping = archiving();
+            if (Intent.ACTION_MEDIA_UNMOUNTED.equals(action)) {
+                final int check = ++unmountCheck;
+                // An unmount on the way out of a drive seen mounted; on the way in (just plugged in) it is not one.
+                unmountPending = false;
+                if (!zipping) {
+                    dropCard();
+                }
+                if (!busy() && !zipping) {
+                    // Only a drive seen mounted before this unmount can have been ejected (never one coming in).
+                    final boolean seen = driveSeenMounted;
+                    unmountPending = driveSeenMounted;
+                    pendingUnmount = check;
+                    // Ejected only when the drive is still attached, and still unmounted, a moment later.
+                    settleUnmount(check, seen, mine, 0);
+                }
+            } else if (Intent.ACTION_MEDIA_EJECT.equals(action)) {
+                ejectingSeen = true;
+                if (!ejectedThisMount) {      // late or out of order: never over an eject already confirmed
+                    setStatus(ejectStatus, "Ejecting…");
+                }
+            } else if (Intent.ACTION_MEDIA_BAD_REMOVAL.equals(action)) {
+                unmountCheck++;     // the unmount just before was the pull, not an eject
+                unmountPending = false;
+                ejectAsked = false;
+                // "Synced first" only on a flashing route whose run wrote its file on this mount (FlashFlow), with
+                // nothing running now; read before the run takes in the pull, which ends that mount.
+                FlashFlow f = flow();
+                boolean synced = f != null && f.syncedClaim() && !busy() && !zipping;
+                if (ejectedThisMount && android.os.SystemClock.elapsedRealtime() - ejectedAt < UNDO_EJECT_MS) {
+                    undoEject();
+                }
+                if (!zipping) {
+                    dropCard();
+                }
+                noteDriveGone(mine);
+                // The steps take in the pull first, so what to do next (and where it shows) follows the steps as
+                // they are now, never a step this pull folds.
+                updateButtons();
+                // On a flashing route the eject is advice, not a gate: say what to do next by the run's stage.
+                // Off the flashing routes: how to connect it again, in the safe order while the card may hold an update
+                // file (the drive's runs and the last listing), as the drive line says it.
+                String next = (f != null ? f.afterUnseenEject(live())
+                        : FlashFlow.unpluggedHint(mayHoldUpdateFile(mine), false)) + " Eject before you unplug next time.";
+                setStatus(ejectStatus, synced
+                        ? "The drive was unplugged before it was ejected. What was written was synced first. " + next
+                        : "The drive was unplugged before it was ejected. " + next);
+                placeEjectStatus();
+            } else if (Intent.ACTION_MEDIA_REMOVED.equals(action)) {
+                // Android reports "removed", not "bad removal", only for a drive that was no longer mounted. An unmount
+                // of a drive seen mounted, still waiting for its second look with no pull or mount since, was an eject:
+                // the cable came out within that moment.
+                boolean ejectedFirst = unmountPending && pendingUnmount == unmountCheck
+                        || ejectingSeen && !ejectedThisMount;     // Android was ejecting it when the cable came out
+                unmountPending = false;
+                unmountCheck++;     // gone: there is nothing left to look at
+                if (!zipping) {
+                    dropCard();
+                }
+                noteDriveGone(mine);
+                if (ejectedFirst && !busy() && !archiving() && mine.equalsIgnoreCase(treeUuid())) {
+                    markEjected();
+                }
+                if (ejectedThisMount) {
+                    setStatus(ejectStatus, "The drive was ejected, then unplugged.");
+                }
+                ejectingSeen = false;
+            } else if (Intent.ACTION_MEDIA_MOUNTED.equals(action)) {
+                ejectAsked = false;
+                ejectingSeen = false;
+                ejectedThisMount = false;
+                unmountPending = false;
+                unmountCheck++;
+                noteMount(mine);              // mounted anew: nothing was written on this mount yet
+                ejectStatus.setText("");
+                // A look at the card still running is superseded by this one (cardRequest).
+                if (!busy() && !zipping) {
+                    if (dialog == null) {
+                        inspectCard();
+                    } else {
+                        inspectAfterDialog = true;
+                    }
+                }
+            }
+        }
+        refreshDrive();
+        updateButtons();
+    }
+
+    /**
+     * The saved drive went (unmounted, pulled out or removed): its listing no longer holds, so Write, Remove and the
+     * card's other buttons go off until it is looked at again. A zip waiting for the listing is refused now.
+     */
+    private void dropCard() {
+        cardRequest++;
+        inspecting = false;
+        relistedFrom = null;
+        card = null;
+        TextView shown = revealAfterLook;     // the look it waited for will not come back: reveal it as things are
+        revealAfterLook = null;
+        reveal(shown);
+        cardStatus.setText("");
+        cardDetailToggle.setVisibility(View.GONE);
+        cardDetail.setVisibility(View.GONE);
+        startPendingZip();
+    }
+
+    /** A dialog went: the card is looked at now if the drive was mounted meanwhile. */
+    private void afterDialog() {
+        if (inspectAfterDialog && dialog == null && tree != null && !busy() && !archiving()) {
+            inspectCard();
+        }
+        updateButtons();
+    }
+
+    /**
+     * Eject: Android lets only the system unmount a drive. The app asks anyway (that usually does nothing), then opens
+     * the drive's own storage page, which has Eject; failing that the Files app, then the storage settings. Whether
+     * it was ejected is seen from the drive's state afterwards, never assumed.
+     */
+    private void eject() {
+        if (busy() || archiving()) {
+            return;
+        }
+        String uuid = treeUuid();
+        android.os.storage.StorageVolume v = volume(uuid);
+        if (uuid == null) {
+            setStatus(ejectStatus, "No camera drive is saved, so there is nothing to eject.");
+            return;
+        }
+        if (v == null) {
+            setStatus(ejectStatus, ejectedThisMount ? "The drive was ejected, then unplugged."
+                    : "The drive is not connected, so there is nothing to eject.");
+            return;
+        }
+        if (unmounted(v)) {
+            markEjected();
+            return;
+        }
+        if (!mounted(v)) {
+            setStatus(ejectStatus, notReady(v));
+            return;
+        }
+        Uri root = DocumentsContract.buildRootUri(EXTERNAL_STORAGE, uuid);
+        try {
+            DocumentsContract.ejectRoot(getContentResolver(), root);
+        } catch (RuntimeException ignored) {
+            // expected: the provider lets only the system eject; the pages below can
+        }
+        android.os.storage.StorageVolume after = volume(uuid);
+        if (unmounted(after)) {
+            markEjected();
+            return;
+        }
+        ejectAsked = true;
+        if (ejecting(after)) {
+            ejectingSeen = true;
+            setStatus(ejectStatus, "Ejecting…");      // the broadcast, the settle check or onResume confirms it
+            settleUnmount(++unmountCheck, true, uuid, 0);
+            return;
+        }
+        Intent page = new Intent(DOCUMENT_ROOT_SETTINGS);
+        page.setDataAndType(root, DocumentsContract.Root.MIME_TYPE_ITEM);
+        Intent files = new Intent(Intent.ACTION_VIEW);
+        files.setDataAndType(root, DocumentsContract.Root.MIME_TYPE_ITEM);
+        if (open(page)) {
+            setStatus(ejectStatus, "Tap Eject (or Unmount) on that page, then come back here.");
+        } else if (open(files)) {
+            setStatus(ejectStatus, "Tap the eject icon next to the drive in the Files app, then come back here.");
+        } else if (openStorageSettings()) {
+            setStatus(ejectStatus, "Tap the USB drive or card in the storage settings, then Eject, then come back"
+                    + " here.");
+        } else {
+            ejectAsked = false;
+            setStatus(ejectStatus, "Android opened no page to eject the drive from. Use Eject in the notification"
+                    + " Android shows for the USB drive, then come back here.");
+        }
+    }
+
+    /** Back from the eject page: say whether the drive went, from its state now. */
+    private void checkEject() {
+        if (!ejectAsked) {
+            return;
+        }
+        String uuid = treeUuid();
+        android.os.storage.StorageVolume v = volume(uuid);
+        if (v == null) {
+            ejectAsked = false;
+            noteDriveGone(uuid);
+            updateButtons();      // the steps take in the drive gone first, so the advice follows them as they are now
+            // The eject is advice, not a gate: what to do next follows the run's stage (FlashFlow), never a step that
+            // is locked; off the flashing routes there is no next step to name, only how to connect it again (in the
+            // safe order while the card may hold an update file).
+            FlashFlow f = flow();
+            setStatus(ejectStatus, ejectedThisMount ? "The drive was ejected, then unplugged."
+                    : "The drive is no longer connected; the app did not see it eject first. "
+                    + (f != null ? f.afterUnseenEject(live()) : FlashFlow.unpluggedHint(mayHoldUpdateFile(uuid), false)));
+            updateButtons();      // placed by the steps as they are, and their folded lines take in the status
+        } else if (unmounted(v)) {
+            markEjected();
+        } else if (!mounted(v)) {
+            setStatus(ejectStatus, notReady(v));
+        } else {
+            // Connected now: not ejected yet, or ejected and connected again while the app was away (it cannot tell
+            // which), so it claims neither. "Synced" only for a write this route's run made on this mount.
+            FlashFlow f = flow();
+            setStatus(ejectStatus, f != null && f.syncedClaim()
+                    ? "Written and synced; eject on the drive's page before unplugging. Tap " + q(EJECT) + " to open it"
+                    + " again."
+                    : "The drive is connected. If you have not ejected it yet, tap " + q(EJECT) + " and use Eject (or"
+                    + " Unmount) on the drive's page.");
+        }
+    }
+
+    /**
+     * The look after an unmount (or an eject Android is still doing): ejected once the drive is still attached and
+     * unmounted. While Android still reports it ejecting, it looks again each second for a while, so the result never
+     * waits for the screen to be reopened. A newer volume broadcast (unmountCheck) ends it.
+     */
+    private void settleUnmount(final int check, final boolean seen, final String mine, final int tries) {
+        ui.postDelayed(() -> {
+            if (gone() || check != unmountCheck) {
+                return;
+            }
+            android.os.storage.StorageVolume v = volume(mine);
+            if (ejecting(v) && tries < EJECTING_LOOKS) {
+                settleUnmount(check, seen, mine, tries + 1);
+                return;
+            }
+            unmountPending = false;
+            if (seen && !busy() && !archiving() && mine.equalsIgnoreCase(treeUuid()) && unmounted(v)) {
+                markEjected();
+            } else {
+                refreshDrive();
+                updateButtons();
+            }
+        }, tries == 0 ? UNMOUNT_SETTLE_MS : 1000);
+    }
+
+    private void markEjected() {
+        if (!ejectedThisMount) {
+            progressEjectedBefore = progressEjected;     // for undoEject(), should Android report a pull right after
+        }
+        ejectedAt = android.os.SystemClock.elapsedRealtime();
+        ejectAsked = false;
+        progressEjected = true;
+        ejectedThisMount = true;
+        noteEject(treeUuid());   // advice only: the runs record it, and no step waits for it
+        setStatus(ejectStatus, EJECTED);
+        refreshDrive();
+        // The steps take in the eject before the status is placed (updateButtons places it last), so it never lands
+        // in a step this eject folds.
+        updateButtons();
+        reveal(ejectStatus);
+    }
+
+    /** The saved drive was seen ejected: each of its runs records it (advice only; no step waits for an eject). */
+    private void noteEject(String uuid) {
+        for (FlashFlow.Route r : FlashFlow.Route.values()) {
+            FlashFlow f = runOf(uuid, r);
+            f.ejectSeen();
+            keep(uuid, f);
+        }
+    }
+
+    /**
+     * Where an eject's or a pull's result goes: under the Remove step's Eject once the run's Remove step holds a
+     * removal (FlashFlow.removalShown), or while the Remove step is the open one and the eject step is folded;
+     * otherwise under the eject step's Eject. So it never lands in a step that is folded or locked; a Remove step
+     * folded once it is done shows it in its folded line. It reads the steps as the last refreshSteps() left them, so
+     * updateButtons() places it again last.
+     */
+    private void placeEjectStatus() {
+        Step remove = removeStepNow;
+        Step eject = ejectStepNow;
+        FlashFlow f = flow();
+        boolean removeOpen = remove != null && remove.body.getVisibility() == View.VISIBLE;
+        boolean ejectFolded = eject != null && eject.body.getVisibility() != View.VISIBLE;
+        if (remove != null && f != null && (f.removalShown() || removeOpen && ejectFolded)) {
+            placeUnder(removeEjectButton, ejectStatus);
+        } else {
+            placeUnder(ejectButton, ejectStatus);
+        }
+    }
+
+    /** Android reported the drive pulled out just after the app said "Ejected": it was not, so that is taken back. */
+    private void undoEject() {
+        ejectedThisMount = false;
+        progressEjected = progressEjectedBefore;
+    }
+
+    // --- the flash log --------------------------------------------------------------------------------------------
+
+    /** How the log names the firmware a file carries, by its SHA-256. */
+    private static String firmwareLabel(String sha) {
+        Candidates.Kind repair = Candidates.repairVersion(sha);
+        if (repair != null) {
+            return repair.version;
+        }
+        if (Candidates.Kind.PROBE.matches(sha)) {
+            return "probe";
+        }
+        if (Candidates.Kind.RESTORE.matches(sha)) {
+            return "stock restore";
+        }
+        String[] set = Recipe.reviewed(sha) == null ? null : Recipe.selectionOf(sha).set();
+        if (set != null) {
+            return set[4];       // any other reviewed build: its set's label ("v012 + EXIF dates")
+        }
+        return "update file";
+    }
+
+    private void logFlash(FlashLog.Event event, String sha) {
+        flashLog = appendLog(this, event, sha == null ? null : firmwareLabel(sha), sha, null);
+    }
+
+    /**
+     * Adds an entry to the log kept in the preferences and returns the log. Main thread or worker: the zip and the
+     * flash check log from the worker, so a result is kept even when its screen has gone.
+     */
+    private static synchronized FlashLog appendLog(Context ctx, FlashLog.Event event, String firmware, String sha,
+            String note) {
+        android.content.SharedPreferences prefs = ctx.getSharedPreferences(PREFS, MODE_PRIVATE);
+        FlashLog log = FlashLog.parse(prefs.getString(KEY_FLASH_LOG, null));    // another screen may have added to it
+        log.add(System.currentTimeMillis(), event, firmware, sha, note);
+        prefs.edit().putString(KEY_FLASH_LOG, log.serialize()).apply();
+        return log;
+    }
+
+    private static synchronized FlashLog clearLog(Context ctx) {
+        FlashLog log = new FlashLog();
+        ctx.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_FLASH_LOG, log.serialize()).apply();
+        return log;
+    }
+
+    private FlashLog readLog() {
+        return FlashLog.parse(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_FLASH_LOG, null));
+    }
+
+    // --- routes -----------------------------------------------------------------------------------------------------
+
+    private static Route routeNamed(String name) {
+        for (Route r : Route.values()) {
+            if (r.name().equals(name)) {
+                return r;
+            }
+        }
+        return Route.HOME;
+    }
+
+    /**
+     * Opens a route. A flashing route drops a file another route asked for, so it is never written from here, and the
+     * shared result lines another route left (its write, eject, removal, sensor result) are cleared: view text only.
+     */
+    private void go(Route to) {
+        if (to != Route.BACKUP_PHOTOS) {
+            returnTo = null;
+        }
+        boolean work = to != Route.HOME && to != Route.FLASH_LOG;
+        freshRunIfStale(flowRoute(to));     // entering a flashing route: a finished run of an older file starts over
+        if (work && to != lastWorkRoute && !busy() && !archiving()) {
+            FlashFlow.Route flashing = flowRoute(to);
+            if (flashing != null && !runOf(treeUuid(), flashing).past()) {
+                writeStatus.setText("");
+                ejectStatus.setText("");
+                cleanStatus.setText("");
+            }
+            if (to != Route.PROBE && to != Route.ADVANCED) {
+                sensorStatus.setText("");
+            }
+        }
+        if (work) {
+            lastWorkRoute = to;
+        }
+        route = to;
+        if ((to == Route.REPAIR || to == Route.PROBE || to == Route.RESTORE) && fileFor != null && fileFor != to
+                && !busy()) {
+            dropFile();
+        }
+        if (checkShown && fileCheck != null) {
+            fileStatus.setText(checkLine(fileCheck, fileChosen));     // its next line is for the route now on screen
+        }
+        render();
+        scroll.scrollTo(0, 0);
+    }
+
+    /** Forgets the file in fileData (and any read or check of it still running), as a new file would. */
+    private void dropFile() {
+        dismissWriteDialog();
+        fileRequest++;
+        fileData = null;
+        fileCheck = null;
+        fileName = null;
+        fileFor = null;
+        checking = false;
+        showFile(NO_FILE, null);
+    }
+
+    /** Whether the route on screen writes this file: each flashing route only its own kind. */
+    private boolean fitsRoute(UpdateCheck.Result check) {
+        switch (route) {
+            case REPAIR:
+                return isRepair(check);
+            case PROBE:
+                return isProbe(check);
+            case RESTORE:
+                return check != null && !isProbe(check) && !isRepair(check);
+            case ADVANCED:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Builds the patch for the probe or repair route, as the old "Make" buttons did: from the dump of the pick's base
+     * (v012 the factory dump, v006 the public stock dump, v008_test its public file).
+     */
+    private void makePatch(Recipe.Selection sel) {
+        if (busy() || dialog != null || downloading) {
+            return;
+        }
+        if (Recipe.V012.equals(sel.base)) {
+            makeFactory(sel, route);
+        } else if (Recipe.V008.equals(sel.base)) {
+            downloadV008(sel, route);
+        } else {
+            downloadDump(sel, route);
+        }
+    }
+
+    /** The Repair make button's label for a pick: a preset by its version, a Custom pick by its set's label. */
+    private static String makeLabel(Recipe.Selection sel) {
+        return sel.version() != null ? "Make firmware " + sel.version() : "Make " + sel.label();
+    }
+
+    /** The dump a base's files are made from, in the write step's words. */
+    private static String dumpWords(String base) {
+        return Recipe.V012.equals(base) ? "the factory dump" : Recipe.V008.equals(base)
+                ? "build v008_test's public file" : "the public stock dump";
+    }
+
+    /** Whether the owner's factory dump is in memory or kept on the phone (checked again when it is used). */
+    private boolean haveFactoryDump() {
+        return factoryDump != null || new File(getFilesDir(), KEPT_FACTORY).isFile();
+    }
+
+    /** The newest Repair preset made from the factory dump. */
+    private static Recipe.Selection newestFactory() {
+        for (Recipe.Selection s : Recipe.presets()) {
+            if (Recipe.V012.equals(s.base)) {
+                return s;
+            }
+        }
+        throw new IllegalStateException("no factory version");
+    }
+
+    /** The preset's row in the version menu, or -1 when the pick is no preset. */
+    private static int presetIndex(Recipe.Selection sel) {
+        Recipe.Selection[] presets = Recipe.presets();
+        for (int i = 0; i < presets.length; i++) {
+            if (presets[i].equals(sel)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** The version menu's row for the pick now: its preset, or the last row (Custom). */
+    private int repairIndex() {
+        int i = presetIndex(repairSel);
+        return repairCustom || i < 0 ? Recipe.presets().length : i;
+    }
+
+    /** Keeps the Repair pick (base and mods, and whether it is Custom) in the preferences. */
+    private void rememberRepair() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_REPAIR_SET, repairSel.serialize())
+                .putBoolean(KEY_REPAIR_CUSTOM, repairCustom).apply();
+    }
+
+    /**
+     * Whether a factory dump picked for this route is made into firmware: only where a factory version is written,
+     * the Repair route and Advanced (which writes any checked file). On every other route it is only kept.
+     */
+    private static boolean buildsFactory(Route forRoute) {
+        return forRoute == Route.REPAIR || forRoute == Route.ADVANCED;
+    }
+
+    /** The file step's line for a factory dump picked on a route that does not use it: kept, and where it is used. */
+    private static String factoryKeptOnly(String fromFactory) {
+        StringBuilder versions = new StringBuilder();
+        for (Candidates.Kind k : Candidates.repairVersions()) {
+            if (k.base == Candidates.Base.FACTORY) {
+                versions.append(versions.length() == 0 ? "" : " and ").append(k.version);
+            }
+        }
+        return fromFactory + " This route does not use it: " + q(routeTitle(Route.REPAIR)) + " makes firmware "
+                + versions + " from it.";
+    }
+
+    /** What the file step says when the pick needs a dump the phone does not have: the factory dump, or v008_test's. */
+    private static String needsFactory(Recipe.Selection sel) {
+        if (Recipe.V008.equals(sel.base)) {
+            return "Firmware " + sel.name() + " is made from build v008_test's public file. " + q(makeLabel(sel))
+                    + " downloads it from GitHub.";
+        }
+        return "Firmware " + sel.name() + " is made from the factory build v012 of OV9732 cameras. "
+                + q(makeLabel(sel)) + " downloads its public cleaned copy, " + Candidates.CLEAN_FACTORY_NAME
+                + ", from GitHub. To use your own read of the chip instead (" + Candidates.FACTORY_DUMP_NAME + "), tap "
+                + q(USE_FILE) + " and choose it.";
+    }
+
+    /** The last row of the version menu, which shows the base menu and the mod boxes. */
+    private static final String CUSTOM_ROW = "Custom: pick base and mods";
+
+    /**
+     * The Repair route's version menu: the presets (newest first), then Custom. Off while anything runs
+     * (updateButtons).
+     */
+    private android.widget.Spinner versionMenu() {
+        final Recipe.Selection[] presets = Recipe.presets();
+        String[] rows = new String[presets.length + 1];
+        for (int i = 0; i < presets.length; i++) {
+            rows[i] = presets[i].kind().menuText();
+        }
+        rows[presets.length] = CUSTOM_ROW;
+        return menu(rows, "Firmware version", repairIndex(), position -> {
+            if (position == repairIndex()) {
+                return;                     // the row shown now (a Spinner reports it again when it is laid out)
+            }
+            if (position < presets.length) {
+                chooseRepair(presets[position], false);
+            } else {
+                chooseRepair(customStart(), true);
+            }
+        });
+    }
+
+    /** Custom's base menu: v012 (OV9732), v006 and v008_test (SP140A). */
+    private android.widget.Spinner baseMenu() {
+        String[] rows = new String[Recipe.BASES.length];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = baseText(Recipe.BASES[i]);
+        }
+        return menu(rows, "Base firmware", baseIndex(repairSel.base), position -> {
+            String base = Recipe.BASES[position];
+            if (!base.equals(repairSel.base)) {
+                chooseRepair(new Recipe.Selection(base), true);     // another base: none of its mods ticked yet
+            }
+        });
+    }
+
+    private static String baseText(String base) {
+        return Recipe.V012.equals(base) ? "v012 — factory build, OV9732 sensor"
+                : Recipe.V006.equals(base) ? "v006 — public build, SP140A sensor"
+                : "v008_test — later build, SP140A sensor";
+    }
+
+    private static int baseIndex(String base) {
+        int i = java.util.Arrays.asList(Recipe.BASES).indexOf(base);
+        return Math.max(0, i);
+    }
+
+    /**
+     * Where Custom starts: the pick now, or, when the Identify route found this camera's base and it is another one,
+     * that base with no mods (v006 for the v006 family, which a photo cannot tell from v008_test).
+     */
+    private Recipe.Selection customStart() {
+        Identify.Base found = identifiedBase;
+        String base = found == Identify.Base.V012 ? Recipe.V012 : found == Identify.Base.V006_FAMILY ? Recipe.V006 : null;
+        return base == null || base.equals(repairSel.base) ? repairSel : new Recipe.Selection(base);
+    }
+
+    interface Picked {
+        void at(int position);
+    }
+
+    /**
+     * A drop-down menu in the screen's own colours: the closed row and the open list both (the theme would draw the
+     * list light in dark mode).
+     */
+    private android.widget.Spinner menu(String[] rows, String what, int selected, final Picked picked) {
+        android.widget.Spinner s = new android.widget.Spinner(this, android.widget.Spinner.MODE_DROPDOWN);
+        android.widget.ArrayAdapter<String> a = new android.widget.ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, rows) {
+            @Override
+            public View getView(int position, View convert, ViewGroup parent) {
+                return menuRow(super.getView(position, convert, parent), false);
+            }
+
+            @Override
+            public View getDropDownView(int position, View convert, ViewGroup parent) {
+                return menuRow(super.getDropDownView(position, convert, parent), true);
+            }
+        };
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        s.setAdapter(a);
+        s.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(cardFill));
+        s.setBackgroundTintList(android.content.res.ColorStateList.valueOf(accent));
+        s.setContentDescription(what);
+        s.setSelection(selected, false);
+        s.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View v, int position, long id) {
+                picked.at(position);
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(8);
+        s.setLayoutParams(lp);
+        return s;
+    }
+
+    /** A row of the version menu in the screen's text colour (and, in the open list, on its card colour). */
+    private View menuRow(View row, boolean open) {
+        if (row instanceof TextView) {
+            TextView t = (TextView) row;
+            t.setTextColor(textPrimary);
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            if (open) {
+                t.setBackgroundColor(cardFill);
+                t.setPadding(dp(12), dp(12), dp(12), dp(12));
+            }
+        }
+        return row;
+    }
+
+    /**
+     * The owner picked a version in the Repair menu, a base in Custom's base menu, or ticked a mod: it is remembered,
+     * a loaded file of another pick goes (with a build of one still running), and a finished run of another pick
+     * starts over. A pick while anything runs (the menus are off then) is put back.
+     */
+    private void chooseRepair(Recipe.Selection sel, boolean custom) {
+        if (sel.equals(repairSel) && custom == repairCustom) {
+            return;
+        }
+        if (busy() || downloading || checking || dialog != null) {
+            refreshRepairChoice();          // the menus and boxes show the pick there is
+            return;
+        }
+        repairSel = sel;
+        repairCustom = custom;
+        rememberRepair();
+        if (route == Route.REPAIR && (fileCheck == null || !sel.matches(fileCheck.sha256))) {
+            dropFile();
+        }
+        freshRunIfStale(FlashFlow.Route.REPAIR);
+        render();
+        updateButtons();
+    }
+
+    /** The menus, the mod boxes, the make button and the factory-dump hint, for the pick now. */
+    private void refreshRepairChoice() {
+        repairButton.setText(makeLabel(repairSel));
+        int i = repairIndex();
+        if (repairChoice.getSelectedItemPosition() != i) {
+            repairChoice.setSelection(i, false);
+        }
+        customPanel.setVisibility(repairCustom ? View.VISIBLE : View.GONE);
+        int b = baseIndex(repairSel.base);
+        if (baseChoice.getSelectedItemPosition() != b) {
+            baseChoice.setSelection(b, false);
+        }
+        modBoxes.removeAllViews();
+        boolean idle = !busy() && !downloading && !checking;
+        boolean experimental = false;
+        for (final String mod : Recipe.mods(repairSel.base)) {
+            String clash = Recipe.conflict(repairSel, mod);
+            boolean tried = !Recipe.experimental(mod);
+            experimental |= !tried && repairSel.has(mod);
+            android.widget.CheckBox box = toggle(Recipe.title(mod) + (tried ? "" : " (experimental, not yet tried on a"
+                    + " camera)"), repairSel.has(mod));
+            box.setTag(clash);
+            box.setEnabled(idle && clash == null);
+            box.setOnCheckedChangeListener((v, on) -> chooseRepair(repairSel.with(mod, on), true));
+            modBoxes.addView(box);
+            TextView about = body(clash == null ? Recipe.description(mod)
+                    : "Cannot go with " + Recipe.title(clash) + ": untick it first. " + Recipe.description(mod));
+            about.setTextColor(textSecondary);
+            about.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            about.setPadding(dp(32), 0, 0, dp(6));
+            modBoxes.addView(about);
+        }
+        if (Recipe.mods(repairSel.base).length == 0) {
+            TextView none = body("Build " + repairSel.base + " has no mods yet.");
+            none.setTextColor(textSecondary);
+            modBoxes.addView(none);
+        }
+        // The set's own status counts too: a combination marked experimental in the recipes warns even when each of
+        // its mods alone is tested (the boxes keep their own labels).
+        boolean untried = !experimental && Recipe.untriedCombination(repairSel);
+        String problem = Recipe.problem(repairSel);
+        String warn = problem != null ? "The app will not make this: " + problem + "."
+                : repairSel.has(Recipe.PROBE_MOD) ? "The sensor-ID probe is a diagnostic: the app makes it here, and "
+                + q(routeTitle(Route.PROBE)) + " writes it."
+                : backupLine(repairSel) + (experimental ? (" Experimental: at least one ticked mod has not yet been tried"
+                + " on a camera. The file is still the reviewed one, checked byte for byte; keep the way back at hand.")
+                : untried ? " Experimental: each ticked mod has been tried on a camera, but this combination has not."
+                + " The file is still the reviewed one, checked byte for byte; keep the way back at hand." : "");
+        warn = warn.trim();
+        customWarning.setText(warn);
+        customWarning.setVisibility(repairCustom && !warn.isEmpty() ? View.VISIBLE : View.GONE);
+        boolean ask = Recipe.V012.equals(repairSel.base) && !haveFactoryDump()
+                && (fileCheck == null || !repairSel.matches(fileCheck.sha256));
+        factoryHint.setText(ask ? needsFactory(repairSel) : "");
+        factoryHint.setVisibility(ask ? View.VISIBLE : View.GONE);
+        factoryFileButton.setVisibility(ask ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * Custom's line for a pick whose firmware is not what the presets are: stock v012, stock v006 (the restore file,
+     * also on its own route) or SP140A firmware. "" for a build with mods that drives the OV9732. No pick needs a
+     * backup; the file step warns when nothing confirms what the camera runs.
+     */
+    private static String backupLine(Recipe.Selection sel) {
+        if (sel.stock() && Recipe.V012.equals(sel.base)) {
+            return "No mods ticked: this is build v012, the factory firmware of OV9732 cameras, unchanged.";
+        }
+        if (sel.stock() && Recipe.V006.equals(sel.base)) {
+            return "No mods ticked: this is build v006's stock firmware, unchanged: the stock restore file. Write it on "
+                    + q(routeTitle(Route.RESTORE)) + " (it compares the file with your backup) or, without one, on"
+                    + " Advanced.";
+        }
+        if (Recipe.drivesOv9732(sel)) {
+            return "";
+        }
+        return sel.stock() ? "No mods ticked: this is build " + sel.base + "'s stock firmware, unchanged: SP140A"
+                + " firmware." : "This is SP140A firmware: without the OV9732 port it does not drive the OV9732.";
+    }
+
+    /** The views that move between routes are made once; render() puts them into the route's steps. */
+    private void makeViews() {
+        flashAgainLink = link("Flash again: start a new run", v -> startNewRun());
+        flashAgainLink.setPadding(0, dp(6), 0, dp(6));
+        flashAgainLink.setVisibility(View.GONE);
+        backupButton = primary(BACKUP, v -> pickBackup());
+        backupStatus = body("");
+        backupDetail = mono();
+        backupDetail.setVisibility(View.GONE);
+        backupDetailToggle = detailToggle(backupDetail, "Details");
+        backupDetailToggle.setVisibility(View.GONE);
+        downloadButton = primary(DOWNLOAD, v -> downloadDump(Recipe.of(Candidates.Kind.RESTORE), route));
+        // The file the picker returns is for this route; a picker cancelled changes nothing about the file loaded now.
+        useFileButton = button(USE_FILE, v -> {
+            pendingFileFor = route;
+            pickFile();
+        });
+        downloadPageLink = linkText("Open the stock dump's download page ↗", Candidates.STOCK_DUMP_PAGE);
+        saveButton = button(SAVE, v -> saveCopy());
+        saveStatus = body("");
+        fileStatus = body("");
+        fileDetail = mono();
+        fileDetail.setVisibility(View.GONE);
+        fileDetailToggle = detailToggle(fileDetail, "Details");
+        probeButton = primary(MAKE_PROBE, v -> makePatch(Recipe.of(Candidates.Kind.PROBE)));
+        // The pick remembered as base and mods; an app before 0.28 remembered a version by its Kind name (V027, V026,
+        // V025, BRINGUP), which is moved to its set here, once.
+        android.content.SharedPreferences picked = getSharedPreferences(PREFS, MODE_PRIVATE);
+        repairSel = Recipe.remembered(picked.getString(KEY_REPAIR_SET, null), picked.getString(KEY_REPAIR_OLD, null));
+        repairCustom = picked.getBoolean(KEY_REPAIR_CUSTOM, false) || presetIndex(repairSel) < 0;
+        if (picked.contains(KEY_REPAIR_OLD)) {
+            picked.edit().remove(KEY_REPAIR_OLD).putString(KEY_REPAIR_SET, repairSel.serialize())
+                    .putBoolean(KEY_REPAIR_CUSTOM, repairCustom).apply();
+        }
+        repairButton = primary(makeLabel(repairSel), v -> makePatch(repairSel));
+        repairChoice = versionMenu();
+        customPanel = new LinearLayout(this);
+        customPanel.setOrientation(LinearLayout.VERTICAL);
+        baseChoice = baseMenu();
+        customPanel.addView(baseChoice);
+        modBoxes = new LinearLayout(this);
+        modBoxes.setOrientation(LinearLayout.VERTICAL);
+        modBoxes.setPadding(0, dp(6), 0, 0);
+        customPanel.addView(modBoxes);
+        customWarning = body("");
+        customWarning.setTextColor(warnAccent);
+        customWarning.setTypeface(Typeface.DEFAULT_BOLD);
+        customPanel.addView(customWarning);
+        factoryHint = body("");
+        factoryHint.setTextColor(textSecondary);
+        factoryFileButton = button(USE_FILE, v -> {
+            pendingFileFor = Route.REPAIR;
+            pickFile();
+        });
+        driveHint = body("");
+        chooseButton = primary(CHOOSE, v -> pickCard());
+        cardStatus = body("");
+        cardDetail = body("");
+        cardDetail.setTextColor(textSecondary);
+        cardDetail.setVisibility(View.GONE);
+        cardDetailToggle = detailToggle(cardDetail, "Details");
+        cardDetailToggle.setVisibility(View.GONE);
+        writeButton = primary(WRITE, v -> confirmWrite());
+        writeStatus = body("");
+        // Each Eject shows its result right under itself, whichever step it is in.
+        ejectButton = primary(EJECT, v -> {
+            placeUnder(v, ejectStatus);
+            eject();
+        });
+        ejectStatus = body("");
+        cleanButton = primary(REMOVE, v -> confirmClean());
+        cleanStatus = body("");
+        removeEjectButton = button(EJECT, v -> {
+            placeUnder(v, ejectStatus);
+            eject();
+        });
+        readResultButton = primary(READ_RESULT, v -> readSensorResult());
+        sensorStatus = body("");
+        updateStatus = body("");
+        final android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        fixDatesBox = toggle("Fix photo and video dates in the copies", prefs.getBoolean(KEY_FIX_DATES, true));
+        fixDatesBox.setOnCheckedChangeListener((b, on) -> prefs.edit().putBoolean(KEY_FIX_DATES, on).apply());
+        dateNamesBox = toggle("Name the copies by date and time (20261111_114931.jpg)",
+                prefs.getBoolean(KEY_DATE_NAMES, true));
+        dateNamesBox.setOnCheckedChangeListener((b, on) -> prefs.edit().putBoolean(KEY_DATE_NAMES, on).apply());
+        wipeBox = toggle("Delete them from the camera after a verified backup", false);
+        zipButton = primary(ZIP_BUTTON, v -> confirmArchive(false));
+        zipStatus = body("");
+        shotsStartStatus = body("");
+        android.widget.RadioGroup lights = new android.widget.RadioGroup(this);
+        lightingChoices = new android.widget.RadioButton[3];
+        String[] lightNames = {"Daylight", "Indoor", "Other"};
+        for (int i = 0; i < lightNames.length; i++) {
+            android.widget.RadioButton rb = new android.widget.RadioButton(this);
+            rb.setText(lightNames[i]);
+            rb.setTextColor(textPrimary);
+            rb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            rb.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));
+            // A tap, even on the light already picked, is the owner's choice; "Other" counts once its name is typed.
+            if (i < 2) {
+                rb.setOnClickListener(v -> chooseLight());
+            }
+            lights.addView(rb);
+            lightingChoices[i] = rb;
+        }
+        lightingGroup = lights;
+        otherLighting = field("Other light, e.g. sunset or LED lamp", android.text.InputType.TYPE_CLASS_TEXT);
+        lightingStatus = body("");
+        lightingStatus.setTextColor(textSecondary);
+        lightingStatus.setTextIsSelectable(false);
+        // The text field only while "Other" is picked; the line under it names the choice for the folded step.
+        lights.setOnCheckedChangeListener((g, id) -> showLighting());
+        otherLighting.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                showLighting();
+            }
+        });
+        // Typing does not fold the step away mid-word: the light counts as chosen once the typing is done.
+        otherLighting.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        otherLighting.setOnEditorActionListener((tv, actionId, event) -> {
+            if (!otherLighting.getText().toString().trim().isEmpty()) {
+                chooseLight();
+            }
+            return false;
+        });
+        otherLighting.setOnFocusChangeListener((fv, has) -> {
+            if (!has && !otherLighting.getText().toString().trim().isEmpty()) {
+                chooseLight();
+            }
+        });
+        lightingChoices[0].setChecked(true);
+        showLighting();
+        shotCount = field("Save the newest N photos instead", android.text.InputType.TYPE_CLASS_NUMBER);
+        shotCount.setVisibility(View.GONE);
+        shotCountToggle = detailToggle(shotCount, "Choose how many");
+        shotsWipeBox = toggle("Delete them from the camera after a verified save", false);
+        shotsButton = primary(SHOTS_BUTTON, v -> confirmArchive(true));
+        shotsStatus = body("");
+        checkPhotoButton = primary(CHECK_PHOTO, v -> checkPhoto());
+        checkStatus = body("");
+        identifyButton = primary(IDENTIFY_BUTTON, v -> identifyFirmware());
+        identifyStatus = body("");
+        identifyDetail = mono();
+        identifyDetail.setVisibility(View.GONE);
+        identifyDetailToggle = detailToggle(identifyDetail, "Evidence");
+        identifyDetailToggle.setVisibility(View.GONE);
+
+        driveBar = new LinearLayout(this);
+        driveBar.setOrientation(LinearLayout.HORIZONTAL);
+        driveBar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(cardFill);
+        bg.setCornerRadius(dp(10));
+        bg.setStroke(Math.max(1, dp(1)), cardStroke);
+        driveBar.setBackground(bg);
+        driveBar.setPadding(dp(12), dp(6), dp(12), dp(6));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dp(6);
+        blp.bottomMargin = dp(12);
+        driveBar.setLayoutParams(blp);
+        driveText = body("Camera drive: none chosen");
+        driveText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        driveText.setTextIsSelectable(false);
+        driveBar.addView(driveText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        driveChange = link("Change", v -> pickCard());
+        driveChange.setPadding(dp(12), dp(8), 0, dp(8));
+        driveBar.addView(driveChange);
+    }
+
+    /** Puts a view made once into this route's layout, taking it out of the one it was in. */
+    private static void attach(ViewGroup parent, View v) {
+        if (v.getParent() instanceof ViewGroup) {
+            ((ViewGroup) v.getParent()).removeView(v);
+        }
+        parent.addView(v);
+    }
+
+    /** Moves a status view right under the button in the same layout, so the button's result shows beside it. */
+    private static void placeUnder(View button, View status) {
+        if (!(button.getParent() instanceof ViewGroup)) {
+            return;
+        }
+        ViewGroup parent = (ViewGroup) button.getParent();
+        if (status.getParent() == parent && parent.indexOfChild(status) == parent.indexOfChild(button) + 1) {
+            return;
+        }
+        if (status.getParent() instanceof ViewGroup) {
+            ((ViewGroup) status.getParent()).removeView(status);
+        }
+        parent.addView(status, parent.indexOfChild(button) + 1);
+    }
+
+    /** Lays out the route on screen: its title, the drive bar and its steps, with the shared views in them. */
+    private void render() {
+        otherLighting.clearFocus();       // a focus loss inside removeAllViews would re-enter updateButtons()
+        col.removeAllViews();
+        steps.clear();
+        flashAnswerView = null;   // a flashing route's eject step makes it again
+        ejectStepNow = null;      // and its eject and remove steps
+        removeStepNow = null;
+        flashLog = readLog();     // the worker may have added to it
+        showArchive();
+        if (!checkingPhoto) {
+            setStatus(checkStatus, checkShown());     // this write's check, or "" when the last one was another's
+        }
+        setStatus(shotsStartStatus, shotsSince == 0 ? "" : "Set started " + FlashLog.when(shotsSince,
+                TimeZone.getDefault()) + ". Photos taken from then on are saved in the last step.");
+        switch (route) {
+            case BACKUP_PHOTOS:
+                renderBackupPhotos();
+                break;
+            case REPAIR:
+                renderRepair();
+                break;
+            case PROBE:
+                renderProbe();
+                break;
+            case RESTORE:
+                renderRestore();
+                break;
+            case TEST_SHOTS:
+                renderTestShots();
+                break;
+            case FLASH_LOG:
+                renderFlashLog();
+                break;
+            case ADVANCED:
+                renderAdvanced();
+                break;
+            case IDENTIFY:
+                renderIdentify();
+                break;
+            default:
+                renderHome();
+                break;
+        }
+        refreshDrive();
+        showCard();
+        updateButtons();
+    }
+
+    /** The top of every screen: "‹ Home" (not on Home), the title, one short line, and the drive bar. */
+    private void header(String title, String line) {
+        if (route != Route.HOME) {
+            final Route back = returnTo != null ? returnTo : Route.HOME;
+            TextView home = link("‹ " + (back == Route.HOME ? "Home" : "Back to " + routeTitle(back)), v -> go(back));
+            home.setPadding(0, 0, dp(12), dp(6));
+            col.addView(home);
+        }
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextColor(textPrimary);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        col.addView(t);
+        if (line != null) {
+            TextView l = body(line);
+            l.setTextColor(textSecondary);
+            l.setTextIsSelectable(false);
+            col.addView(l);
+        }
+        attach(col, driveBar);
+        if (flowRoute(route) != null) {
+            // Shown, and worded, by updateButtons from the run as it stands, so a new write hides it at once.
+            attach(col, flashAgainLink);
+        }
+    }
+
+    /** "Flash again" only while the run is finished; "Done." only once every step of the route is done. */
+    private void showFlashAgain(FlashFlow f) {
+        boolean again = f != null && FlashFlow.finished(f);
+        flashAgainLink.setVisibility(again ? View.VISIBLE : View.GONE);
+        if (again) {
+            String text = (f.view(live()).current() < 0 ? "Done. " : "") + "Flash again: start a new run";
+            if (!text.contentEquals(flashAgainLink.getText())) {
+                flashAgainLink.setText(text);
+            }
+        }
+    }
+
+    /** A route's name as its header and Home tile show it, for "‹ Back to …" and for text naming the route. */
+    private static String routeTitle(Route r) {
+        switch (r) {
+            case REPAIR:
+                return "Flash custom firmware";
+            case PROBE:
+                return "Identify the image sensor";
+            case RESTORE:
+                return "Restore stock firmware";
+            case IDENTIFY:
+                return "Identify this camera's firmware";
+            default:
+                return "Home";
+        }
+    }
+
+    /** "Back up photos first": the backup route, with a way back to this one. */
+    private void backUpFirst() {
+        returnTo = route;
+        go(Route.BACKUP_PHOTOS);
+    }
+
+    private void renderHome() {
+        header("Charmera Card", "Back up, flash and look after a Kodak Charmera from the phone.");
+        TextView fw = body("Camera firmware: " + flashLog.summary(java.util.TimeZone.getDefault()));
+        fw.setTextColor(textSecondary);
+        fw.setPadding(0, 0, 0, dp(10));
+        col.addView(fw);
+        tile("Back up photos", "Save the camera's photos and videos as a zip.", Route.BACKUP_PHOTOS);
+        tile(routeTitle(Route.IDENTIFY), "From the photos on the card. Writes nothing.", Route.IDENTIFY);
+        tile(routeTitle(Route.REPAIR), repairCustom ? "Custom: " + repairSel.label() + "."
+                : repairSel.name() + " for the OV9732 sensor.", Route.REPAIR);
+        tile(routeTitle(Route.PROBE), "Diagnostic only.", Route.PROBE);
+        tile(routeTitle(Route.RESTORE), "Needs this camera's backup.", Route.RESTORE);
+        tile("Test shots", "Shoot the colour card and save the shots.", Route.TEST_SHOTS);
+        LinearLayout links = new LinearLayout(this);
+        links.setOrientation(LinearLayout.HORIZONTAL);
+        links.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        links.addView(link("Flash log", v -> go(Route.FLASH_LOG)));
+        links.addView(dot());
+        links.addView(link("Advanced", v -> go(Route.ADVANCED)));
+        links.addView(dot());
+        links.addView(link("Check for app updates", v -> checkForUpdate()));
+        col.addView(links);
+        attach(col, updateStatus);
+        TextView footer = body("Charmera Card " + appVersion() + " · Original 2025 series only. Charge the battery"
+                + " fully before any flash.");
+        footer.setTextColor(textSecondary);
+        footer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        col.addView(footer);
+    }
+
+    /** A Home button for a route: a card with its name in bold and one short line under it. */
+    private void tile(String title, String line, final Route to) {
+        LinearLayout c = card();
+        android.graphics.drawable.Drawable bg = c.getBackground();
+        c.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(ripple), bg, null));
+        c.setClickable(true);
+        c.setOnClickListener(v -> go(to));
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextColor(accent);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        c.addView(t);
+        TextView l = body(line);
+        l.setTextColor(textSecondary);
+        l.setTextIsSelectable(false);
+        l.setPadding(0, dp(2), 0, 0);
+        c.addView(l);
+    }
+
+    private TextView dot() {
+        TextView d = body(" · ");
+        d.setTextColor(textSecondary);
+        d.setTextIsSelectable(false);
+        return d;
+    }
+
+    private void renderBackupPhotos() {
+        header("Back up photos", "Save the camera's photos and videos as a zip.");
+        Step drive = readDriveStep("1");
+        Step options = step("2", "Options", "The zip holds the photos and videos in DCIM and SPIDCIM; never the update"
+                + " file, SENSOR.TXT or other folders.");
+        options.add(fixDatesBox);
+        options.add(dateNamesBox);
+        options.add(wipeBox);
+        options.more("The camera writes dates other programs cannot read; the copies get readable ones. The card's own"
+                        + " files are never changed.",
+                "Videos get the card's file time, read in the phone's time zone; on some phones it is off by the"
+                        + " time-zone difference.",
+                "Delete removes only the camera's own JPEG photos and AVI videos whose copy in the zip read back the"
+                        + " same. Folders and other files stay.",
+                "With delete on, the zip also keeps each date-fixed file as the camera wrote it, under its name on the"
+                        + " card, in originals/.",
+                "SPIDCIM holds the photos the camera copied from its own memory, which a flash replaces.");
+        options.needs = new Step[]{drive};
+        final Step save = step("3", "Back up", "Choose a place for the zip; the app copies the files, then reads the"
+                + " zip back to check every file.");
+        save.add(zipButton);
+        save.result(zipStatus);
+        save.more("A big card takes minutes; the app keeps the screen on meanwhile. Keep the cable in until the result"
+                        + " shows.",
+                "Choose a place on the phone, not the camera's card.",
+                "Android adds (1) to the name when a file of that name exists.");
+        save.needs = new Step[]{drive};
+        // A zip running, or one whose end the owner has not seen with the drive listed, keeps the step open even with
+        // the drive away (pulled mid-zip): its result, and what to do about it, never hides behind step 1. The button
+        // stays off until the drive is listed again (updateButtons).
+        save.ready = () -> unseen(backupArchive);
+        save.done = () -> backupSaved && !archiving() && Objects.equals(backupSavedFrom, treeUuid());
+        // Folded, it still says which copies are not whole, and what was deleted from the camera, or that nothing was.
+        save.summaryText = () -> {
+            String outcome = zipStatus.getText().toString();
+            StringBuilder folded = new StringBuilder(save.resultLine());
+            for (String warning : copyWarnings(outcome)) {
+                folded.append("\n").append(warning);
+            }
+            String deleted = deleteLine(outcome);
+            return deleted == null ? folded.toString() : folded + "\n" + deleted;
+        };
+        Step eject = ejectStep("4");
+        eject.needs = new Step[]{drive};
+        // Once ejected (or while ejecting) the drive step reads "not connected"; keep this step open.
+        eject.ready = () -> progressEjected || leavingNow();
+    }
+
+    private void renderRepair() {
+        header(routeTitle(Route.REPAIR), "Firmware for the OV9732 sensor fitted in place of the SP140A."
+                + " Experimental.");
+        // Each step is numbered and shown as the route's flash run says (FlashFlow; refreshSteps).
+        Step intro = flowStep(FlashFlow.Step.INTRO, "Before you start", "Flashing replaces the photos kept in the"
+                + " camera's own memory. Photos on the SD card stay.");
+        intro.add(button("Back up photos first", v -> backUpFirst()));
+        intro.add(primary("Continue", v -> {
+            repairStarted = true;
+            updateButtons();
+        }));
+        intro.more("For an original 2025-series camera (matte body, yellow Kodak boot screen) whose sensor is an"
+                        + " OmniVision OV9732. Not sure? Identify the image sensor first.",
+                Recipe.V006.equals(repairSel.base) && repairSel.mods.isEmpty()
+                        ? repairSel.name() + " is the stock restore file: write it on " + q(routeTitle(Route.RESTORE))
+                        + " (it compares the file with your backup) or on Advanced."
+                        : "No backup is needed: the app writes only a reviewed file, checked byte for byte. If nothing"
+                        + " confirms which firmware the camera runs (a backup, or Identify), the app says so before it"
+                        + " writes.",
+                wayBack(repairSel),
+                "It may give no clean picture on the first try.",
+                "Charge the battery fully: a flash cut short leaves a camera only a chip programmer can bring back.");
+        flashDriveStep();
+        boolean factory = Recipe.V012.equals(repairSel.base);
+        Step write = flowStep(FlashFlow.Step.WRITE, "Write firmware " + repairSel.name(), "Pick the version, then"
+                + " make it: the app builds the file from " + dumpWords(repairSel.base) + ", checks it, and copies it to"
+                + " the card.");
+        write.add(repairChoice);
+        write.add(customPanel);
+        write.add(repairButton);
+        write.add(factoryHint);
+        write.add(factoryFileButton);
+        refreshRepairChoice();
+        write.result(fileStatus);
+        write.add(fileDetailToggle);
+        write.add(fileDetail);
+        write.add(writeButton);
+        write.result(writeStatus);
+        write.more(factory ? "Your factory dump stays on this phone; the app keeps a copy after you pick it once."
+                        : Recipe.V008.equals(repairSel.base)
+                        ? "Making it downloads build v008_test's public file (1.4 MB) from GitHub once, at a fixed"
+                        + " commit."
+                        : "Making it downloads the public stock dump (2 MB) from GitHub once, at a fixed commit.",
+                "The app reads the file back from the card after writing and compares it.",
+                "Nothing changes on the camera until it is switched on with the card in it.");
+        foldWrite(write);
+        flashStep();
+        removeStep();
+        Step check = flowStep(FlashFlow.Step.CHECK, "Flash check", "Take one photo with the camera, switch it off,"
+                + " reconnect, then tap " + q(CHECK_PHOTO) + ".");
+        check.add(checkPhotoButton);
+        check.result(checkStatus);
+        check.more("The app reads the newest photo taken since the write and looks at how its header is made.",
+                Recipe.expectedPhoto(repairSel) == PhotoId.Kind.FACTORY_EXIF ? "Firmware " + repairSel.name()
+                        + " writes the factory header with its own EXIF block (Make Kodak, Model Charmera), so the"
+                        + " check looks for that one."
+                        : factory ? "Firmware " + repairSel.name() + " is the factory build: its photos have the"
+                        + " factory header (no EXIF block), not the public build's, so the check looks for that one."
+                        : "The stock restore file, the probe and firmware " + repairSel.name() + " all write the"
+                        + " same header: a match shows the camera runs one of them, not which.",
+                "It cannot see the picture: a black or frozen photo passes too. Open the photo and look at it.",
+                "When the app did not list the card at the write (or was restarted since), it picks the photo by its"
+                        + " time, which comes from the camera's clock.");
+    }
+
+    /** The Repair intro's way back from a pick, in the words that fit its base and mods. */
+    private static String wayBack(Recipe.Selection sel) {
+        String step = "step " + FlashFlow.number(FlashFlow.Route.REPAIR, FlashFlow.Step.WRITE);
+        if (sel.mods.isEmpty()) {
+            // a stock pick is itself what the camera's mods are undone with
+            return Recipe.V012.equals(sel.base) ? sel.name() + " is the factory firmware of OV9732 cameras, unchanged:"
+                    + " it is the way back from every v012 version."
+                    : Recipe.V006.equals(sel.base) ? sel.name() + " is the stock restore file itself."
+                    : sel.name() + " is build v008_test unchanged; to go back from it, write the firmware this camera"
+                    + " ran before, with this camera's backup.";
+        }
+        if (Recipe.V012.equals(sel.base)) {
+            return "To go back, write the firmware the camera ran before: an older version, or stock v012 (the factory"
+                    + " firmware: " + q(CUSTOM_ROW) + ", base v012, no mods), in " + step + ".";
+        }
+        if (Recipe.V008.equals(sel.base)) {
+            return "To go back from " + sel.name() + ", write the firmware this camera ran before, with this"
+                    + " camera's backup: the stock restore file (" + q(routeTitle(Route.RESTORE)) + ") when the backup,"
+                    + " read before the camera was ever flashed, shows the public build.";
+        }
+        if (sel.has(Recipe.OV9732_PORT) && sel.mods.size() > 1) {
+            return "To go back from " + sel.name() + ", write v0.23's file: the app makes it here too (" + q(CUSTOM_ROW)
+                    + ", base v006, OV9732 port only).";
+        }
+        if (sel.has(Recipe.OV9732_PORT)) {
+            return "To go back from " + sel.name() + ", pick another OV9732 version in " + step + " and write it.";
+        }
+        return "To go back from " + sel.name() + ", write the stock restore file (" + q(routeTitle(Route.RESTORE))
+                + "), with this camera's backup.";
+    }
+
+    private void renderProbe() {
+        header(routeTitle(Route.PROBE), "Diagnostic only: it does not repair the camera.");
+        photosNote();
+        flashDriveStep();
+        Step write = flowStep(FlashFlow.Step.WRITE, "Write the sensor-ID probe", "The app makes the probe from the"
+                + " public stock dump, checks it, and copies it to the card.");
+        write.add(probeButton);
+        write.result(fileStatus);
+        write.add(fileDetailToggle);
+        write.add(fileDetail);
+        write.add(writeButton);
+        write.result(writeStatus);
+        write.more("When the camera next opens photo mode, the probe scans the sensor bus, writes SENSOR.TXT to the"
+                        + " card, and stops as it does now.",
+                "No backup of the camera is needed: the app writes only the reviewed file, checked byte for byte.",
+                "It changes no boot or update code; the stock restore file reverses it.");
+        foldWrite(write);
+        flashStep();
+        removeStep();
+        Step read = flowStep(FlashFlow.Step.READ, "Read the result", "Power the camera on, open photo mode once,"
+                + " switch it off, then reconnect.");
+        read.add(readResultButton);
+        read.result(sensorStatus);
+        read.more("While the update file is on the card the camera re-flashes it instead of running it, so remove it"
+                + " first.");
+    }
+
+    private void renderRestore() {
+        header(routeTitle(Route.RESTORE), null);
+        col.addView(caution("This route compares the restore file with this camera's backup. Original 2025 series only:"
+                + " never a Millennium (blue boot screen) or CLOT edition."));
+        photosNote();
+        // Each step is numbered and shown as the route's flash run says (FlashFlow; refreshSteps). Before the write the
+        // backup, the file and the drive steps follow what is on record now; once the file is on the card they are
+        // behind the owner (a backup changed before the flash starts the run over: FlashFlow.backupChanged).
+        Step backupStep = flowStep(FlashFlow.Step.BACKUP, BACKUP, "The 2 MB dump read from this camera's flash chip"
+                + " with a clip and a 3.3 V programmer.");
+        backupStep.add(backupButton);
+        backupStep.result(backupStatus);
+        backupStep.add(backupDetailToggle);
+        backupStep.add(backupDetail);
+        backupStep.more("The stock restore file is only for a camera whose backup, read before the camera was ever"
+                        + " flashed, shows the public build.",
+                "Several owners report working cameras after flashing it; what their cameras ran before is not known.",
+                "The app refuses the public dumps and any read named unverified-read. A camera that stopped taking"
+                        + " pictures after a flash needs the donor route on a computer (docs/02-RECOVERY.md, D).",
+                "It cannot tell which camera a dump came from, and a dump read after a flash shows what was flashed:"
+                        + " use this camera's read from before.",
+                "Keep the backup file somewhere safe: it is the only way back to what the camera runs now.");
+        // Folded once the file is on the card, these two say what the run knows when the screen no longer has the
+        // backup or the file it wrote (a restart, or another file loaded since).
+        backupStep.summaryText = () -> {
+            FlashFlow f = flow();
+            return backupSha256 == null && f != null && f.past() ? "No backup on record now; the update file was"
+                    + " checked against the one on record then." : backupStep.resultLine();
+        };
+        Step file = flowStep(FlashFlow.Step.FILE, "Get the stock restore file", "The app downloads the public 2 MB"
+                + " dump, makes the restore file from it, and checks it against your backup.");
+        file.add(downloadButton);
+        file.add(useFileButton);
+        file.result(fileStatus);
+        file.add(fileDetailToggle);
+        file.add(fileDetail);
+        file.add(downloadPageLink);
+        file.more("Have the file already? Tap " + q(USE_FILE) + ".",
+                "Card in the phone's own slot on Android 11 or later: use Advanced, " + q(SAVE) + ".");
+        file.summaryText = () -> {
+            FlashFlow f = flow();
+            if (f == null || !f.past() || fileCheck != null && fileCheck.sha256.equals(f.sha())) {
+                return file.resultLine();
+            }
+            return fileCheck == null ? f.writeLine() : "On the card: " + f.cardName() + ". The file loaded now is"
+                    + " another one.";
+        };
+        flashDriveStep();          // one current step at a time: backup, file, then the drive
+        Step write = flowStep(FlashFlow.Step.WRITE, "Write to the card", "The app copies the file to the card's top"
+                + " folder and reads it back.");
+        write.add(writeButton);
+        write.result(writeStatus);
+        // With another file loaded that passes, it is that one's write next (FlashFlow: Live.loadedOther).
+        foldWrite(write);
+        flashStep();
+        removeStep();
+    }
+
+    /**
+     * The Identify route: what the photos on the card say about the firmware that took them, and what
+     * the owner can see on the camera. No flash run, no backup and no file: it reads the photos' headers and writes
+     * nothing, to the card or to any run.
+     */
+    private void renderIdentify() {
+        header(routeTitle(Route.IDENTIFY), "From the photos on the card and what the camera shows. Writes nothing.");
+        Step drive = readDriveStep("1");
+        Step look = step("2", "Read the photos", "The app reads the start of each photo on the card and looks at how its"
+                + " header is made.");
+        look.add(identifyButton);
+        look.result(identifyStatus);
+        look.add(identifyDetailToggle);
+        look.add(identifyDetail);
+        look.more("Nothing is written: not to the card, not to the flash log, not to a flash run.",
+                "Only photos in DCIM are read, at most " + Identify.SCAN_CAP + ", and only up to the start of the"
+                        + " picture. Videos are counted, not read.",
+                "Photos copied from another camera or edited on a computer may not be recognised; they are counted and"
+                        + " left out.",
+                "Open a photo and look at it too: a black or frozen picture has the same header.");
+        look.needs = new Step[]{drive};
+        Step ask = step("3", "Look at the camera", "Three things you can check on the camera itself.");
+        ask.body.addView(body("1. Setup menu: are there Volume and LED rows after FORMAT? Then one of our mods (v0.24"
+                + " or later) is installed. Without them it is a build without our menu rows: stock, or our v0.21 to"
+                + " v0.23.\n"
+                + "2. Does Photo or Video mode freeze after a flash? Then that firmware does not drive this camera's"
+                + " sensor: it is a build for the other sensor family.\n"
+                + "3. Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells nothing."));
+        ask.more("None of these needs the card or the app.",
+                "A freeze points at the firmware flashed last, not at the camera: photos from before that flash say"
+                        + " what fits.");
+        showIdentify();
+    }
+
+    private void renderTestShots() {
+        header("Test shots", "Shoot the same colour card after each flash, so the shots compare.");
+        Step card = step("1", "Show the colour card", "Hold the phone flat in front of the camera, or use a printed"
+                + " card.");
+        card.add(primary("Show the colour card", v -> {
+            startShots();
+            if (!open(new Intent(this, CalibrationActivity.class))) {
+                android.widget.Toast.makeText(this, "The colour card did not open.",
+                        android.widget.Toast.LENGTH_LONG).show();
+            }
+        }));
+        card.add(button("Use a printed card", v -> startShots()));
+        card.result(shotsStartStatus);
+        card.more("Take 3 shots per light.", "Wait 5 seconds between shots.", "Cover the camera's flash.",
+                "Turn off auto-brightness and night light on the phone.",
+                "Tapping either button starts a new set: only photos taken after it are saved.");
+        card.done = () -> shotsSince != 0;
+        Step light = step("2", "Lighting", "The light the shots were taken in; it goes in the zip's name.");
+        light.add(lightingGroup);
+        light.add(otherLighting);
+        light.result(lightingStatus);
+        light.needs = new Step[]{card};
+        light.done = () -> shotsSince != 0 && lightChosen;
+        Step drive = readDriveStep("3");
+        drive.needs = new Step[]{card};
+        Step save = step("4", SHOTS_BUTTON, "The app zips the photos taken since step 1, with a manifest.txt that lists"
+                + " them.");
+        save.add(shotCountToggle);
+        save.add(shotCount);
+        if (!shotCount.getText().toString().trim().isEmpty()) {
+            shotCount.setVisibility(View.VISIBLE);       // a count typed before stays in sight
+            shotCountToggle.setText("\u25be Choose how many");
+        }
+        save.add(shotsWipeBox);
+        save.add(shotsButton);
+        save.result(shotsStatus);
+        save.more("The zip is named Charmera-<firmware>-<lighting>-<date>.zip; the firmware comes from the flash log.",
+                "No new photos found? Tap \"Choose how many\" and type how many of the newest photos to save.",
+                "The photos are saved exactly as the camera wrote them; their dates are not changed.",
+                "Delete removes only photos whose copy in the zip read back the same.");
+        save.needs = new Step[]{card, drive};
+        save.ready = () -> unseen(shotsArchive);      // as on Back up photos: a pull mid-zip never hides the result
+    }
+
+    private void renderFlashLog() {
+        header("Flash log", "What the app wrote, and what you told it. It is not proof of what the camera runs.");
+        TextView now = body("Camera firmware: " + flashLog.summary(TimeZone.getDefault()));
+        now.setPadding(0, 0, 0, dp(10));
+        col.addView(now);
+        List<FlashLog.Entry> entries = flashLog.entries();
+        if (entries.isEmpty()) {
+            TextView none = body("Nothing logged yet.");
+            none.setTextColor(textSecondary);
+            col.addView(none);
+            return;
+        }
+        LinearLayout list = card();
+        for (FlashLog.Entry e : entries) {
+            StringBuilder sb = new StringBuilder(FlashLog.when(e.timeMs, TimeZone.getDefault())).append(" · ")
+                    .append(e.event.label);
+            if (!e.firmware.isEmpty()) {
+                sb.append(" · ").append(e.firmware);
+            }
+            TextView row = body(sb.toString());
+            row.setTypeface(Typeface.DEFAULT_BOLD);
+            list.addView(row);
+            String sub = (e.sha256Prefix.isEmpty() ? "" : "SHA-256 " + e.sha256Prefix + "…")
+                    + (!e.sha256Prefix.isEmpty() && !e.note.isEmpty() ? " · " : "") + e.note;
+            if (!sub.isEmpty()) {
+                TextView s = body(sub);
+                s.setTextColor(textSecondary);
+                s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                s.setPadding(0, 0, 0, dp(6));
+                list.addView(s);
+            }
+        }
+        col.addView(button("Clear log", v -> confirmClearLog()));
+    }
+
+    private void confirmClearLog() {
         if (dialog != null) {
             return;
         }
         AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle(message)
-                .setMessage("Now eject the drive, before you unplug the cable or take the card out. Ejecting makes sure"
-                        + " everything written reaches the card.\n"
-                        + "Android does not let apps eject a drive, so " + q(OPEN_SETTINGS) + " opens Android's storage"
-                        + " settings. Tap the USB drive or card there, then \"Eject\". Or tap \"Eject\" in the"
-                        + " notification Android shows for the USB drive.\n\n" + next)
-                .setPositiveButton(OPEN_SETTINGS, (di, w) -> openStorageSettings())
-                .setNegativeButton("Later", null)
+                .setTitle("Clear the flash log?")
+                .setMessage("The app forgets every entry: what it wrote, and what you told it. This cannot be undone.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear", (di, w) -> {
+                    flashLog = clearLog(this);
+                    render();
+                })
                 .create();
         d.setOnDismissListener(di -> {
             if (dialog == di) {
                 dialog = null;
             }
             if (!gone()) {
-                updateButtons();
+                afterDialog();
             }
         });
         dialog = d;
         d.show();
         updateButtons();
+    }
+
+    private void renderAdvanced() {
+        header("Advanced", "Every tool on one page, for any update file the app checks.");
+        Step backupStep = step("1", "This camera's backup", "Needed for any file except the reviewed probe and"
+                + " the reviewed OV9732 builds.");
+        backupStep.add(backupButton);
+        backupStep.result(backupStatus);
+        backupStep.add(backupDetailToggle);
+        backupStep.add(backupDetail);
+        Step file = step("2", "Update file", null);
+        file.add(downloadButton);
+        file.add(useFileButton);
+        file.result(fileStatus);
+        file.add(fileDetailToggle);
+        file.add(fileDetail);
+        file.add(saveButton);
+        file.result(saveStatus);
+        file.add(downloadPageLink);
+        file.more("Android 11 or later with the card in the phone's own slot: save a copy, copy it onto the card's top"
+                + " folder with the Files app, then tap " + q(USE_FILE) + " and choose the copy to have it checked.");
+        Step advDrive = driveStep("3");
+        Step write = step("4", "Write to the card", null);
+        write.add(writeButton);
+        write.result(writeStatus);
+        Step advEject = ejectStep("5");
+        advEject.needs = new Step[]{advDrive};
+        advEject.ready = () -> progressEjected || leavingNow();
+        Step remove = step("6", "Remove update files", null);
+        remove.add(cleanButton);
+        remove.result(cleanStatus);
+        Step read = step("7", "Read the sensor result", null);
+        read.add(readResultButton);
+        read.result(sensorStatus);
+        Step app = step("8", "App update", "Charmera Card " + appVersion() + ".");
+        app.add(button("Check for app updates", v -> checkForUpdate()));
+        app.result(updateStatus);
+        app.add(linkText("Open the releases page ↗", RELEASES_PAGE));
+    }
+
+    /** Before a flashing route without its own "Before you start": the photos in the camera's memory go. */
+    private void photosNote() {
+        LinearLayout c = card();
+        TextView t = body("Flashing replaces the photos kept in the camera's own memory. Photos on the SD card stay.");
+        t.setTextIsSelectable(false);
+        c.addView(t);
+        c.addView(button("Back up photos first", v -> backUpFirst()));
+    }
+
+    /** The camera drive step: the warning about plugging in, the saved drive's state, and Choose. */
+    private Step driveStep(String number) {
+        Step s = step(number, "Camera drive", null);
+        s.body.addView(caution("Never plug the cable into a switched-off camera: it turns on and flashes any update"
+                + " file on the card."));
+        s.add(driveHint);
+        s.add(chooseButton);
+        s.result(cardStatus);
+        s.add(cardDetailToggle);
+        s.add(cardDetail);
+        s.more("Connect in this order: camera off, card out; switch on with the power key and wait 10 seconds; card"
+                        + " in; then the USB-C data cable.",
+                "Choose the drive's top folder (\"Use this folder\"), not DCIM.",
+                "A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10.",
+                "Drive not showing? Some USB-C cables only charge. Android may offer to format a card the camera"
+                        + " has used: that erases it, so copy the photos off first (docs/05-CARDS.md).");
+        s.done = () -> card != null && card.state.writable() && mounted(volume(treeUuid()));
+        return s;
+    }
+
+    /** The camera drive step of a route that only reads the card (and deletes photos): listed is enough. */
+    private Step readDriveStep(String number) {
+        Step s = driveStep(number);
+        s.done = () -> (readable(card) || relisting()) && mounted(volume(treeUuid()));
+        return s;
+    }
+
+    /** The drive, listed before, is being listed again: same drive, nothing pulled or unmounted since (dropCard). */
+    private boolean relisting() {
+        Card before = relistedFrom;
+        return inspecting && card == null && readable(before) && tree != null && tree.equals(before.tree);
+    }
+
+    /** The saved drive is attached but not mounted: ejecting, or ejected and not yet seen as such. */
+    private boolean leavingNow() {
+        android.os.storage.StorageVolume v = volume(treeUuid());
+        return v != null && !mounted(v);
+    }
+
+    /** The card was listed, so its photos can be read. A low-space or stale-update-file note does not matter here. */
+    private static boolean readable(Card c) {
+        return c != null && c.state.listed && c.root != null;
+    }
+
+    /** The Eject step of a route that writes no update file (Back up photos, Advanced). */
+    private Step ejectStep(String number) {
+        Step s = step(number, "Eject", "Eject before you unplug, so everything written reaches the card.");
+        s.add(ejectButton);
+        s.result(ejectStatus);
+        return s;
+    }
+
+    /** A flashing route's step, numbered as FlashFlow numbers it for the route and shown as its run says. */
+    private Step flowStep(FlashFlow.Step kind, String title, String line) {
+        Step s = step(String.valueOf(FlashFlow.number(flowRoute(route), kind)), title, line);
+        s.kind = kind;
+        return s;
+    }
+
+    /**
+     * A flashing route's drive step. Once the file is on the card it stays done (FlashFlow): an unplugged drive only
+     * turns the card's buttons off, and the folded line then says what the drive line says (flash as the flash step
+     * says, or how to connect the camera, in the safe order while an update file may be on the card).
+     */
+    private Step flashDriveStep() {
+        Step s = driveStep(String.valueOf(FlashFlow.number(flowRoute(route), FlashFlow.Step.DRIVE)));
+        s.kind = FlashFlow.Step.DRIVE;
+        s.summaryText = () -> driveHint.length() > 0 ? driveHint.getText().toString() : s.resultLine();
+        return s;
+    }
+
+    /** A flashing route's write step folded: its result, or once that is off screen what the run wrote or found. */
+    private void foldWrite(final Step write) {
+        write.summaryText = () -> {
+            FlashFlow f = flow();
+            return writeStatus.length() == 0 && f != null && f.past() ? f.writeLine() : write.resultLine();
+        };
+    }
+
+    /**
+     * Eject, then what to do on the camera, and the flash question. The eject is advice, not a gate: the write was
+     * synced (writeFully), so the answer counts whether or not the app saw an eject. Done once "Upgrade 100%" was seen
+     * or the update file is removed; after "not seen" it stays open, its More info in sight (FlashFlow).
+     */
+    private Step flashStep() {
+        final Step s = flowStep(FlashFlow.Step.FLASH, "Eject, then flash", "Eject before you unplug, so everything"
+                + " written reaches the card.");
+        s.add(ejectButton);
+        s.result(ejectStatus);
+        TextView how = body("1. Unplug the cable.\n"
+                + "2. Switch the camera on with the card in it.\n"
+                + "3. Wait for \"Upgrade 100%\" (15 to 20 seconds). Touch nothing until then.\n"
+                + "4. Hold the power key 1 second to switch it off.");
+        s.body.addView(how);
+        flashQuestion(s);
+        s.more("No \"Upgrade\" screen: the camera did not find the file. Camera off, card out; switch it on and wait 10"
+                        + " seconds; card in; then connect, and check the card holds it.",
+                "\"Program error\": the camera found the file damaged and ignored it; nothing was erased."
+                        + " Remove the file and write it again.",
+                "At 100% the camera stays on that screen. It does not delete the update file.");
+        s.summaryText = () -> {
+            FlashFlow f = flow();
+            return f == null ? s.resultLine() : f.flashSummary(live());
+        };
+        ejectStepNow = s;
+        return s;
+    }
+
+    /** "Did the camera show Upgrade 100%?" under the flash instructions; the answer goes to the flash log. */
+    private void flashQuestion(Step s) {
+        TextView ask = body("Did the camera show \"Upgrade 100%\"?");
+        ask.setTypeface(Typeface.DEFAULT_BOLD);
+        ask.setTextIsSelectable(false);
+        s.body.addView(ask);
+        final TextView answer = body("");
+        flashAnswerView = answer;     // its line is the run's (updateButtons), so a new write clears it too
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        Button yes = button("Yes", v -> answerFlash(true));
+        Button no = button("No / something else", v -> answerFlash(false));
+        row.addView(yes, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(no, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        s.body.addView(row);
+        s.body.addView(answer);
+        s.results.add(answer);
+    }
+
+    /** The owner's answer: logged, and the run moves on to it whether or not an eject was seen (FlashFlow.answered). */
+    private void answerFlash(boolean seen) {
+        String uuid = treeUuid();
+        FlashFlow f = flow();
+        if (f == null || !f.past()) {
+            return;     // nothing written this run: there was nothing to flash
+        }
+        flashLog = appendLog(this, seen ? FlashLog.Event.FLASH_SEEN : FlashLog.Event.FLASH_NOT_SEEN,
+                f.firmware().isEmpty() ? null : f.firmware(), f.sha(), null);
+        f.answered(seen);
+        keep(uuid, f);
+        ejectStatus.setText("");          // what it said ("flash now, answer below") is done with; never carry it on
+        updateButtons();
+        reveal(flashAnswerView);
+    }
+
+    /**
+     * Remove the update file after the flash. It opens as the run says (FlashFlow.removeAvailable): once the flash
+     * question is answered; at once when the write found the file there already, when the card holds another update
+     * file, or another file that this route writes is loaded; before any write whenever the card holds one. It is done
+     * once a listing after the removal finds no update file, and stays done until a listing finds one again.
+     */
+    private Step removeStep() {
+        final Step s = flowStep(FlashFlow.Step.REMOVE, "Remove the update file", "The camera re-flashes on every"
+                + " power-on while the file is on the card.");
+        s.body.addView(body("1. Card out; camera on with the power key; wait 10 seconds.\n"
+                + "2. Card in, then connect.\n"
+                + "3. Tap " + q(REMOVE) + ", then eject the drive."));
+        s.add(cleanButton);
+        s.result(cleanStatus);
+        // Eject again from here: the eject step above is done and folded away by now.
+        s.add(removeEjectButton);
+        s.more("No phone needed: with the camera off, take the card out, switch the camera on, put the card in, then"
+                        + " format the card in the camera. That erases everything on the card, the update file too, so"
+                        + " back up the photos first.",
+                "The next time the app reads the card and finds no update file, this step counts as done.");
+        FlashFlow f = flow();
+        if (f != null && f.removalShown()) {
+            attach(s.body, ejectStatus);
+        }
+        // Folded once done: the removal's result (or, once that is off screen, what the card lists), and the eject's
+        // result placed under its Eject.
+        s.summaryText = () -> {
+            FlashFlow now = flow();
+            String line = cleanStatus.length() == 0 && now != null ? now.removeLine() : s.resultLine();
+            String ejected = ejectStatus.getParent() == s.body ? ejectStatus.getText().toString().trim() : "";
+            return ejected.isEmpty() ? line : line + "\n" + ejected;
+        };
+        removeStepNow = s;
+        return s;
+    }
+
+    // --- photos on the card: listing, zip backup, test shots, flash check -------------------------------------------
+
+    /** A photo or video in the card's DCIM or SPIDCIM folder. */
+    private static final class Media {
+        final String docId;
+        /** Its path from the card's top folder, e.g. "DCIM/PICT0001.jpg"; the zip entry's name. */
+        final String path;
+        final long size;
+        final long mtime;
+        final boolean video;
+        final Uri uri;
+
+        Media(String docId, String path, long size, long mtime, boolean video, Uri uri) {
+            this.docId = docId;
+            this.path = path;
+            this.size = size;
+            this.mtime = mtime;
+            this.video = video;
+            this.uri = uri;
+        }
+
+        boolean inDcim() {
+            return path.regionMatches(true, 0, "DCIM/", 0, 5);
+        }
+    }
+
+    /** One row of a folder listing. */
+    private static final class Row {
+        final String id;
+        final String name;
+        final String mime;
+        final long size;
+        final long mtime;
+
+        Row(String id, String name, String mime, long size, long mtime) {
+            this.id = id;
+            this.name = name;
+            this.mime = mime;
+            this.size = size;
+            this.mtime = mtime;
+        }
+    }
+
+    /** What one file put into the zip: the CRC and length of the bytes written, and how much of the card file read. */
+    private static final class Copied {
+        long crc;
+        long length;
+        long read;
+        boolean fixed;
+        /** The name it has in the zip. */
+        String entry;
+        /** The file is the camera's own (a Charmera JPEG or an AVI), so a verified copy may be deleted. */
+        boolean camera;
+    }
+
+    /**
+     * The photos and videos in DCIM (and SPIDCIM when asked), sorted by path. Worker only. Only files ending .jpg,
+     * .jpeg or .avi (any case) inside those folders: never a folder, an update file, SENSOR.TXT or anything in the top
+     * folder. A drive that does not answer throws, so it is never read as one without photos.
+     */
+    private List<Media> listMedia(Uri t, boolean spidcim) throws IOException {
+        String rootId = DocumentsContract.getTreeDocumentId(t);
+        List<Media> out = new ArrayList<>();
+        for (Row r : children(t, rootId)) {
+            if (r.id == null || r.name == null || !DocumentsContract.Document.MIME_TYPE_DIR.equals(r.mime)) {
+                continue;
+            }
+            if (r.name.equalsIgnoreCase("DCIM") || spidcim && r.name.equalsIgnoreCase("SPIDCIM")) {
+                collect(t, r.id, r.name + "/", out, 0);
+            }
+        }
+        Collections.sort(out, (a, b) -> a.path.compareToIgnoreCase(b.path));
+        return out;
+    }
+
+    private void collect(Uri t, String dirId, String prefix, List<Media> out, int depth) throws IOException {
+        for (Row r : children(t, dirId)) {
+            if (r.id == null || r.name == null) {
+                continue;
+            }
+            if (DocumentsContract.Document.MIME_TYPE_DIR.equals(r.mime)) {
+                if (depth < 3) {
+                    collect(t, r.id, prefix + r.name + "/", out, depth + 1);
+                }
+                continue;
+            }
+            String lower = r.name.toLowerCase(Locale.ROOT);
+            boolean video = lower.endsWith(".avi");
+            if (lower.startsWith("._") || !(video || lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) {
+                continue;
+            }
+            out.add(new Media(r.id, prefix + r.name, r.size, r.mtime, video,
+                    DocumentsContract.buildDocumentUriUsingTree(t, r.id)));
+        }
+    }
+
+    private List<Row> children(Uri t, String docId) throws IOException {
+        Uri u = DocumentsContract.buildChildDocumentsUriUsingTree(t, docId);
+        List<Row> rows = new ArrayList<>();
+        try (Cursor q = getContentResolver().query(u, new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED},
+                null, null, null)) {
+            if (q == null) {
+                throw new Plain("the drive did not answer; the cable or card may have come loose");
+            }
+            while (q.moveToNext()) {
+                rows.add(new Row(q.getString(0), q.getString(1), q.getString(2), q.isNull(3) ? -1 : q.getLong(3),
+                        q.isNull(4) ? 0 : q.getLong(4)));
+            }
+        }
+        return rows;
+    }
+
+    /** Up to max bytes from in (fewer at its end). */
+    private static byte[] readUpTo(InputStream in, int max) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(max, 512 * 1024));
+        byte[] buf = new byte[64 * 1024];
+        while (out.size() < max) {
+            int n = in.read(buf, 0, Math.min(buf.length, max - out.size()));
+            if (n < 0) {
+                break;
+            }
+            out.write(buf, 0, n);
+        }
+        return out.toByteArray();
+    }
+
+    /**
+     * Just after a write (or the same file found on the card), on the worker: the SENSOR.TXT on the card now, which
+     * goes into that write's run (applySnapshot) and so survives a restart, since a result read later that is still
+     * this file is not news; and the IDs of the card's DCIM photos, what predates the flash, for the flash check. Each
+     * is left unknown when the card cannot be read now.
+     */
+    private void snapshotAtWrite(final String uuid, final FlashFlow.Route r, final long writtenAt) {
+        final Uri t = tree;
+        dcimAtWrite = null;
+        dcimAtWriteFor = null;
+        if (t == null || uuid == null) {
+            return;
+        }
+        final String id = runId(uuid, r, writtenAt);
+        WORKER.execute(() -> {
+            String sensor;
+            try {
+                long[] modified = {0};
+                byte[] b = readCardFile(t, "SENSOR.TXT", modified);
+                sensor = sensorIdentity(b, modified[0]);
+            } catch (RuntimeException e) {
+                sensor = null;   // not read: no file is called unchanged, and a read later says the app cannot tell
+            }
+            SENSOR_SNAPSHOT.set(new Snapshot(uuid, r, writtenAt, sensor));
+            ui.post(() -> {
+                if (gone()) {
+                    MainActivity s = screen;      // this screen has gone: the one open now takes it in
+                    if (s != null && s != this && !s.gone()) {
+                        s.applySnapshot();
+                    }
+                    return;
+                }
+                applySnapshot();
+            });
+            Set<String> ids = new HashSet<>();
+            try {
+                for (Media m : listMedia(t, false)) {
+                    ids.add(m.docId);
+                }
+            } catch (IOException | RuntimeException e) {
+                return;     // not connected now: the photos are picked by their time instead
+            }
+            dcimAtWrite = ids;
+            dcimAtWriteFor = id;
+        });
+    }
+
+    /** Lists the card's DCIM photos on the worker when a test-shot set begins; left null when it cannot be listed. */
+    private void snapshotShots() {
+        final Uri t = tree;
+        final long since = shotsSince;
+        final Context app = getApplicationContext();
+        shotsBefore = null;
+        if (t == null) {
+            return;
+        }
+        WORKER.execute(() -> {
+            Set<String> ids = new HashSet<>();
+            try {
+                for (Media m : listMedia(t, false)) {
+                    ids.add(m.docId);
+                }
+            } catch (IOException | RuntimeException e) {
+                return;     // not connected now: the photos are picked by their time instead
+            }
+            if (since == shotsSince) {      // not a set begun again meanwhile
+                shotsBefore = ids;
+                app.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putStringSet(KEY_SHOTS_BEFORE, ids)
+                        .putLong(KEY_SHOTS_BEFORE_FOR, since).apply();
+            }
+        });
+    }
+
+    /** Step 1 of the test shots: a new set begins now. Its start is kept in the preferences too. */
+    private void startShots() {
+        shotsSince = System.currentTimeMillis();
+        lightChosen = false;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong(KEY_SHOTS_SINCE, shotsSince)
+                .remove(KEY_SHOTS_BEFORE).remove(KEY_SHOTS_BEFORE_FOR).remove(KEY_LIGHT_FOR).apply();
+        if (readable(card) && !busy() && !archiving()) {
+            snapshotShots();
+        } else {
+            shotsBefore = null;
+        }
+        if (!archiving()) {
+            // The previous set's "Saved … / Deleted …" is not about this set; a backup's result stays.
+            shotsArchive = null;
+            shotsStatus.setText("");
+        }
+        setStatus(shotsStartStatus, "Set started " + FlashLog.when(shotsSince, TimeZone.getDefault()) + ". Photos"
+                + " taken from then on are saved in the last step.");
+        updateButtons();
+    }
+
+    /** The test-shot set's start (and the photos on the card then) as kept in the preferences, after a restart. */
+    private void restoreShots() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        long since = prefs.getLong(KEY_SHOTS_SINCE, 0);
+        if (since <= 0) {
+            return;
+        }
+        Set<String> before = prefs.getLong(KEY_SHOTS_BEFORE_FOR, 0) == since
+                ? prefs.getStringSet(KEY_SHOTS_BEFORE, null) : null;
+        shotsBefore = before == null ? null : new HashSet<>(before);
+        shotsSince = since;
+        lightChosen = prefs.getLong(KEY_LIGHT_FOR, 0) == since;    // a light picked for this same set
+    }
+
+    /** The owner picked the light for this set: the lighting step is done. It is kept beside the set's start. */
+    private void chooseLight() {
+        if (shotsSince != 0 && !lightChosen) {
+            lightChosen = true;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong(KEY_LIGHT_FOR, shotsSince).apply();
+            updateButtons();
+        }
+    }
+
+    private void showLighting() {
+        otherLighting.setVisibility(lightingIndex() == 2 ? View.VISIBLE : View.GONE);
+        lightingStatus.setText("Lighting: " + lighting());
+    }
+
+    private int lightingIndex() {
+        for (int i = 0; i < lightingChoices.length; i++) {
+            if (lightingChoices[i].isChecked()) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private String lighting() {
+        int i = lightingIndex();
+        if (i == 2) {
+            String other = otherLighting.getText().toString().trim();
+            return other.isEmpty() ? "Other" : other;
+        }
+        return lightingChoices[i].getText().toString();
+    }
+
+    /** Letters, digits and dots only, for a file name; "unknown" when nothing is left. */
+    private static String tag(String s) {
+        String t = s == null ? "" : s.replaceAll("[^A-Za-z0-9.]+", "");
+        return t.isEmpty() ? "unknown" : t;
+    }
+
+    /**
+     * The firmware for the test-shot zip's name: the one the owner saw the camera take (FlashLog.confirmedFirmware: a
+     * flash seen, or a passed photo check after a flash seen of that file), otherwise "unknown".
+     */
+    private String firmwareTag() {
+        String f = readLog().confirmedFirmware();
+        return f == null ? "unknown" : tag(f);
+    }
+
+    private static String stamp(String pattern, long ms) {
+        SimpleDateFormat f = new SimpleDateFormat(pattern, Locale.ROOT);
+        f.setTimeZone(TimeZone.getDefault());
+        return f.format(new Date(ms));
+    }
+
+    private static String megabytes(long bytes) {
+        return String.format(Locale.ROOT, "%.1f MB", bytes / 1e6);
+    }
+
+    /** "Choose where to save the zip" / "Save the shots": a wipe is confirmed first, then the save screen opens. */
+    private void confirmArchive(final boolean shots) {
+        if (busy() || archiving() || dialog != null || !readable(card)) {
+            return;
+        }
+        final String name = shots
+                ? "Charmera-" + firmwareTag() + "-" + tag(lighting()) + "-" + stamp("yyyyMMdd-HHmm",
+                System.currentTimeMillis()) + ".zip"
+                : "Charmera-" + stamp("yyyyMMdd-HHmm", System.currentTimeMillis()) + ".zip";
+        boolean wipe = shots ? shotsWipeBox.isChecked() : wipeBox.isChecked();
+        if (!wipe) {
+            pickZip(shots ? SAVE_SHOTS : SAVE_ZIP, name);
+            return;
+        }
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Delete from the camera afterwards?")
+                .setMessage("Once the zip is saved and read back, the app deletes from the camera each "
+                        + (shots ? "photo" : "photo and video") + " whose copy in the zip matched. Files this camera"
+                        + " did not make, folders, the update file and SENSOR.TXT stay.\n\nThe camera keeps no other"
+                        + " copy: the zip is then the only one.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Choose where to save", (di, w) -> pickZip(shots ? SAVE_SHOTS : SAVE_ZIP, name))
+                .create();
+        d.setOnDismissListener(di -> {
+            if (dialog == di) {
+                dialog = null;
+            }
+            if (!gone()) {
+                afterDialog();
+            }
+        });
+        dialog = d;
+        d.show();
+        updateButtons();
+    }
+
+    /** Android's save screen for the zip; its result starts the zip. */
+    private void pickZip(int request, String title) {
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/zip");
+        i.putExtra(Intent.EXTRA_TITLE, title);
+        try {
+            startActivityForResult(i, request);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            setStatus(request == SAVE_SHOTS ? shotsStatus : zipStatus, "Nothing was saved: Android could not open its"
+                    + " screen for saving a file." + detail(why(e)));
+        }
+    }
+
+    /** The save screen made the (empty) zip at dest: fill it from the card on the worker. */
+    private void startArchive(final Uri dest, final boolean shots) {
+        final Card c = card;
+        final TextView status = shots ? shotsStatus : zipStatus;
+        String refusal = busy() || archiving() ? "a write, a removal or another zip is running"
+                : !readable(c) ? "the app has not listed the camera's drive; connect it and try again"
+                : onCameraCard(dest) ? "that place is on the camera's own card. Choose a place on the phone, not the"
+                + " camera's card" : null;
+        if (refusal != null) {
+            clearOutcome(shots);        // an older zip's outcome must not come back in place of this refusal
+            setStatus(status, "Nothing was saved: " + sentence(refusal));
+            WORKER.execute(() -> delete(dest));     // the save screen's empty file must not stay behind
+            return;
+        }
+        // Until the zip is read back, a process ended by Android leaves it unfinished: the next start says so.
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_ZIP_RUNNING, dest.toString())
+                .putBoolean(KEY_ZIP_RUNNING_SHOTS, shots).commit();
+        final boolean fix = !shots && fixDatesBox.isChecked();
+        final boolean dateNames = dateNamesBox.isChecked();
+        final boolean wipe = shots ? shotsWipeBox.isChecked() : wipeBox.isChecked();
+        int n = 0;
+        // A count folded away under "Choose how many" is not in sight, so it chooses nothing.
+        if (shots && shotCount.getVisibility() == View.VISIBLE) {
+            try {
+                n = Integer.parseInt(shotCount.getText().toString().trim());
+            } catch (NumberFormatException e) {
+                n = 0;
+            }
+        }
+        final int count = Math.max(0, Math.min(n, 9999));
+        final long since = shotsSince;
+        final Set<String> before = shotsBefore;
+        final String header = shots ? "Charmera test shots\n"
+                + "Firmware (flash log): " + flashLog.summary(TimeZone.getDefault()) + "\n"
+                + "Lighting: " + lighting() + "\n"
+                + "App: Charmera Card " + appVersion() + "\n"
+                + "Saved: " + stamp("yyyy-MM-dd HH:mm", System.currentTimeMillis()) + " (phone time)\n" : null;
+        final Archive a = new Archive(shots, c);
+        if (shots) {
+            shotsArchive = a;
+        } else {
+            backupArchive = a;
+        }
+        ejectedThisMount = false;       // the zip reads (and may delete from) the mounted drive
+        ejectAsked = false;
+        ejectStatus.setText("");        // an eject before the zip no longer applies
+        if (!shots) {
+            backupSaved = false;
+            backupSavedFrom = treeUuid();
+        }
+        showArchive();
+        updateButtons();
+        final Context app = getApplicationContext();
+        WORKER.execute(() -> {
+            String outcome = null;
+            try {
+                outcome = runArchive(a, app, c.tree, dest, fix, dateNames, wipe, count, since, before, header);
+            } finally {
+                forgetRunningZip(app);      // ended, one way or another: nothing is left unfinished for the next start
+                a.outcome = outcome != null ? outcome : "The zip stopped with an unexpected error. Do not rely on it;"
+                        + " nothing was deleted from the camera unless this says so.";
+            }
+            postArchive();
+        });
+    }
+
+    /** The zip running now is read back or has ended: its save place is no longer kept (KEY_ZIP_RUNNING). */
+    private static void forgetRunningZip(Context app) {
+        app.getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_ZIP_RUNNING).remove(KEY_ZIP_RUNNING_SHOTS)
+                .commit();
+    }
+
+    /**
+     * dest is a document on the saved camera drive's own card: the save screen offers that card like any other place,
+     * and a zip there is no copy off the camera (with delete on, the only copy would be on the card it came from).
+     */
+    private boolean onCameraCard(Uri dest) {
+        String mine = treeUuid();
+        if (mine == null || dest == null || !EXTERNAL_STORAGE.equals(dest.getAuthority())) {
+            return false;
+        }
+        try {
+            String id = DocumentsContract.getDocumentId(dest);
+            int colon = id.indexOf(':');
+            return colon > 0 && mine.equalsIgnoreCase(id.substring(0, colon));
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * A zip refused, or waiting for the card's listing: the slot's last outcome goes (and, for a backup, its "saved"),
+     * so an older zip's result never shows in place of this one's. A zip still running is kept.
+     */
+    private static void clearOutcome(boolean shots) {
+        Archive a = archiveOf(shots);
+        if (a == null || a.outcome == null) {
+            return;
+        }
+        if (shots) {
+            shotsArchive = null;
+        } else {
+            backupArchive = null;
+            backupSaved = false;
+        }
+    }
+
+    /**
+     * Start-up: a zip whose save place is still kept (KEY_ZIP_RUNNING) with no zip running was left unfinished when
+     * Android ended the app's process, before it was read back, so nothing was deleted from the camera for it. If that
+     * file is still there, the zip's step says so; the key goes either way.
+     */
+    private void unfinishedZip() {
+        final android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        final String left = prefs.getString(KEY_ZIP_RUNNING, null);
+        if (left == null || archiving()) {
+            return;
+        }
+        final boolean shots = prefs.getBoolean(KEY_ZIP_RUNNING_SHOTS, false);
+        prefs.edit().remove(KEY_ZIP_RUNNING).remove(KEY_ZIP_RUNNING_SHOTS).apply();
+        final Uri dest = Uri.parse(left);
+        WORKER.execute(() -> {
+            String name = null;
+            try (Cursor q = getContentResolver().query(dest, new String[]{OpenableColumns.DISPLAY_NAME}, null, null,
+                    null)) {
+                if (q != null && q.moveToFirst() && !q.isNull(0)) {
+                    name = q.getString(0);
+                }
+            } catch (RuntimeException e) {
+                name = null;        // gone, or no longer reachable: nothing to say about it
+            }
+            final String found = name;
+            ui.post(() -> {
+                if (gone() || found == null || archiving()) {
+                    return;
+                }
+                setStatus(shots ? shotsStatus : zipStatus, "A zip was not finished: the app was stopped while it saved "
+                        + found + ", before it was read back. Do not rely on it; delete it and save the zip again."
+                        + " Nothing was deleted from the camera for it.");
+            });
+        });
+    }
+
+    /** Has the screen open now show the zip's progress or outcome. Worker or main thread. */
+    private void postArchive() {
+        ui.post(() -> {
+            if (gone()) {
+                MainActivity s = screen;      // this screen has gone: the one open now shows it
+                if (s != null && s != this && !s.gone()) {
+                    s.archiveShown();
+                }
+                return;
+            }
+            archiveShown();
+        });
+    }
+
+    /** Fills each zip's status from its own slot: the backup's under Back up, the shots' under Save the shots. */
+    private void showArchive() {
+        showArchive(backupArchive, zipStatus);
+        showArchive(shotsArchive, shotsStatus);
+    }
+
+    private static void showArchive(Archive a, TextView status) {
+        if (a == null) {
+            return;
+        }
+        String o = a.outcome;
+        setStatus(status, o != null ? o : a.progress);
+    }
+
+    /**
+     * Shows the zips' state; once one has ended, looks at the card again (photos may have been deleted) and reveals
+     * the result after that listing is back, so the steps it moves never hide it or scroll it away.
+     */
+    private void archiveShown() {
+        showArchive();
+        for (boolean shots : new boolean[]{false, true}) {
+            Archive a = archiveOf(shots);
+            if (a == null || a.outcome == null || a.shown) {
+                continue;
+            }
+            a.shown = true;
+            flashLog = readLog();
+            TextView status = shots ? shotsStatus : zipStatus;
+            if (inspecting) {
+                revealAfterLook = status;       // the look in flight shows it once it is back
+            } else if (tree != null && !busy() && dialog == null) {
+                revealAfterLook = status;
+                inspectCard();
+            } else {
+                reveal(status);
+            }
+        }
+        updateButtons();
+    }
+
+    /** A zip's end has been on screen with the drive listed: from now on its step opens and locks as usual. */
+    private void markSeen(Archive a, TextView status, boolean listed) {
+        if (a != null && a.outcome != null && !a.seen && listed && status.isShown()) {
+            a.seen = true;
+        }
+    }
+
+    /**
+     * Runs on the worker: lists the photos, writes the zip, syncs it, reads it back and checks every entry, then, only
+     * when asked, deletes from the card exactly the files whose entries matched (through delete(), one file each).
+     * Returns the outcome for the step's result.
+     */
+    private String runArchive(Archive a, Context app, Uri t, Uri dest, boolean fix, boolean dateNames, boolean wipe,
+                              int count,
+            long since, Set<String> before, String manifestHead) {
+        boolean shots = a.shots;
+        List<Media> chosen;
+        try {
+            chosen = listMedia(t, !shots);
+        } catch (IOException | RuntimeException e) {
+            return "Nothing was saved: the app could not list the camera's photos: " + sentence(cause(e, "the drive"
+                    + " did not answer")) + emptyZip(dest) + detail(detailOf(e));
+        }
+        if (shots) {
+            chosen = newestShots(chosen, count, since, before);
+        }
+        if (chosen.isEmpty()) {
+            return "Nothing was saved: " + (shots ? count > 0 ? "the card's DCIM folder holds no photos."
+                    : before != null ? "no photo has appeared in the card's DCIM folder since step 1. To save photos"
+                    + " that were there already, type how many of the newest to save, then try again."
+                    : "no photo taken since step 1 is on the card. If you took some, the camera's clock may differ"
+                    + " from the phone's: type how many of the newest photos to save, then try again."
+                    : "the card's DCIM and SPIDCIM folders hold no photos or videos.") + emptyZip(dest);
+        }
+        TimeZone tz = TimeZone.getDefault();
+        Map<String, long[]> written = new LinkedHashMap<>();    // entry name -> {CRC-32, length}
+        Map<String, Media> sourceOf = new LinkedHashMap<>();
+        // entry name of a date-fixed copy -> the entry that holds the card file as it is (delete on only)
+        Map<String, String> originalOf = new LinkedHashMap<>();
+        Set<String> removable = new HashSet<>();
+        Set<String> lower = new HashSet<>();
+        int photos = 0;
+        int videos = 0;
+        int fixed = 0;
+        int originals = 0;
+        int shortOriginals = 0;
+        int shortRead = 0;
+        int unsized = 0;
+        long bytes = 0;
+        int got = chosen.size();
+        StringBuilder manifest = manifestHead == null ? null : new StringBuilder(manifestHead).append("Selected: ")
+                .append(count > 0 ? "the newest " + got + (got == 1 ? " photo" : " photos")
+                        + (got < count ? " (" + count + " asked; the card held no more)" : "")
+                        : "photos taken since " + stamp("yyyy-MM-dd HH:mm", since)).append("\nFiles:\n");
+        try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(dest, "w")) {
+            if (pfd == null) {
+                throw new Plain("Android gave the app nowhere to write the zip");
+            }
+            try (FileOutputStream fos = new FileOutputStream(pfd.getFileDescriptor());
+                 ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(fos, 64 * 1024))) {
+                zip.setMethod(ZipOutputStream.DEFLATED);
+                zip.setLevel(Deflater.BEST_SPEED);      // JPEG and AVI are compressed already
+                for (int i = 0; i < chosen.size(); i++) {
+                    Media m = chosen.get(i);
+                    a.progress = "Copying " + (i + 1) + " of " + chosen.size() + "…";
+                    postArchive();
+                    // The name is chosen inside, once the file's start (and its capture time) has been read.
+                    Copied cp = copyInto(zip, m, "", dateNames, fix, tz, lower);
+                    String entry = cp.entry;
+                    written.put(entry, new long[]{cp.crc, cp.length});
+                    sourceOf.put(entry, m);
+                    boolean whole = m.size >= 0 && cp.read == m.size;
+                    if (!whole) {
+                        shortRead++;
+                    } else if (cp.camera) {
+                        removable.add(entry);
+                    }
+                    if (m.size < 0) {
+                        unsized++;      // never whole: it stays, and the outcome says the card gave no size
+                    }
+                    // Only a whole first copy's file can be deleted, so only it needs its original kept beside it.
+                    if (wipe && cp.fixed && whole) {
+                        // The card file is about to be deleted: the zip keeps it as the camera wrote it too, so a
+                        // copy with rebuilt dates is never the only one left. It is read back like every entry, and
+                        // keeps the file's name on the card (made unique in lower), whatever the copy is named.
+                        Copied orig = copyInto(zip, m, ORIGINALS, false, false, tz, lower);
+                        String original = orig.entry;
+                        written.put(original, new long[]{orig.crc, orig.length});
+                        originalOf.put(entry, original);
+                        originals++;
+                        bytes += orig.length;
+                        if (orig.read != m.size) {
+                            // The second read came out short: the card file stays, and the zip's original of it is
+                            // not called the file as the camera wrote it.
+                            removable.remove(entry);
+                            shortOriginals++;
+                        }
+                    }
+                    if (cp.fixed) {
+                        fixed++;
+                    }
+                    if (m.video) {
+                        videos++;
+                    } else {
+                        photos++;
+                    }
+                    bytes += cp.length;
+                    if (manifest != null) {
+                        manifest.append(entry).append("  ").append(cp.read).append(" bytes  ")
+                                .append(m.mtime > 0 ? stamp("yyyy-MM-dd HH:mm:ss", m.mtime) : "no file time")
+                                .append('\n');
+                    }
+                }
+                if (manifest != null) {
+                    byte[] text = manifest.toString().getBytes(StandardCharsets.UTF_8);
+                    zip.putNextEntry(new ZipEntry("manifest.txt"));
+                    zip.write(text);
+                    zip.closeEntry();
+                    CRC32 crc = new CRC32();
+                    crc.update(text, 0, text.length);
+                    written.put("manifest.txt", new long[]{crc.getValue(), text.length});
+                }
+                a.progress = "Saving the zip…";
+                postArchive();
+                zip.finish();
+                zip.flush();
+                fos.getFD().sync();     // the zip is on the phone's storage before it is read back
+            }
+        } catch (IOException | RuntimeException e) {
+            String failed = delete(dest);
+            return "The zip was not finished: " + sentence(cause(e, "a file could not be read from the card, or the"
+                    + " zip could not be written. The cable may have come loose, or the phone may be full"))
+                    + (failed == null ? " The unfinished zip was deleted." : " Delete the unfinished zip yourself.")
+                    + " Nothing was deleted from the camera." + detail(detailOf(e));
+        }
+        a.progress = "Reading the zip back to check it…";
+        postArchive();
+        Set<String> verified = new HashSet<>();
+        String verifyProblem = null;
+        try {
+            verifyZip(dest, written, verified);
+            if (verified.size() != written.size()) {
+                verifyProblem = (written.size() - verified.size()) + " of " + written.size() + " files read back"
+                        + " differently or not at all";
+            }
+        } catch (IOException | RuntimeException e) {
+            verifyProblem = "the zip could not be read back" + (why(e).isEmpty() ? "" : ": " + why(e));
+        }
+        String name = displayName(dest);
+        String what = shots ? photos + (photos == 1 ? " test shot" : " test shots") + " and manifest.txt"
+                : photos + (photos == 1 ? " photo, " : " photos, ") + videos + (videos == 1 ? " video" : " videos");
+        if (verifyProblem != null) {
+            return "Do not rely on the zip " + name + ": " + sentence(verifyProblem) + " Nothing was deleted from the"
+                    + " camera. Delete the zip and try again; a different place to save it may help.";
+        }
+        // Read back and matched: nothing is left for a restart to call unfinished (the wipe below comes after this).
+        forgetRunningZip(app);
+        // "Every file matched" only when every copy is also as long as the card lists it; otherwise the lines below
+        // say which are not, and the backup does not count as done (backupSaved).
+        boolean allWhole = shortRead == 0 && shortOriginals == 0;
+        StringBuilder out = new StringBuilder("Saved " + what + " (" + megabytes(bytes) + ") as " + name
+                + (allWhole ? ". Verified: the zip was read back and every file matched."
+                : ". The zip was read back and matches what the app copied, but not every copy is whole."));
+        if (fixed > 0) {
+            out.append("\nDates fixed in ").append(fixed).append(fixed == 1 ? " copy." : " copies.");
+        }
+        int wholeOriginals = originals - shortOriginals;
+        if (wholeOriginals > 0 && wholeOriginals == fixed) {
+            out.append(" The zip also holds ").append(wholeOriginals == 1 ? "that file" : "those files")
+                    .append(" as the camera wrote ").append(wholeOriginals == 1 ? "it" : "them").append(", in ")
+                    .append(ORIGINALS).append(".");
+        } else if (wholeOriginals > 0) {
+            out.append(" The zip also holds ").append(wholeOriginals).append(" of them as the camera wrote them, in ")
+                    .append(ORIGINALS).append(".");
+        }
+        if (shortOriginals > 0) {
+            out.append("\n").append(shortOriginals).append(shortOriginals == 1 ? " copy" : " copies").append(" in ")
+                    .append(ORIGINALS).append(DIFFERENT_SIZE).append(" the file, so ")
+                    .append(shortOriginals == 1 ? "it is" : "they are").append(" not the file as the camera wrote it;")
+                    .append(" the card ").append(shortOriginals == 1 ? "file stays" : "files stay")
+                    .append(" on the camera.");
+        }
+        int shortSized = shortRead - unsized;
+        if (shortSized > 0) {
+            out.append("\n").append(shortSized).append(shortSized == 1 ? " file" : " files")
+                    .append(DIFFERENT_SIZE).append(shortSized == 1 ? " it; it stays" : " them; they stay")
+                    .append(" on the camera.");
+        }
+        if (unsized > 0) {
+            out.append("\n").append(unsized).append(unsized == 1 ? " file has" : " files have")
+                    .append(NO_SIZE).append(", so the app cannot check that the copy is whole; ")
+                    .append(unsized == 1 ? "it stays" : "they stay").append(" on the camera.");
+        }
+        // What may go: a whole copy of the camera's own file that read back the same, and its original too when the
+        // zip holds one (tested on the JVM: ZipCheckTest).
+        Set<String> deletable = ZipCheck.deletable(removable, verified, originalOf);
+        if (wipe) {
+            out.append("\n").append(wipeVerified(sourceOf, deletable, verified));
+        } else {
+            out.append("\nThe photos are still on the camera.");
+        }
+        appendLog(app, FlashLog.Event.BACKUP_SAVED, null, null, (shots ? "test shots, " + lightingNote(manifestHead)
+                + ", " : "") + what + " in " + name);
+        if (!shots) {
+            backupSaved = allWhole;     // a copy that is not whole keeps the step open, its warnings in sight
+        }
+        return out.toString();
+    }
+
+    /** How the outcome says a copy is not whole: read a different size than listed, or listed with no size at all. */
+    private static final String DIFFERENT_SIZE = " read a different size than the card lists";
+    private static final String NO_SIZE = " no size in the card's listing";
+
+    /** The lines of a zip's outcome that say a copy is not whole, for its folded step. */
+    private static List<String> copyWarnings(String outcome) {
+        List<String> out = new ArrayList<>();
+        for (String line : outcome.split("\n")) {
+            if (line.contains(DIFFERENT_SIZE) || line.contains(NO_SIZE)) {
+                out.add(line);
+            }
+        }
+        return out;
+    }
+
+    private static String lightingNote(String manifestHead) {
+        int i = manifestHead == null ? -1 : manifestHead.indexOf("Lighting: ");
+        if (i < 0) {
+            return "lighting not named";
+        }
+        int end = manifestHead.indexOf('\n', i);
+        return manifestHead.substring(i + "Lighting: ".length(), end < 0 ? manifestHead.length() : end);
+    }
+
+    /**
+     * Copies one card file into its own zip entry, its dates fixed when asked; never changes the card file. The entry
+     * is named by DateFix.entryName: prefix (ORIGINALS for an original beside its copy, else ""), then the card path,
+     * or with dateName the capture time in the same folder, made unique in lower ("-2" / "_2"...).
+     */
+    private Copied copyInto(ZipOutputStream zip, Media m, String prefix, boolean dateName, boolean fix, TimeZone tz,
+                            Set<String> lower) throws IOException {
+        CRC32 crc = new CRC32();
+        Copied c = new Copied();
+        try (InputStream in = getContentResolver().openInputStream(m.uri)) {
+            if (in == null) {
+                throw new Plain("Android gave no data for " + m.path + " on the card");
+            }
+            byte[] head = readUpTo(in, m.video ? AVI_HEAD : MAX_PHOTO + 1);
+            String stem = dateName ? DateFix.captureName(head, m.video, m.mtime, tz) : null;
+            String entry = DateFix.entryName(m.path, stem, prefix, lower);
+            c.entry = entry;
+            ZipEntry ze = new ZipEntry(entry);
+            if (m.mtime > 0) {
+                ze.setTime(m.mtime);
+            }
+            zip.putNextEntry(ze);
+            c.read = head.length;
+            byte[] first = head;
+            if (m.video) {
+                // The camera's own video only: an AVI with the camera's fixed 2010-06-29 in its IDIT or ICRD.
+                c.camera = DateFix.isCharmeraAvi(head);
+                if (fix) {
+                    DateFix.Result r = DateFix.fixAvi(head, m.mtime, tz);
+                    if (r.changed && r.data.length == head.length) {
+                        first = r.data;
+                        c.fixed = true;
+                    }
+                }
+            } else if (head.length <= MAX_PHOTO) {
+                c.camera = DateFix.isCharmeraJpeg(head);
+                if (fix) {
+                    DateFix.Result r = DateFix.fixJpeg(head, m.mtime, tz);
+                    if (r.changed) {
+                        first = r.data;
+                        c.fixed = true;
+                    }
+                }
+            }
+            zip.write(first, 0, first.length);
+            crc.update(first, 0, first.length);
+            c.length = first.length;
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                zip.write(buf, 0, n);
+                crc.update(buf, 0, n);
+                c.read += n;
+                c.length += n;
+            }
+        }
+        zip.closeEntry();
+        c.crc = crc.getValue();
+        return c;
+    }
+
+    /** Reads the saved zip back; each entry whose CRC-32 and length are what was written goes into verified. */
+    private void verifyZip(Uri dest, Map<String, long[]> written, Set<String> verified) throws IOException {
+        InputStream raw = getContentResolver().openInputStream(dest);
+        if (raw == null) {
+            throw new Plain("Android gave no data for the zip");
+        }
+        verified.addAll(ZipCheck.verify(raw, written));     // tested on the JVM: ZipCheckTest
+    }
+
+    /**
+     * Deletes from the card exactly the files whose zip entry read back the same and that the camera made, one file
+     * at a time through delete(); folders and every other file stay. Worker only. Returns what it did, in words.
+     */
+    private String wipeVerified(Map<String, Media> sourceOf, Set<String> removable, Set<String> verified) {
+        int deleted = 0;
+        int kept = 0;
+        StringBuilder reasons = new StringBuilder();
+        // The card answering no and a delete that failed with an error (a drive pulled mid-wipe, say) are told apart.
+        int refused = 0;
+        int failed = 0;
+        for (Map.Entry<String, Media> e : sourceOf.entrySet()) {
+            if (!removable.contains(e.getKey()) || !verified.contains(e.getKey())) {
+                kept++;
+                continue;
+            }
+            String why = delete(e.getValue().uri);
+            if (why == null) {
+                deleted++;
+            } else {
+                if (CARD_REFUSED.equals(why)) {
+                    refused++;
+                } else {
+                    failed++;
+                }
+                reasons.append(reasons.length() == 0 ? "" : "; ").append(e.getValue().path).append(": ").append(why);
+            }
+        }
+        StringBuilder sb = new StringBuilder("Deleted " + deleted + " from the camera.");
+        if (kept > 0) {
+            sb.append(" Kept ").append(kept).append(kept == 1 ? " file" : " files").append(" this camera did not"
+                    + " make, or that did not read back whole.");
+        }
+        if (refused > 0) {
+            sb.append(" Could not delete ").append(refused).append(": the card refused. ").append(refused == 1
+                    ? "It is" : "They are").append(" in the zip and still on the camera.");
+        }
+        if (failed > 0) {
+            // The delete threw: the app cannot tell what the card holds now, so it says only what it knows.
+            sb.append(" Could not delete ").append(failed).append(refused > 0 ? " more" : "").append(": the delete"
+                    + " failed with an error (the drive may have been unplugged). ").append(failed == 1 ? "It is"
+                    : "They are").append(" in the zip, and may still be on the camera.");
+        }
+        if (refused + failed > 0) {
+            sb.append(detail(reasons.toString()));
+        }
+        return sb.toString();
+    }
+
+    /** The line of a backup's outcome that says what was deleted from the camera (or that nothing was), or null. */
+    private static String deleteLine(String outcome) {
+        for (String line : outcome.split("\n")) {
+            if (line.startsWith("Deleted ") || line.startsWith("The photos are still on the camera.")) {
+                return line;
+            }
+        }
+        return null;
+    }
+
+    /** The save screen's empty zip is deleted; says so, or that the owner should. */
+    private String emptyZip(Uri dest) {
+        return delete(dest) == null ? " The empty zip the save screen made was deleted."
+                : " Delete the empty zip the save screen made.";
+    }
+
+    /** The DCIM photos of this test-shot set, oldest first: the newest count, or those taken since the set began. */
+    private static List<Media> newestShots(List<Media> all, int count, long since, Set<String> before) {
+        List<Media> photos = new ArrayList<>();
+        for (Media m : all) {
+            if (!m.video && m.inDcim()) {
+                photos.add(m);
+            }
+        }
+        Collections.sort(photos, (a, b) -> a.mtime != b.mtime ? Long.compare(b.mtime, a.mtime)
+                : b.path.compareToIgnoreCase(a.path));
+        List<Media> out = new ArrayList<>();
+        for (Media m : photos) {
+            if (count > 0 ? out.size() < count : before != null ? !before.contains(m.docId) : m.mtime >= since) {
+                out.add(m);
+            }
+        }
+        Collections.reverse(out);
+        return out;
+    }
+
+    /**
+     * Flash check: the newest DCIM photo taken since the write, and whether its header is the one the public build's
+     * family writes. It cannot see the picture, nor tell the stock restore file, the probe and the bring-up apart.
+     */
+    private void checkPhoto() {
+        final Card c = card;
+        if (busy() || archiving() || dialog != null || checkingPhoto || !readable(c)) {
+            return;
+        }
+        // The Repair run's write: when it was, and the DCIM photos listed just after it (only that write's listing).
+        final String uuid = treeUuid();
+        final FlashFlow run = runOf(uuid, FlashFlow.Route.REPAIR);
+        final String id = runId(uuid, run);
+        final long since = run.writtenAt();
+        final Set<String> before = id != null && id.equals(dcimAtWriteFor) ? dcimAtWrite : null;
+        final String sha = run.past() ? run.sha() : null;
+        checkingPhoto = true;
+        photoCheck = null;
+        setStatus(checkStatus, "Looking for the newest photo…");
+        updateButtons();
+        final Uri t = c.tree;
+        final boolean fileOnCard = !c.state.updateFiles.isEmpty();
+        final Context app = getApplicationContext();
+        WORKER.execute(() -> {
+            String text;
+            Boolean verdict = null;     // none: no new photo yet, or the card could not be read
+            try {
+                List<Media> all = listMedia(t, false);
+                Media newest = null;
+                for (Media m : all) {
+                    if (m.video || !m.inDcim() || (before != null ? before.contains(m.docId)
+                            : since > 0 && m.mtime < since)) {
+                        continue;
+                    }
+                    if (newest == null || m.mtime > newest.mtime
+                            || m.mtime == newest.mtime && m.path.compareToIgnoreCase(newest.path) > 0) {
+                        newest = m;
+                    }
+                }
+                if (newest == null) {
+                    text = fileOnCard ? "No new photo yet. The update file is still on the card, so the camera flashes"
+                            + " again instead of starting: tap " + q(REMOVE) + " first."
+                            : "No photo taken since the write is on the card. Take one photo, switch the camera off,"
+                            + " reconnect, then tap " + q(CHECK_PHOTO) + " again.";
+                } else {
+                    byte[] head;
+                    try (InputStream in = getContentResolver().openInputStream(newest.uri)) {
+                        if (in == null) {
+                            throw new Plain("Android gave no data for " + newest.path);
+                        }
+                        head = readUpTo(in, PhotoId.HEADER_LIMIT + 16);
+                    }
+                    PhotoId.Result r = PhotoId.identify(head);
+                    String which = newest.path + (newest.mtime > 0 ? ", taken " + FlashLog.when(newest.mtime,
+                            TimeZone.getDefault()) : "");
+                    String how = before != null ? "" : since > 0 ? "\nThe app picked it by its time, which comes from"
+                            + " the camera's clock." : "\nThe app does not know when the file was written (it was"
+                            + " restarted since), so this may be a photo from before the flash.";
+                    String fw = sha == null ? null : firmwareLabel(sha);
+                    Candidates.Kind written = Candidates.repairVersion(sha);
+                    // any reviewed build (a preset or a Custom pick) by its base and mods; else by the fixed kind
+                    Recipe.Selection made = Recipe.selectionOf(sha);
+                    boolean factory = made != null ? Recipe.V012.equals(made.base)
+                            : written != null && written.base == Candidates.Base.FACTORY;
+                    PhotoId.Kind expected = made != null ? Recipe.expectedPhoto(made) : PhotoId.expectedFor(written);
+                    String version = written != null ? written.version : made != null ? made.name() : "?";
+                    verdict = r.kind == expected;
+                    if (expected == PhotoId.Kind.FACTORY_EXIF && r.kind == expected) {
+                        // v0.26: the factory header with its own EXIF block (Make Kodak, Model Charmera).
+                        text = "New photo found, with firmware " + version + "'s EXIF header ✓\n" + which
+                                + ". Open it and check the picture."
+                                + (written == Candidates.Kind.V027 ? " v0.26 writes the same header, so check v0.27 on"
+                                + " the camera itself: power-on goes straight into Picture, and the screen flashes"
+                                + " black when you take a photo." : "") + how;
+                        appendLog(app, FlashLog.Event.CHECK_OK, fw, sha, "factory EXIF header: " + newest.path);
+                    } else if (expected == PhotoId.Kind.FACTORY_EXIF) {
+                        String got = r.kind == PhotoId.Kind.ORIGINAL_BARE ? "the factory header without EXIF"
+                                : r.kind == PhotoId.Kind.PUBLIC_FAMILY ? "the public build's header"
+                                : r.reasons.isEmpty() ? "a header the app does not know"
+                                : android.text.TextUtils.join("; ", r.reasons);
+                        text = "This photo has " + got + ", not firmware " + version + "'s EXIF header"
+                                + " ✗\n" + which + ". The flash did not take: write the file again and wait for"
+                                + " \"Upgrade 100%\"." + how;
+                        appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": " + got);
+                    } else if (factory && r.kind == PhotoId.Kind.ORIGINAL_BARE) {
+                        // A factory version is the camera's own factory build: its photos have the bare header.
+                        text = "New photo found, with the factory firmware's header \u2713\n" + which + ". Open it and"
+                                + " check the picture." + how;
+                        appendLog(app, FlashLog.Event.CHECK_OK, fw, sha, "factory header: " + newest.path);
+                    } else if (factory && r.kind == PhotoId.Kind.PUBLIC_FAMILY) {
+                        text = "This photo has the public build's header, not the factory firmware's \u2717\n" + which
+                                + ". The flash did not take: write the file again and wait for \"Upgrade 100%\"." + how;
+                        appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": public-build header");
+                    } else if (r.kind == PhotoId.Kind.FACTORY_EXIF) {
+                        // The EXIF mod's header after a write of a firmware without it: it still runs v0.26 or later.
+                        text = "This photo has the EXIF header of firmware " + Candidates.Kind.V026.version + " or later, not the"
+                                + " written firmware's ✗\n" + which + ". The flash did not take: write the file"
+                                + " again and wait for \"Upgrade 100%\"." + how;
+                        appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": factory EXIF header");
+                    } else if (r.kind == PhotoId.Kind.PUBLIC_FAMILY) {
+                        text = "New photo found, written by this firmware family ✓\n" + which + ". Open it and check"
+                                + " the picture." + how;
+                        // The header is the same for the stock restore file, the probe and the bring-up: the log
+                        // names no firmware for it, only the family.
+                        appendLog(app, FlashLog.Event.CHECK_OK, null, sha, "public-build family header: "
+                                + newest.path);
+                    } else if (r.kind == PhotoId.Kind.ORIGINAL_BARE) {
+                        text = "This photo has the original firmware's header ✗\n" + which + ". The flash did not"
+                                + " take: write the file again and wait for \"Upgrade 100%\"." + how;
+                        appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": original header");
+                    } else {
+                        String why = r.reasons.isEmpty() ? "its header is not one the app knows"
+                                : android.text.TextUtils.join("; ", r.reasons);
+                        text = "This photo's header is not this firmware family's ✗\n" + which + ": " + sentence(why)
+                                + " It may not be a photo this camera took." + how;
+                        appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": " + why);
+                    }
+                }
+            } catch (IOException | RuntimeException e) {
+                text = "Could not read the card: " + sentence(cause(e, "the drive may have come loose")) + " Connect it"
+                        + " again, then tap " + q(CHECK_PHOTO) + "." + detail(detailOf(e));
+            }
+            photoCheck = text;
+            photoCheckFor = id;
+            photoCheckOk = verdict;
+            checkingPhoto = false;
+            ui.post(() -> {
+                if (gone()) {
+                    MainActivity s = screen;      // this screen has gone: the one open now shows it
+                    if (s != null && s != this && !s.gone()) {
+                        s.photoShown();
+                    }
+                    return;
+                }
+                photoShown();
+            });
+        });
+    }
+
+    /**
+     * Identify: lists the card's DCIM photos and videos, reads the start of at most Identify.SCAN_CAP photos (header
+     * only), and shows what they say (Identify). Reads only: it writes nothing to the card and touches no flash run.
+     */
+    private void identifyFirmware() {
+        final Card c = card;
+        if (busy() || archiving() || dialog != null || identifying || !readable(c)) {
+            return;
+        }
+        identifying = true;
+        identifyText = null;
+        identifyEvidence = null;
+        setStatus(identifyStatus, "Reading the photos on the card…");
+        identifyDetail.setText("");
+        identifyDetailToggle.setVisibility(View.GONE);
+        updateButtons();
+        final Uri t = c.tree;
+        final String uuid = treeUuid();
+        WORKER.execute(() -> {
+            String text;
+            String evidence = "";
+            try {
+                List<Identify.Entry> entries = new ArrayList<>();
+                for (Media m : listMedia(t, false)) {
+                    final Uri u = m.uri;
+                    final String path = m.path;
+                    entries.add(new Identify.Entry(m.path, m.mtime, m.video, () -> {
+                        try (InputStream in = getContentResolver().openInputStream(u)) {
+                            if (in == null) {
+                                throw new Plain("Android gave no data for " + path);
+                            }
+                            return readUpTo(in, PhotoId.HEADER_LIMIT + 16);
+                        }
+                    }));
+                }
+                Identify.Result r = Identify.identify(entries, TimeZone.getDefault());
+                StringBuilder sb = new StringBuilder(r.conclusion);
+                if (r.base != Identify.Base.UNKNOWN) {
+                    sb.append("\nConfidence: ").append(r.confidence.name().toLowerCase(Locale.ROOT)).append(".");
+                }
+                for (String caveat : r.caveats) {
+                    sb.append("\n\u2022 ").append(caveat);
+                }
+                text = sb.toString();
+                StringBuilder ev = new StringBuilder();
+                for (String line : r.evidence) {
+                    ev.append(ev.length() == 0 ? "" : "\n").append(line);
+                }
+                evidence = ev.toString();
+                if (r.base != Identify.Base.UNKNOWN) {
+                    identifiedBase = r.base;
+                }
+            } catch (IOException | RuntimeException e) {
+                text = "Could not read the card: " + sentence(cause(e, "the drive may have come loose")) + " Connect it"
+                        + " again, then tap " + q(IDENTIFY_BUTTON) + "." + detail(detailOf(e));
+            }
+            identifyText = text;
+            identifyEvidence = evidence;
+            identifyFor = uuid;
+            identifying = false;
+            ui.post(() -> {
+                if (gone()) {
+                    MainActivity s = screen;      // this screen has gone: the one open now shows it
+                    if (s != null && s != this && !s.gone()) {
+                        s.showIdentify();
+                        s.updateButtons();
+                    }
+                    return;
+                }
+                showIdentify();
+                reveal(identifyStatus);
+                updateButtons();
+            });
+        });
+    }
+
+    /** Puts the last identification on screen when it was read from the drive saved now; otherwise clears it. */
+    private void showIdentify() {
+        if (identifying) {
+            return;     // "Reading..." stays until the result comes
+        }
+        String text = identifyText;
+        boolean mine = text != null && Objects.equals(identifyFor, treeUuid());
+        setStatus(identifyStatus, mine ? text : "");
+        String ev = mine ? identifyEvidence : null;
+        identifyDetail.setText(ev == null ? "" : ev);
+        identifyDetailToggle.setVisibility(ev == null || ev.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * Shows the flash check's last result, and the log it added to, when it was made for the Repair run's write now; a
+     * verdict (the family's header or another one) goes into that run once (FlashFlow.checked).
+     */
+    private void photoShown() {
+        String p = photoCheck;
+        if (p == null || checkingPhoto) {
+            return;
+        }
+        String uuid = treeUuid();
+        FlashFlow f = runOf(uuid, FlashFlow.Route.REPAIR);
+        String id = runId(uuid, f);
+        if (id == null || !id.equals(photoCheckFor)) {
+            return;     // a check of another write, or of another drive's card
+        }
+        Boolean verdict = photoCheckOk;
+        if (verdict != null) {
+            photoCheckOk = null;
+            f.checked(verdict, p);
+            keep(uuid, f);
+        }
+        boolean fresh = !p.equals(checkStatus.getText().toString());
+        setStatus(checkStatus, p);
+        flashLog = readLog();
+        if (fresh) {
+            reveal(checkStatus);
+        }
+        updateButtons();
+    }
+
+    // --- the step component -----------------------------------------------------------------------------------------
+
+    private interface Check {
+        boolean holds();
+    }
+
+    private interface Text {
+        String get();
+    }
+
+    /**
+     * One numbered step of a route: badge, title, one short line, its action, the action's result right under it, and
+     * "More info" bullets. Done: a ✓ and the title with a one-line result, tap to open again. Locked: the title dimmed
+     * with "Do step N first", N the first open step before it. Otherwise it is open.
+     */
+    private final class Step {
+        final String number;
+        final LinearLayout box;
+        final LinearLayout head;
+        final TextView badge;
+        final android.graphics.drawable.GradientDrawable badgeFill;
+        final TextView title;
+        final TextView summary;
+        final TextView lockNote;
+        final LinearLayout body;
+        final List<TextView> results = new ArrayList<>();
+        /**
+         * A flashing route's step: done, open or locked as the route's flash run says (FlashFlow.view), and done, ready
+         * and needs are not used. Null on the other routes.
+         */
+        FlashFlow.Step kind;
+        Check done;
+        /** When it holds, the step is open even though a step it needs is not done. */
+        Check ready;
+        Step[] needs = new Step[0];
+        /** The folded done state's line, when the first line of the latest result would leave out what matters. */
+        Text summaryText;
+        boolean isDone;
+        /** A done step the owner opened again. */
+        boolean open;
+        /** Its state has been applied once, so a later change to done is news (and scrolls). */
+        boolean shown;
+
+        Step(String number, String titleText, String line) {
+            this.number = number;
+            box = card();
+            head = new LinearLayout(MainActivity.this);
+            head.setOrientation(LinearLayout.HORIZONTAL);
+            head.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            badge = badge(number);
+            badgeFill = (android.graphics.drawable.GradientDrawable) badge.getBackground();
+            head.addView(badge);
+            title = new TextView(MainActivity.this);
+            title.setText(titleText);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            head.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            head.setOnClickListener(v -> {
+                if (isDone) {
+                    open = !open;
+                    apply(true, null);
+                }
+            });
+            box.addView(head);
+            summary = body("");
+            summary.setTextColor(textSecondary);
+            summary.setTextIsSelectable(false);
+            summary.setVisibility(View.GONE);
+            box.addView(summary);
+            lockNote = body("");
+            lockNote.setTextColor(disabledText);
+            lockNote.setTextIsSelectable(false);
+            lockNote.setVisibility(View.GONE);
+            box.addView(lockNote);
+            body = new LinearLayout(MainActivity.this);
+            body.setOrientation(LinearLayout.VERTICAL);
+            box.addView(body, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            if (line != null) {
+                TextView l = body(line);
+                l.setPadding(0, dp(8), 0, dp(2));
+                body.addView(l);
+            }
+        }
+
+        void add(View v) {
+            attach(body, v);
+        }
+
+        /** A status view: an action's result, placed right under it. */
+        void result(final TextView v) {
+            attach(body, v);
+            results.add(v);
+            if (v.getTag(R.id.collapse_empty) == null) {
+                // An empty result takes no room: no blank gap under a button before anything has run.
+                v.setTag(R.id.collapse_empty, Boolean.TRUE);
+                v.addTextChangedListener(new android.text.TextWatcher() {
+                    @Override
+                    public void beforeTextChanged(CharSequence t, int a, int b, int c) {
+                    }
+
+                    @Override
+                    public void onTextChanged(CharSequence t, int a, int b, int c) {
+                    }
+
+                    @Override
+                    public void afterTextChanged(android.text.Editable e) {
+                        v.setVisibility(e.length() == 0 || (v == cardStatus && driveAway()) ? View.GONE
+                                : View.VISIBLE);
+                    }
+                });
+            }
+            v.setVisibility(v.length() == 0 || (v == cardStatus && driveAway()) ? View.GONE : View.VISIBLE);
+        }
+
+        /** The "More info" toggle with up to five short bullets. */
+        void more(String... bullets) {
+            StringBuilder sb = new StringBuilder();
+            for (String b : bullets) {
+                sb.append(sb.length() == 0 ? "" : "\n").append("• ").append(b);
+            }
+            expander(body, "More info", sb.toString());
+        }
+
+        /** The first line of its latest result (the last one with text), for the collapsed done state. */
+        String resultLine() {
+            for (int i = results.size() - 1; i >= 0; i--) {
+                String t = results.get(i).getText().toString().trim();
+                if (!t.isEmpty()) {
+                    int nl = t.indexOf('\n');
+                    return nl < 0 ? t : t.substring(0, nl);
+                }
+            }
+            return "Done.";
+        }
+
+        /** Done; or locked, with lock its note ("Do step N first."); or open when lock is null. */
+        void apply(boolean nowDone, String lock) {
+            isDone = nowDone;
+            if (nowDone) {
+                badge.setText("✓");
+                badgeFill.setColor(okColor);
+                badge.setTextColor(onAccent);
+                title.setTextColor(textPrimary);
+                lockNote.setVisibility(View.GONE);
+                summary.setText(summaryText != null ? summaryText.get() : resultLine());
+                summary.setVisibility(open ? View.GONE : View.VISIBLE);
+                body.setVisibility(open ? View.VISIBLE : View.GONE);
+            } else if (lock != null) {
+                open = false;
+                badge.setText(number);
+                badgeFill.setColor(disabledFill);
+                badge.setTextColor(disabledText);
+                title.setTextColor(disabledText);
+                summary.setVisibility(View.GONE);
+                lockNote.setText(lock);
+                lockNote.setVisibility(View.VISIBLE);
+                body.setVisibility(View.GONE);
+            } else {
+                open = false;
+                badge.setText(number);
+                badgeFill.setColor(accent);
+                badge.setTextColor(onAccent);
+                title.setTextColor(textPrimary);
+                summary.setVisibility(View.GONE);
+                lockNote.setVisibility(View.GONE);
+                body.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
+    private Step step(String number, String title, String line) {
+        Step s = new Step(number, title, line);
+        steps.add(s);
+        return s;
+    }
+
+    /**
+     * Applies each step's state; a step that has just become done scrolls itself and the next one into view. A flashing
+     * route's steps are as its flash run says (FlashFlow.view: done, open or locked, the note naming the first open
+     * step before it), never by whether the drive is plugged in now. The other routes' steps go by their done, ready
+     * and needs, and their notes name the first open step before them too.
+     */
+    private void refreshSteps() {
+        FlashFlow f = flow();
+        FlashFlow.View v = f == null ? null : f.view(live());
+        for (int i = 0; i < steps.size(); i++) {
+            Step s = steps.get(i);
+            boolean d;
+            String lock = null;
+            if (s.kind != null && v != null) {
+                d = v.done(s.kind);
+                lock = v.lockReason(s.kind);
+            } else {
+                d = s.done != null && s.done.holds();
+                if (!d && (s.ready == null || !s.ready.holds())) {
+                    for (Step n : s.needs) {
+                        if (!n.isDone) {
+                            lock = "Do step " + firstOpenBefore(i, n).number + " first.";
+                            break;
+                        }
+                    }
+                }
+            }
+            boolean news = s.shown && d && !s.isDone;
+            s.apply(d, lock);
+            s.shown = true;
+            if (news && uiReady) {
+                reveal(s.summary);
+            }
+        }
+    }
+
+    /** The first step before index i that is open as this refresh applied it; fallback when none is. */
+    private Step firstOpenBefore(int i, Step fallback) {
+        for (int j = 0; j < i; j++) {
+            Step e = steps.get(j);
+            if (!e.isDone && e.lockNote.getVisibility() != View.VISIBLE) {
+                return e;
+            }
+        }
+        return fallback;
+    }
+
+    /** The step whose card holds this view, or null. */
+    private Step stepOf(View v) {
+        for (View p = v; p != null; p = p.getParent() instanceof View ? (View) p.getParent() : null) {
+            for (Step s : steps) {
+                if (s.box == p) {
+                    return s;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The view's top within the scroll column, or -1 when it is not in it. */
+    private int offsetInColumn(View v) {
+        int y = 0;
+        for (View p = v; p != null; p = p.getParent() instanceof View ? (View) p.getParent() : null) {
+            if (p == col) {
+                return y;
+            }
+            y += p.getTop();
+        }
+        return -1;
+    }
+
+    /**
+     * Scrolls so a fresh result is on screen together with the head of the next step, so the owner sees what happened
+     * and what comes next without hunting. Posted, since the result has no size until it is laid out.
+     */
+    private void reveal(final View v) {
+        if (v == null) {
+            return;
+        }
+        v.post(() -> {
+            if (gone() || scroll == null || !v.isShown()) {
+                return;
+            }
+            int top = offsetInColumn(v);
+            if (top < 0) {
+                return;
+            }
+            int bottom = top + v.getHeight();
+            Step s = stepOf(v);
+            int i = s == null ? -1 : steps.indexOf(s);
+            if (i >= 0 && i + 1 < steps.size()) {
+                Step next = steps.get(i + 1);
+                bottom = Math.max(bottom, offsetInColumn(next.box) + next.head.getHeight() + dp(24));
+            }
+            int h = scroll.getHeight();
+            int y = scroll.getScrollY();
+            int pad = dp(12);
+            int target;
+            if (bottom - top + 2 * pad > h) {
+                target = top - pad;
+            } else if (bottom + pad > y + h) {
+                target = bottom + pad - h;
+            } else if (top - pad < y) {
+                target = top - pad;
+            } else {
+                return;
+            }
+            scroll.smoothScrollTo(0, Math.max(0, target));
+        });
     }
 
     /** Pick the card-layout colours from the phone's light/dark mode and the theme's accent. */
@@ -645,12 +4649,12 @@ public class MainActivity extends Activity {
         } else {
             accent = 0xFF1D6FD6;
             onAccent = 0xFFFFFFFF;
-            warnAccent = 0xFFB06A00;
+            warnAccent = 0xFF8A5300;
             windowBg = 0xFFF3F3F4;
             cardFill = 0xFFFFFFFF;
             cardStroke = 0xFFE3E3E6;
             disabledFill = 0xFFDCDCE0;
-            disabledText = 0xFF8C8C8C;
+            disabledText = 0xFF767676;
             ripple = 0x22000000;
             cautionFill = 0xFFFFF7E6;
             cautionStroke = 0xFFF0DFA8;
@@ -699,28 +4703,6 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    /** A card headed by a round step number and a bold title, then an optional line of instruction. */
-    private LinearLayout stepCard(String number, String title, String instruction) {
-        LinearLayout c = card();
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        head.addView(badge(number));
-        TextView t = new TextView(this);
-        t.setText(title);
-        t.setTextColor(textPrimary);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        head.addView(t);
-        c.addView(head);
-        if (instruction != null) {
-            TextView ins = body(instruction);
-            ins.setPadding(0, dp(10), 0, dp(2));
-            c.addView(ins);
-        }
-        return c;
-    }
-
     /** A filled accent button for a step's main action; it dims when disabled, which a bare drawable would not. */
     private Button primary(String label, View.OnClickListener onClick) {
         Button b = button(label, onClick);
@@ -760,29 +4742,6 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    /** A faint rule inside a card, setting a secondary block apart from the main action. */
-    private void divider(LinearLayout parent) {
-        View line = new View(this);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
-        lp.topMargin = dp(16);
-        lp.bottomMargin = dp(4);
-        line.setLayoutParams(lp);
-        line.setBackgroundColor(cardStroke);
-        parent.addView(line);
-    }
-
-    /** A bold sub-heading inside a card. */
-    private TextView subTitle(String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextColor(textPrimary);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setPadding(0, dp(4), 0, dp(2));
-        return t;
-    }
-
     /** A tappable label that shows or hides a block of detail, collapsed to begin with. */
     private void expander(LinearLayout parent, String label, String detail) {
         final TextView detailView = body(detail);
@@ -802,39 +4761,6 @@ public class MainActivity extends Activity {
         parent.addView(detailView);
     }
 
-    /** The one hard rule, in a card with an amber title, at the top of the screen. */
-    private void banner() {
-        LinearLayout c = new LinearLayout(this);
-        c.setOrientation(LinearLayout.VERTICAL);
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setColor(cautionFill);
-        bg.setCornerRadius(dp(14));
-        bg.setStroke(Math.max(1, dp(1)), cautionStroke);
-        c.setBackground(bg);
-        int bp = dp(16);
-        c.setPadding(bp, bp, bp, bp);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        blp.bottomMargin = dp(12);
-        c.setLayoutParams(blp);
-        col.addView(c);
-        TextView t = new TextView(this);
-        t.setText("Before you flash");
-        t.setTextColor(warnAccent);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        c.addView(t);
-        TextView rule = body("No backup of this camera, no flash. Original 2025 series only — matte body, yellow"
-                + " Kodak boot screen; never a Millennium Edition (blue boot screen) or a CLOT edition. Charge the"
-                + " battery fully first.");
-        rule.setPadding(0, dp(6), 0, dp(2));
-        c.addView(rule);
-        expander(c, "What a flash does to your photos", "A longer file (1,966,080 bytes, like the stock restore file)"
-                + " replaces the two photos the camera keeps in its own memory. A shorter one (1,478,656 bytes) keeps"
-                + " them but clears the list, so the camera stops showing them either way. To keep them, copy the"
-                + " SPIDCIM folder off the card first, with the Files app or a computer.");
-    }
-
     private TextView body(String s) {
         TextView t = new TextView(this);
         t.setText(s);
@@ -846,6 +4772,32 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    /** A check box for a step's option, in the screen's own colours. */
+    private android.widget.CheckBox toggle(String label, boolean on) {
+        android.widget.CheckBox b = new android.widget.CheckBox(this);
+        b.setText(label);
+        b.setChecked(on);
+        b.setTextColor(textPrimary);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        b.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));
+        b.setPadding(b.getPaddingLeft(), dp(6), 0, dp(6));
+        return b;
+    }
+
+    /** A one-line text field with a hint, in the screen's own colours. */
+    private android.widget.EditText field(String hint, int inputType) {
+        android.widget.EditText e = new android.widget.EditText(this);
+        e.setHint(hint);
+        e.setInputType(inputType);
+        e.setSingleLine(true);
+        e.setTextColor(textPrimary);
+        e.setHintTextColor(textSecondary);
+        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        e.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        return e;
+    }
+
     private TextView mono() {
         TextView t = body("");
         t.setTypeface(Typeface.MONOSPACE);
@@ -853,12 +4805,34 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    /**
+     * A secondary button: outlined in the accent, accent text, in the screen's own colours (never the device theme's,
+     * which is light on Android 7 to 9 even in dark mode). primary() fills it.
+     */
     private Button button(String label, View.OnClickListener onClick) {
         Button b = new Button(this);
         b.setText(label);
         b.setAllCaps(false);
         b.setOnClickListener(onClick);
-        b.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        int[][] states = {{-android.R.attr.state_enabled}, {}};
+        android.graphics.drawable.GradientDrawable outline = new android.graphics.drawable.GradientDrawable();
+        outline.setColor(android.graphics.Color.TRANSPARENT);
+        outline.setCornerRadius(dp(10));
+        outline.setStroke(Math.max(1, dp(1)), new android.content.res.ColorStateList(states,
+                new int[]{disabledFill, accent}));
+        android.graphics.drawable.GradientDrawable mask = new android.graphics.drawable.GradientDrawable();
+        mask.setColor(0xFFFFFFFF);
+        mask.setCornerRadius(dp(10));
+        b.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(ripple), outline, mask));
+        b.setStateListAnimator(null);       // no shadow under a see-through button
+        b.setTextColor(new android.content.res.ColorStateList(states, new int[]{disabledText, accent}));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(8);
+        b.setLayoutParams(lp);
+        int py = dp(10);
+        b.setPadding(dp(8), py, dp(8), py);
         return b;
     }
 
@@ -894,18 +4868,18 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+    /** A tappable accent label that runs an action in the app. */
+    private TextView link(String label, View.OnClickListener onClick) {
+        TextView t = body(label);
+        t.setTextColor(accent);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextIsSelectable(false);
+        t.setOnClickListener(onClick);
+        return t;
     }
 
-    /** Scroll the main view so a freshly-shown result is on screen, not left below the fold. Bubbles up to the
-     *  enclosing ScrollView; a no-op if the view has no size yet, so it is posted after layout. */
-    private void reveal(final View v) {
-        if (v == null) {
-            return;
-        }
-        v.post(() -> v.requestRectangleOnScreen(
-                new android.graphics.Rect(0, 0, v.getWidth(), v.getHeight()), false));
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     /** The app's version name from the manifest, for the footer; empty if it cannot be read. */
@@ -915,19 +4889,6 @@ public class MainActivity extends Activity {
         } catch (android.content.pm.PackageManager.NameNotFoundException e) {
             return "";
         }
-    }
-
-    /**
-     * The firmware version the bring-up patch writes, read from its file name
-     * (JH_&lt;12 digits&gt;&lt;NNNN&gt;_&lt;hex&gt;.bin, e.g. ...11090017_... -&gt; "v0.17"). It tracks the firmware the
-     * patch actually carries, which can differ from the app's own version on an app-only release; it falls back to the
-     * raw file name if the pattern ever changes, so a wrong number is never shown.
-     */
-    private static String bringupFirmwareVersion() {
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("JH_\\d{12}(\\d{4})_[0-9A-Fa-f]+\\.bin")
-                .matcher(Candidates.Kind.BRINGUP.fileName);
-        return m.matches() ? "v0." + Integer.parseInt(m.group(1)) : Candidates.Kind.BRINGUP.fileName;
     }
 
     private int installedVersionCode() {
@@ -1019,7 +4980,7 @@ public class MainActivity extends Activity {
                 dialog = null;
             }
             if (!gone()) {
-                updateButtons();
+                afterDialog();
             }
         });
         dialog = d;
@@ -1050,7 +5011,7 @@ public class MainActivity extends Activity {
                     dialog = null;
                 }
                 if (!gone()) {
-                    updateButtons();
+                    afterDialog();
                 }
             });
             dialog = d;
@@ -1074,19 +5035,83 @@ public class MainActivity extends Activity {
         // and no check still running. A flash from a copy saved to the phone is a flash too, so the copy is gated the
         // same way.
         boolean fileOk = gate(fileCheck, fileData) == null;
-        boolean cardOk = card != null && card.state.writable();
+        // A listing of a drive that is not mounted now (ejected, or pulled out) no longer says what it holds.
+        boolean attached = mounted(volume(treeUuid()));
+        boolean cardOk = card != null && card.state.writable() && attached;
         writeButton.setEnabled(idle && fileOk && cardOk);
-        cleanButton.setEnabled(idle && card != null && card.state.listed && !card.state.updateFiles.isEmpty());
+        cleanButton.setEnabled(idle && attached && card != null && card.state.listed
+                && !card.state.updateFiles.isEmpty());
         downloadButton.setEnabled(idle && !downloading);
         probeButton.setEnabled(idle && !downloading);
-        bringupButton.setEnabled(idle && !downloading);
-        readResultButton.setEnabled(idle && !readingSensor && card != null && card.state.listed);
+        repairButton.setEnabled(idle && !downloading);
+        // The version menu is off while a file is being made, checked or written, so a pick never meets work in flight.
+        repairChoice.setEnabled(idle && !downloading && !checking);
+        repairChoice.setAlpha(repairChoice.isEnabled() ? 1f : 0.45f);   // the Spinner itself does not look off when it is
+        baseChoice.setEnabled(repairChoice.isEnabled());
+        baseChoice.setAlpha(repairChoice.isEnabled() ? 1f : 0.45f);
+        for (int i = 0; i < modBoxes.getChildCount(); i++) {
+            View box = modBoxes.getChildAt(i);
+            if (box instanceof android.widget.CheckBox) {
+                box.setEnabled(repairChoice.isEnabled() && box.getTag() == null);   // tag: the mod it conflicts with
+            }
+        }
+        factoryFileButton.setEnabled(idle);
+        readResultButton.setEnabled(idle && !readingSensor && attached && card != null && card.state.listed);
         backupButton.setEnabled(idle && !loadingBackup);
         saveButton.setEnabled(idle && fileOk);
         // Another drive picked during a write would show the write's result under the wrong drive.
         chooseButton.setEnabled(!busy());
         // Ejecting while a write or a removal runs would cut it short.
         ejectButton.setEnabled(!busy());
+        // Each flashing route writes only its own kind of file (go() drops another route's file).
+        if (!fitsRoute(fileCheck)) {
+            writeButton.setEnabled(false);
+        }
+        driveChange.setEnabled(!busy());
+        useFileButton.setEnabled(idle);
+        // A zip reads the card and may delete photos from it: nothing else touches the card or the drive meanwhile.
+        boolean zipping = archiving();
+        if (zipping) {
+            writeButton.setEnabled(false);
+            cleanButton.setEnabled(false);
+            readResultButton.setEnabled(false);
+            chooseButton.setEnabled(false);
+            ejectButton.setEnabled(false);
+            driveChange.setEnabled(false);
+        }
+        removeEjectButton.setEnabled(ejectButton.isEnabled());
+        // The Remove step's own Eject once it holds a removal's result; the line under the flash question is the run's.
+        FlashFlow f = flow();
+        removeEjectButton.setVisibility(f != null && f.removalShown() ? View.VISIBLE : View.GONE);
+        if (flashAnswerView != null) {
+            setStatus(flashAnswerView, f == null ? "" : f.answerLine(live()));
+        }
+        showFlashAgain(f);
+        // Before the answer a listing found the written file gone: the write step, open again, says so.
+        String gone = f == null || busy() ? "" : f.goneLine();
+        if (!gone.isEmpty() && !gone.contentEquals(writeStatus.getText())) {
+            setStatus(writeStatus, gone);
+        } else if (gone.isEmpty() && !busy() && writeStatus.getText().toString().startsWith(GONE_LINE)) {
+            writeStatus.setText("");      // listed with the file again (or written again): that line no longer holds
+        }
+        // A zip may take minutes: the screen stays on while one runs.
+        if (zipping) {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+        showDriveLine();      // the answer, a removal or a listing changes it while the drive is away
+        boolean listed = readable(card) && attached;
+        zipButton.setEnabled(idle && !zipping && listed);
+        shotsButton.setEnabled(idle && !zipping && listed && shotsSince != 0);
+        checkPhotoButton.setEnabled(idle && !zipping && !checkingPhoto && listed);
+        identifyButton.setEnabled(idle && !zipping && !identifying && listed);
+        // A zip's end on screen as the last refresh left it, with the drive listed now, has been seen.
+        markSeen(backupArchive, zipStatus, listed);
+        markSeen(shotsArchive, shotsStatus, listed);
+        refreshSteps();
+        // After the steps: the eject's result follows the states just applied.
+        placeEjectStatus();
     }
 
     /** WriteGate's answer for this file and check, with the backup on record now: null when it may go to the card. */
@@ -1173,17 +5198,15 @@ public class MainActivity extends Activity {
 
     /** Step 1's readout: the plain summary, and under it the technical part (hidden when there is none). */
     private void showFile(String summary, String technical) {
+        checkShown = false;
         setStatus(fileStatus, summary == null ? "" : summary.trim());
         showDetail(technical);
-        // The probe/bring-up/download buttons sit far below this readout; scroll it into view so the result is seen
-        // without hunting back up the page.
-        if (uiReady && scroll != null) {
-            fileStatus.post(() -> fileStatus.requestRectangleOnScreen(
-                    new android.graphics.Rect(0, 0, fileStatus.getWidth(), fileStatus.getHeight()), false));
+        if (uiReady) {
+            reveal(fileStatus);
         }
     }
 
-    /** Fills step 1's detail block (hidden behind the Details toggle, collapsed on every new readout). */
+    /** Fills the file step's detail block (hidden behind the Details toggle, collapsed on every new readout). */
     private void showDetail(String technical) {
         boolean none = technical == null || technical.trim().isEmpty();
         fileDetail.setText(none ? "" : technical.trim());
@@ -1192,21 +5215,38 @@ public class MainActivity extends Activity {
         fileDetailToggle.setVisibility(none ? View.GONE : View.VISIBLE);
     }
 
-    /** The "Detail:" block for step 1's readout, or null when there is no detail. */
+    /** The "Detail:" block for the file step's readout, or null when there is no detail. */
     private static String detailBlock(String d) {
         return d == null || d.trim().isEmpty() ? null : "Detail: " + d.trim();
     }
 
-    /** What to do after step 1 has a file that passed. A file the owner chose may already be a copy on the card. */
+    /** What to do once the file step has a file that passed. A file the owner chose may already be on the card. */
     private static String nextAfterFile(boolean chosen) {
-        return chosen ? "Next: go on with step 2. If this copy is already on the card, eject the card and go on with"
-                + " step 4." : "Next: go on with step 2.";
+        return chosen ? "Next: connect the camera's drive and write it. If this copy is already on the card, tap "
+                + q(WRITE) + " all the same: the app finds it there, writes nothing, and moves on to Eject."
+                : "Next: connect the camera's drive and write it.";
+    }
+
+    /**
+     * For a file that passed but that the flashing route on screen does not write (each writes only its own kind):
+     * where it is written instead; null when this route writes it, or the screen is not a flashing route.
+     */
+    private String writtenElsewhere(UpdateCheck.Result result) {
+        if ((route != Route.REPAIR && route != Route.PROBE && route != Route.RESTORE) || fitsRoute(result)) {
+            return null;
+        }
+        // Another flashing route drops this file (go()), so only Advanced writes this very copy.
+        String again = isProbe(result) ? "or make the probe again on " + routeTitle(Route.PROBE)
+                : isRepair(result) ? "or make it again on " + routeTitle(Route.REPAIR)
+                : "or open " + routeTitle(Route.RESTORE) + " and choose it again with " + q(USE_FILE);
+        return routeTitle(route) + " does not write this file. To write this copy, open Advanced; " + again + ".";
     }
 
     /** The withdrawn candidate (C, A or B) these bytes are, by SHA-256, or null. */
     private static Candidates.Kind withdrawnKind(String sha) {
         for (Candidates.Kind k : Candidates.Kind.values()) {
-            if (!k.offered && k.sha256.equals(sha)) {
+            // the stock restore file made from the cleaned copy has candidate C's bytes: it is the restore file
+            if (!k.offered && k.matches(sha) && !Candidates.Kind.RESTORE.matches(sha)) {
                 return k;
             }
         }
@@ -1215,20 +5255,53 @@ public class MainActivity extends Activity {
 
     /** Whether a checked file is the sensor-ID probe, by its reviewed SHA-256: a file written without a backup. */
     private static boolean isProbe(UpdateCheck.Result result) {
-        return result != null && Candidates.Kind.PROBE.sha256.equals(result.sha256);
+        return result != null && Candidates.Kind.PROBE.matches(result.sha256);
     }
 
-    /** Whether a checked file is the OV9732 bring-up, by its reviewed SHA-256. */
-    private static boolean isBringup(UpdateCheck.Result result) {
-        return result != null && Candidates.Kind.BRINGUP.sha256.equals(result.sha256);
+    /**
+     * The base and mods a checked file the Repair route writes was made from (a preset such as v0.26, or a Custom pick),
+     * by its reviewed SHA-256, or null.
+     */
+    private static Recipe.Selection repairOf(UpdateCheck.Result result) {
+        return result == null || !Candidates.isRepairFile(result.sha256) ? null : Recipe.selectionOf(result.sha256);
     }
 
-    /** Whether a checked file is one of the reviewed patches (probe or bring-up): the files written without a backup. */
+    /**
+     * Whether a checked file is one the Repair route writes: a preset version or any Custom pick (Candidates.isRepairFile:
+     * every reviewed build but the probe and the stock restore file).
+     */
+    private static boolean isRepair(UpdateCheck.Result result) {
+        return repairOf(result) != null;
+    }
+
+    /** The few words after a Repair pick's name: a preset's menu summary, or a Custom pick's set label. */
+    private static String summaryOf(Recipe.Selection sel) {
+        Candidates.Kind k = sel.kind();
+        return k != null && k.summary != null ? k.summary : sel.label();
+    }
+
+    /**
+     * Whether a checked file is a reviewed file (the sensor-ID probe, any Repair file, the stock restore file: every
+     * build of the recipe table): the files written without a backup.
+     */
     private static boolean isReviewedPatch(UpdateCheck.Result result) {
         return result != null && Candidates.isReviewedPatch(result.sha256);
     }
 
-    /** How many WARN lines a checked file produced, for the one-line status in step 1. */
+    /**
+     * The warning for writing a reviewed file when nothing confirms what this camera runs (Recipe.unconfirmed): no
+     * backup on record and no Identify answer for the same sensor. Null when something does, or for another file.
+     */
+    private String unconfirmed(UpdateCheck.Result result) {
+        if (!isReviewedPatch(result)) {
+            return null;
+        }
+        Identify.Base f = identifiedBase;
+        return Recipe.unconfirmed(Recipe.selectionOf(result.sha256), backupSha256 != null,
+                f == Identify.Base.V012 ? "v012" : f == Identify.Base.V006_FAMILY ? "v006-family" : null);
+    }
+
+    /** How many WARN lines a checked file produced, for the file step's one-line status. */
     private static int warnCount(UpdateCheck.Result result) {
         int n = 0;
         for (UpdateCheck.Line l : result.lines) {
@@ -1294,9 +5367,6 @@ public class MainActivity extends Activity {
                     sha = null;
                     text = "Not taken as a backup: " + sentence(problem) + (isPublic
                             ? " If it is a read of this camera, keep it: it is the way back to what the camera runs now."
-                            + " It cannot show what fits the camera, so the app has nothing to compare an update file"
-                            + " with, and does not write to the card. A camera that can no longer take pictures since a"
-                            + " flash needs the donor route, on a computer (docs/02-RECOVERY.md, section D)."
                             : " The app needs the 2 MB file the toolkit's backup command read from this camera's flash"
                             + " chip. Tap " + q(BACKUP) + " to choose it.") + "\n"
                             + "File: " + name + ".";
@@ -1305,10 +5375,7 @@ public class MainActivity extends Activity {
                     for (String note : UpdateCheck.backupNotes(data, UpdateCheck.PUBLIC_BUILD)) {
                         notes.append('\n').append(note);
                     }
-                    text = "Backup on record: " + name + ", " + UpdateCheck.bytes(data.length) + ". The app compares the"
-                            + " update file with it in step 1, and writes to the card only while this backup is here."
-                            + " Keep the file itself somewhere safe: it is the only way back to what the camera runs now."
-                            + notes + detail("SHA-256 " + sha + ".");
+                    text = "Backup on record: " + name + ", " + UpdateCheck.bytes(data.length) + "." + notes;
                 }
             } catch (IOException | RuntimeException e) {
                 data = null;
@@ -1332,8 +5399,16 @@ public class MainActivity extends Activity {
                 backupName = d == null ? null : n;
                 backupUri = d == null ? null : uri;
                 setStatus(backupStatus, t);
+                backupDetail.setText(h == null ? "" : "SHA-256 " + h);
+                backupDetail.setVisibility(View.GONE);
+                backupDetailToggle.setText("\u25b8 Details");
+                backupDetailToggle.setVisibility(h == null ? View.GONE : View.VISIBLE);
                 if (!Objects.equals(before, h)) {
                     dismissWriteDialog();
+                    // Restore: a write checked against another backup, not yet flashed, no longer counts.
+                    FlashFlow restore = runOf(treeUuid(), FlashFlow.Route.RESTORE);
+                    restore.backupChanged(h);
+                    keep(treeUuid(), restore);
                 }
                 outdated(h);
                 recheckFile();
@@ -1352,22 +5427,22 @@ public class MainActivity extends Activity {
         if (writtenWith != null && !writtenWith.equals(now)
                 && (written.startsWith(WRITTEN) || written.startsWith(NOTHING_TO_WRITE))) {
             setStatus(writeStatus, "The update file on the card was checked against the backup chosen before, "
-                    + writtenName + ", and step 0 has changed since. Unless step 1 says \"OK to put on the card\" again,"
-                    + " remove the file from the card (step 5) before the card goes back into the camera.");
+                    + writtenName + ", and the backup on record has changed since. Unless the file step says \"OK to put on"
+                    + " the card\" again, tap " + q(REMOVE) + " before the card goes back into the camera.");
             writtenWith = null;
         }
         String saved = saveStatus.getText().toString();
         if (savedWith != null && !savedWith.equals(now) && saved.startsWith(SAVED)) {
             setStatus(saveStatus, "The copy saved to the phone was checked against the backup chosen before, "
-                    + savedName + ", and step 0 has changed since. Do not put it on the card unless step 1 says \"OK to"
-                    + " put on the card\" again.");
+                    + savedName + ", and the backup on record has changed since. Do not put it on the card unless the file"
+                    + " step says \"OK to put on the card\" again.");
             savedWith = null;
         }
     }
 
     /**
-     * Checks the file in step 1 again, against the backup on record now, whenever its check was made against another
-     * one (or none). Until the new check is in, nothing is written or saved (WriteGate), and step 1 says so.
+     * Checks the file in the file step again, against the backup on record now, whenever its check was made against another
+     * one (or none). Until the new check is in, nothing is written or saved (WriteGate), and the file step says so.
      */
     private void recheckFile() {
         final byte[] data = fileData;
@@ -1376,11 +5451,11 @@ public class MainActivity extends Activity {
             checking = false;
             return;
         }
-        // The reviewed patches (probe, bring-up) are backup-independent; their check is never re-made against a backup.
+        // The reviewed patches (probe, Repair versions) are backup-independent; their check is never re-made against one.
         // This keys on the applied check (fileCheck), set and cleared together with fileData on the UI thread, so a
         // patch in fileData always has isReviewedPatch(fileCheck) true here (finding 7). Keep that lock-step if you
         // change how file state is set.
-        if (isReviewedPatch(fileCheck)) {
+        if (fileCheck != null && Candidates.checkedAlone(fileCheck.sha256)) {
             checking = false;
             return;
         }
@@ -1398,7 +5473,7 @@ public class MainActivity extends Activity {
         showFile("Checking the update file again, against the backup now on record…", null);
         updateButtons();
         WORKER.execute(() -> {
-            final UpdateCheck.Result result = UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
+            final UpdateCheck.Result result = Candidates.check(name, data, ref);
             ui.post(() -> {
                 if (gone() || request != fileRequest || check != checkRequest || fileData != data) {
                     return;
@@ -1417,7 +5492,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Applies a check made on the worker to step 1, unless it was made against another backup than the one on record
+     * Applies a check made on the worker to the file step, unless it was made against another backup than the one on record
      * now: then the file is kept and checked again, and the old check is never shown or used.
      */
     private void applyCheck(byte[] data, UpdateCheck.Result result, String name, String origin, boolean chosen) {
@@ -1425,21 +5500,52 @@ public class MainActivity extends Activity {
         fileName = name;
         fileOrigin = origin;
         fileChosen = chosen;
-        // The reviewed patches (probe, bring-up) are backup-independent (WriteGate's exemption): each is checked with
+        // The reviewed patches (probe, Repair versions) are backup-independent (WriteGate's exemption): each is checked with
         // no reference (buildRestore), so its check never needs re-checking against the backup on record, and must not
         // be — comparing it with a backup it was never meant to match would fail its sensor-table line and refuse a
         // file that needs no backup. Apply the patch's check as it stands.
-        if (!isReviewedPatch(result) && !Objects.equals(result.referenceSha256, backupSha256)) {
+        if (!Candidates.checkedAlone(result.sha256) && !Objects.equals(result.referenceSha256, backupSha256)) {
             fileCheck = null;
             recheckFile();
             return;
         }
         fileCheck = result;
+        followLoadedRepair(result);
         showChecked(result, origin, chosen);
+    }
+
+    /**
+     * The Repair route writes any of its versions, so a Repair-version file loaded for it that is not the version
+     * picked in the menu becomes the pick (and is remembered): the step's title, the menu, the check line and the file
+     * written then always name the same version.
+     */
+    private void followLoadedRepair(UpdateCheck.Result result) {
+        Recipe.Selection k = repairOf(result);
+        if (fileFor != Route.REPAIR || k == null || k.equals(repairSel)) {
+            return;
+        }
+        repairSel = k;
+        repairCustom = presetIndex(k) < 0;    // a file of a preset shows that preset; any other shows Custom
+        rememberRepair();
+        freshRunIfStale(FlashFlow.Route.REPAIR);
+        if (route == Route.REPAIR) {
+            render();
+        }
     }
 
     /** Step 1's readout for a file that was checked: the verdict, where the file came from, and what to do next. */
     private void showChecked(UpdateCheck.Result result, String origin, boolean chosen) {
+        fileStatus.setText(checkLine(result, chosen));
+        checkShown = true;
+        reveal(fileStatus);
+        showDetail(result.verdict() + "\n\n" + origin + "\n\nDetail: " + UpdateCheck.bytes(result.size) + ", SHA-256 "
+                + result.sha256 + ".\n\nThe app's checks"
+                + (result.compared ? ", compared with " + backupName : " (not compared with a backup)") + ":\n\n"
+                + result.report());
+    }
+
+    /** The file step's verdict and next line for a checked file, for the route on screen. */
+    private SpannableString checkLine(UpdateCheck.Result result, boolean chosen) {
         String state;
         int color;
         String next;
@@ -1450,17 +5556,21 @@ public class MainActivity extends Activity {
         } else if (isProbe(result)) {
             state = "\u2713 Sensor-ID probe ready \u2014 no backup needed.";
             color = okColor;
-            next = "Connect the camera (step 2) and tap " + q(WRITE) + ". After it flashes, open photo mode, then read"
-                    + " it with " + q(READ_RESULT) + " in step 4.";
-        } else if (isBringup(result)) {
-            state = "\u2713 OV9732 bring-up " + bringupFirmwareVersion() + " ready \u2014 no backup needed.";
-            color = okColor;
-            next = "Connect the camera (step 2) and tap " + q(WRITE) + ". After it flashes, power the camera on and try"
-                    + " a photo, then take the card out and look at the JPEGs. The stock restore file puts it back.";
+            next = "Next: connect the camera's drive and tap " + q(WRITE) + ".";
+        } else if (isReviewedPatch(result)) {
+            String unsure = unconfirmed(result);
+            int warns = warnCount(result);
+            Recipe.Selection sel = Recipe.selectionOf(result.sha256);
+            state = "\u2713 " + (isRepair(result) ? "Firmware " + repairOf(result).name() : sel != null ? sel.label()
+                    : "Reviewed file") + " ready." + (warns == 0 ? "" : " " + warns + (warns == 1 ? " warning"
+                    : " warnings") + " \u2014 see Details.");
+            color = unsure != null || warns > 0 ? warnAccent : okColor;
+            next = (unsure == null ? "" : "\u26a0 " + unsure + "\n") + "Next: connect the camera's drive and tap "
+                    + q(WRITE) + ".";
         } else if (!result.compared) {
             state = "\u26a0 Needs this camera's backup first.";
             color = warnAccent;
-            next = "Add it in step 0; the app compares the file with it before it will write.";
+            next = "Tap " + q(BACKUP) + " first; the app compares the file with it before it will write.";
         } else {
             int warns = warnCount(result);
             state = "\u2713 OK to put on the card." + (warns == 0 ? ""
@@ -1468,15 +5578,14 @@ public class MainActivity extends Activity {
             color = okColor;
             next = nextAfterFile(chosen);
         }
+        String elsewhere = result.ok ? writtenElsewhere(result) : null;
+        if (elsewhere != null) {
+            next = elsewhere;     // Write stays off here, so "tap Write" would lead nowhere
+        }
         SpannableString line = new SpannableString(state + "\n" + next);
         line.setSpan(new StyleSpan(Typeface.BOLD), 0, state.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         line.setSpan(new android.text.style.ForegroundColorSpan(color), 0, state.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        fileStatus.setText(line);
-        reveal(fileStatus);
-        showDetail(result.verdict() + "\n\n" + origin + "\n\nDetail: " + UpdateCheck.bytes(result.size) + ", SHA-256 "
-                + result.sha256 + ".\n\nThe app's checks"
-                + (result.compared ? ", compared with " + backupName : " (not compared with a backup)") + ":\n\n"
-                + result.report());
+        return line;
     }
 
     // --- the update file ----------------------------------------------------------------------------------------
@@ -1512,7 +5621,7 @@ public class MainActivity extends Activity {
             startActivityForResult(i, SAVE_COPY);
         } catch (ActivityNotFoundException | SecurityException e) {
             setStatus(saveStatus, "No copy was saved: Android could not open its screen for saving a file. Use the"
-                    + " camera's USB-C cable or a USB card reader instead (step 2)." + detail(why(e)));
+                    + " camera's USB-C cable or a USB card reader instead." + detail(why(e)));
         }
     }
 
@@ -1522,7 +5631,7 @@ public class MainActivity extends Activity {
         saveData = null;
         saveCheck = null;
         // Checked again against the backup on record now: it may have changed while the save screen was open. A check
-        // of another file in step 1 does not concern these bytes; a changed backup shows in its SHA-256.
+        // of another file in the file step does not concern these bytes; a changed backup shows in its SHA-256.
         final String refusal = data == null ? "the app was restarted while the save screen was open (a dark-mode, font"
                 + " or language change can do that), so it no longer had the file to save"
                 : WriteGate.refusal(check, data, backupSha256, loadingBackup, false);
@@ -1596,23 +5705,27 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** Download the public stock dump from its pinned upstream address, then make the chosen kind of file from it. */
-    private void downloadDump(Candidates.Kind kind) {
+    /**
+     * Download the public stock dump from its pinned upstream address, then make the chosen kind of file from it, for
+     * the route forRoute. The file loaded before goes now, so the one being made is tagged for that route from here.
+     */
+    private void downloadDump(Recipe.Selection sel, Route forRoute) {
         dismissDialog();
         final int request = ++fileRequest;
         fileData = null;
         fileCheck = null;
         fileName = null;
+        fileFor = forRoute;
         checking = false;          // a check of the earlier file still running is dropped (fileRequest)
         saveStatus.setText("");
         if (!busy()) {
             writeStatus.setText("");
         }
         if (stockDump != null) {               // already downloaded and checked: make the file again without a new download
-            buildRestore(stockDump, request, "Used the stock dump the app already has.", kind);
+            buildRestore(stockDump, request, "Used the stock dump the app already has.", sel, forRoute);
             return;
         }
-        showFile("Downloading the stock dump from GitHub (2 MB)…", null);
+        showFile("Getting the stock dump (2 MB; the first time it downloads from GitHub)…", null);
         downloading = true;
         updateButtons();
         NET.execute(() -> {
@@ -1624,8 +5737,15 @@ public class MainActivity extends Activity {
             final String wrong = "The download arrived, but it is not the stock dump, so the app will not use it.\n"
                     + "A Wi-Fi network that asks you to sign in can cause this, or a download that stopped part way."
                     + " Open a web page in the browser to check the connection. Then tap " + q(DOWNLOAD) + " again.";
+            boolean kept = false;
+            boolean keeping = false;
             try {
-                dump = Candidates.stockDump(fetch(Candidates.STOCK_DUMP_DOWNLOAD));
+                dump = keptDump();             // the phone's own copy, checked again: no download needed
+                kept = dump != null;
+                if (dump == null) {
+                    dump = Candidates.stockDump(fetch(Candidates.STOCK_DUMP_DOWNLOAD));
+                    keeping = keepDump(dump);  // "keeps a copy" is said only when it did
+                }
             } catch (IOException e) {
                 if (GITHUB_REFUSED.equals(e.getMessage())) {
                     problem = "The stock dump did not download: GitHub did not send the file. It may be busy.\n"
@@ -1651,6 +5771,8 @@ public class MainActivity extends Activity {
             final byte[] d = dump;
             final String p = problem;
             final String x = technical;
+            final boolean fromKept = kept;
+            final boolean keptNow = keeping;
             ui.post(() -> {
                 if (gone()) {
                     return;
@@ -1668,74 +5790,315 @@ public class MainActivity extends Activity {
                     updateButtons();
                     return;
                 }
-                buildRestore(d, request, "Downloaded the stock dump from GitHub and checked it.", kind);
+                buildRestore(d, request, fromKept ? "Used the stock dump kept on this phone, checked again."
+                        : "Downloaded the stock dump from GitHub and checked it."
+                        + (keptNow ? " The app keeps a copy on this phone." : ""), sel, forRoute);
             });
         });
     }
 
-    /** Explain the sensor-ID probe (a diagnostic, written without a backup), then build it on the owner's go-ahead. */
-    private void confirmMakeProbe() {
-        if (busy() || dialog != null || downloading) {
-            return;
+    /** Where the app keeps its own checked copy of the stock dump, so it never needs GitHub's copy again. */
+    private static final String KEPT_DUMP = "stock-dump.bin";
+    /** Where the app keeps the owner's factory dump once picked, so it is picked only once. Never leaves the phone. */
+    private static final String KEPT_FACTORY = "factory-dump.bin";
+
+    /** The kept factory dump if it is there and still exactly that dump; a damaged copy is thrown away. Worker thread. */
+    private byte[] keptFactoryDump() {
+        File f = new File(getFilesDir(), KEPT_FACTORY);
+        if (!f.isFile()) {
+            return null;
         }
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Make the sensor-ID probe?")
-                .setMessage("This is a diagnostic, not a repair. It will not make the camera take pictures.\n\n"
-                        + "It is the one file the app puts on the card without a backup in step 0, because it is built"
-                        + " from the public build and the stock restore file (step 1) puts it back: its boot and update"
-                        + " code are that file's, byte for byte.\n\n"
-                        + "After you flash it (steps 2 to 4) and open photo mode on the camera, it scans the sensor"
-                        + " bus and writes a result to SENSOR.TXT on the card and the camera stops as it does now. Read it"
-                        + " with " + q(READ_RESULT) + " in step 4.\n\n"
-                        + "The app cannot prove the file fits your camera without a dump of its chip, which you do not"
-                        + " have. The worst case is an empty result, not a damaged camera.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Make it", (di, w) -> downloadDump(Candidates.Kind.PROBE))
-                .create();
-        d.setOnDismissListener(di -> {
-            if (dialog == di) {
-                dialog = null;
-            }
-            if (!gone()) {
-                updateButtons();
-            }
-        });
-        dialog = d;
-        d.show();
-        updateButtons();
+        try (InputStream in = new java.io.FileInputStream(f)) {
+            return Candidates.factoryDump(readAll(in));
+        } catch (IOException | IllegalArgumentException e) {
+            f.delete();                       // not the factory dump any more: the owner picks it again
+            return null;
+        }
     }
 
-    /** Explain the OV9732 bring-up (a reviewed patch, written without a backup), then build it on the owner's go-ahead. */
-    private void confirmMakeBringup() {
-        if (busy() || dialog != null || downloading) {
+    /**
+     * Make a factory version from the owner's factory dump: the copy in memory, or the one kept on the phone, read and
+     * checked again on the worker. With none, the file step says how to give it to the app. The file loaded before
+     * goes now, so the one being made is tagged for forRoute from here, as downloadDump does.
+     */
+    private void makeFactory(Recipe.Selection sel, Route forRoute) {
+        dismissDialog();
+        final int request = ++fileRequest;
+        fileData = null;
+        fileCheck = null;
+        fileName = null;
+        fileFor = forRoute;
+        checking = false;          // a check of the earlier file still running is dropped (fileRequest)
+        saveStatus.setText("");
+        if (!busy()) {
+            writeStatus.setText("");
+        }
+        if (factoryDump != null) {
+            buildRestore(factoryDump, request, "Used the factory dump the app already has.", sel, forRoute);
             return;
         }
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Make the OV9732 bring-up — firmware " + bringupFirmwareVersion() + "?")
-                .setMessage("This is experimental. It drives the OmniVision OV9732 that is fitted, in place of the"
-                        + " SuperPix SP140A the firmware was built for, so the camera can try to take a picture.\n\n"
-                        + "Like the sensor-ID probe, it goes on the card without a backup in step 0, because it is built"
-                        + " from the public build and the stock restore file (step 1) puts it back: its boot and update"
-                        + " code are that file's, byte for byte, and the SP140A table is left in place.\n\n"
-                        + "After you flash it (steps 2 to 4), power the camera on and try a photo, then take the card out"
-                        + " and look at the JPEGs.\n\n"
-                        + "It may take no clean picture on the first try: the sensor's 1-lane MIPI timing has to match"
-                        + " what the camera's receiver expects, which can only be confirmed on the bench. It cannot"
-                        + " damage the camera; the worst case is no picture, as now.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Make it", (di, w) -> downloadDump(Candidates.Kind.BRINGUP))
-                .create();
-        d.setOnDismissListener(di -> {
-            if (dialog == di) {
-                dialog = null;
-            }
-            if (!gone()) {
-                updateButtons();
-            }
-        });
-        dialog = d;
-        d.show();
+        showFile("Reading the factory dump kept on this phone…", null);
         updateButtons();
+        WORKER.execute(() -> {
+            final byte[] d = keptFactoryDump();
+            ui.post(() -> {
+                if (gone()) {
+                    return;
+                }
+                if (d != null) {
+                    factoryDump = d;
+                }
+                if (request != fileRequest) {
+                    updateButtons();
+                    return;
+                }
+                if (d == null) {
+                    downloadFactory(sel, forRoute, request);   // none on the phone: the public cleaned copy
+                    return;
+                }
+                buildRestore(d, request, "Used the factory dump kept on this phone, checked again.", sel, forRoute);
+            });
+        });
+    }
+
+    /**
+     * With no factory dump on the phone: download the factory build v012's public cleaned copy, check it by SHA-256
+     * (Candidates.factoryDump), keep it as the factory dump, and make the version from it. The owner's own read, picked
+     * with Use a file, is kept in its place and used first from then on.
+     */
+    private void downloadFactory(Recipe.Selection sel, Route forRoute, int request) {
+        showFile("Getting the factory dump (2 MB, the public cleaned copy of build v012; it downloads from GitHub once)…",
+                null);
+        downloading = true;
+        updateButtons();
+        NET.execute(() -> {
+            byte[] dump = null;
+            String problem = null;
+            String technical = null;
+            boolean keeping = false;
+            final String again = " Then tap " + q(makeLabel(sel)) + " again.";
+            final String instead = " Or open " + Candidates.CLEAN_FACTORY_PAGE + " in the browser, download "
+                    + Candidates.CLEAN_FACTORY_NAME + " there, and tap " + q(USE_FILE) + "; or choose your own read of"
+                    + " the chip, " + Candidates.FACTORY_DUMP_NAME + ", the same way.";
+            final String wrong = "The download arrived, but it is not the factory dump, so the app will not use it.\nA"
+                    + " Wi-Fi network that asks you to sign in can cause this, or a download that stopped part way."
+                    + again + instead;
+            try {
+                dump = Candidates.factoryDump(fetch(Candidates.CLEAN_FACTORY_DOWNLOAD));
+                keeping = keepFactoryDump(dump);
+            } catch (IOException e) {
+                if (GITHUB_REFUSED.equals(e.getMessage())) {
+                    problem = "The factory dump did not download: GitHub did not send the file. It may be busy.\nWait a"
+                            + " few minutes." + again + instead;
+                } else if (e instanceof Plain) {
+                    problem = wrong;
+                } else {
+                    problem = "The factory dump did not download: the phone could not reach GitHub, or the connection"
+                            + " stopped.\nCheck the connection." + again + instead;
+                }
+                technical = detailOf(e);
+            } catch (IllegalArgumentException e) {
+                String[] parts = split(e.getMessage());
+                problem = wrong;
+                technical = parts[1].isEmpty() ? firstSentence(parts[0]) : parts[1];
+            } catch (RuntimeException e) {
+                problem = "The factory dump did not download: the download stopped with an error." + again + instead;
+                technical = why(e);
+            }
+            final byte[] d = dump;
+            final String p = problem;
+            final String x = technical;
+            final boolean keptNow = keeping;
+            ui.post(() -> {
+                if (gone()) {
+                    return;
+                }
+                downloading = false;
+                if (d != null) {
+                    factoryDump = d;
+                }
+                refreshRepairChoice();
+                if (request != fileRequest) {
+                    updateButtons();
+                    return;
+                }
+                if (d == null) {
+                    showFile(p, detailBlock(x));
+                    updateButtons();
+                    return;
+                }
+                buildRestore(d, request, "Downloaded the factory dump (" + Candidates.CLEAN_FACTORY_NAME + ") from"
+                        + " GitHub and checked it." + (keptNow ? " The app keeps a copy on this phone." : ""), sel,
+                        forRoute);
+            });
+        });
+    }
+
+    /** Where the app keeps build v008_test's public file once downloaded and checked, so it downloads only once. */
+    private static final String KEPT_V008 = "v008_test-dump.bin";
+
+    /** The v008_test file as the recipes start from it, checked by its SHA-256 (Recipes.DUMPS); throws otherwise. */
+    private static byte[] v008File(byte[] data) {
+        String[] want = Recipe.download(Recipe.V008);
+        String sha = UpdateCheck.sha256Hex(data, 0, data.length);
+        if (want == null || !want[4].equals(sha)) {
+            throw new IllegalArgumentException("the file is not build v008_test's public file, so the app will not use"
+                    + " it.\nDetail: its SHA-256 is " + sha + "; the public file's is "
+                    + (want == null ? "not listed" : want[4]) + ".");
+        }
+        return data;
+    }
+
+    /** The kept v008_test file if it is there and still exactly that file; a damaged copy is thrown away. */
+    private byte[] keptV008() {
+        File f = new File(getFilesDir(), KEPT_V008);
+        if (!f.isFile()) {
+            return null;
+        }
+        try (InputStream in = new java.io.FileInputStream(f)) {
+            return v008File(readAll(in));
+        } catch (IOException | IllegalArgumentException e) {
+            f.delete();
+            return null;
+        }
+    }
+
+    /**
+     * Make a v008_test pick: from the file already checked, the copy kept on the phone, or build v008_test's public
+     * file, downloaded at a fixed commit (Recipes.DUMPS) and checked by SHA-256, as downloadDump does for v006. The
+     * file loaded before goes now, so the one being made is tagged for forRoute from here.
+     */
+    private void downloadV008(Recipe.Selection sel, Route forRoute) {
+        dismissDialog();
+        final int request = ++fileRequest;
+        fileData = null;
+        fileCheck = null;
+        fileName = null;
+        fileFor = forRoute;
+        checking = false;          // a check of the earlier file still running is dropped (fileRequest)
+        saveStatus.setText("");
+        if (!busy()) {
+            writeStatus.setText("");
+        }
+        if (v008Dump != null) {
+            buildRestore(v008Dump, request, "Used build v008_test's file the app already has.", sel, forRoute);
+            return;
+        }
+        showFile("Getting build v008_test's public file (1.4 MB; the first time it downloads from GitHub)…", null);
+        downloading = true;
+        updateButtons();
+        final String[] entry = Recipe.download(Recipe.V008);
+        NET.execute(() -> {
+            byte[] dump = null;
+            String problem = null;
+            String technical = null;
+            boolean kept = false;
+            boolean keeping = false;
+            final String again = " Then tap " + q(makeLabel(sel)) + " again.";
+            try {
+                dump = keptV008();
+                kept = dump != null;
+                if (dump == null) {
+                    dump = v008File(fetch(entry[5]));
+                    keeping = keepCopy(KEPT_V008, dump);
+                }
+            } catch (IOException e) {
+                problem = GITHUB_REFUSED.equals(e.getMessage())
+                        ? "Build v008_test's file did not download: GitHub did not send the file. It may be busy.\nWait"
+                        + " a few minutes." + again
+                        : e instanceof Plain ? "The download arrived, but it is not build v008_test's file, so the app"
+                        + " will not use it.\nA Wi-Fi network that asks you to sign in can cause this." + again
+                        : "Build v008_test's file did not download: the phone could not reach GitHub, or the connection"
+                        + " stopped.\nCheck the connection." + again;
+                technical = detailOf(e);
+            } catch (IllegalArgumentException e) {
+                String[] parts = split(e.getMessage());
+                problem = "The download arrived, but it is not build v008_test's file, so the app will not use it.\nA"
+                        + " Wi-Fi network that asks you to sign in can cause this, or a download that stopped part way."
+                        + again;
+                technical = parts[1].isEmpty() ? firstSentence(parts[0]) : parts[1];
+            } catch (RuntimeException e) {
+                problem = "Build v008_test's file did not download: the download stopped with an error." + again;
+                technical = why(e);
+            }
+            final byte[] d = dump;
+            final String p = problem;
+            final String x = technical;
+            final boolean fromKept = kept;
+            final boolean keptNow = keeping;
+            ui.post(() -> {
+                if (gone()) {
+                    return;
+                }
+                downloading = false;
+                if (d != null) {
+                    v008Dump = d;
+                }
+                if (request != fileRequest) {
+                    updateButtons();
+                    return;
+                }
+                if (d == null) {
+                    showFile(p, detailBlock(x));
+                    updateButtons();
+                    return;
+                }
+                buildRestore(d, request, fromKept ? "Used build v008_test's file kept on this phone, checked again."
+                        : "Downloaded build v008_test's file from GitHub and checked it."
+                        + (keptNow ? " A copy stays on this phone." : ""), sel, forRoute);
+            });
+        });
+    }
+
+    /** The kept copy if it is there and still the exact stock dump; a damaged copy is thrown away. Worker thread. */
+    private byte[] keptDump() {
+        File f = new File(getFilesDir(), KEPT_DUMP);
+        if (!f.isFile()) {
+            return null;
+        }
+        try (InputStream in = new java.io.FileInputStream(f)) {
+            return Candidates.stockDump(readAll(in));
+        } catch (IOException | IllegalArgumentException e) {
+            f.delete();                       // not the stock dump any more: download it again
+            return null;
+        }
+    }
+
+    /**
+     * Keeps a checked stock dump in the app's own storage: written to a temporary file of its own beside it (so two
+     * threads keeping it at once never share one), synced, then renamed over it. True only once the rename worked.
+     * Worker or network thread.
+     */
+    private boolean keepDump(byte[] dump) {
+        return keepCopy(KEPT_DUMP, dump);
+    }
+
+    /** keepDump for the owner's factory dump (KEPT_FACTORY). */
+    private boolean keepFactoryDump(byte[] dump) {
+        return keepCopy(KEPT_FACTORY, dump);
+    }
+
+    /** Writes data to name in the app's own storage, as keepDump says. True only once the rename worked. */
+    private boolean keepCopy(String name, byte[] data) {
+        File f = new File(getFilesDir(), name);
+        File part;
+        try {
+            part = File.createTempFile(name, ".part", getFilesDir());
+        } catch (IOException | RuntimeException e) {
+            return false;                     // not kept; the next run gets it again
+        }
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(part)) {
+            out.write(data);
+            out.getFD().sync();
+        } catch (IOException e) {
+            part.delete();
+            return false;
+        }
+        if (!part.renameTo(f)) {
+            part.delete();
+            return false;
+        }
+        return true;
     }
 
     private static byte[] fetch(String address) throws IOException {
@@ -1754,9 +6117,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Make the chosen kind of update file from the dump. from says where the dump came from, for step 1's readout. */
-    private void buildRestore(byte[] dump, int request, String from, Candidates.Kind kind) {
-        stockDump = dump;
+    /** Make the chosen kind of update file from the dump. from says where the dump came from, for the file step's readout. */
+    private void buildRestore(byte[] dump, int request, String from, Recipe.Selection sel, Route forRoute) {
+        if (Recipe.V012.equals(sel.base)) {
+            factoryDump = dump;
+        } else if (Recipe.V008.equals(sel.base)) {
+            v008Dump = dump;
+        } else {
+            stockDump = dump;
+        }
         if (request != fileRequest) {
             return;
         }
@@ -1767,9 +6136,15 @@ public class MainActivity extends Activity {
             UpdateCheck.Result result = null;
             String problem = null;
             String technical = null;
+            // A preset (and the restore file and the probe) is made by Candidates.build exactly as before; any other
+            // pick by Recipe.build. Both refuse a result that is not the reviewed file; its name is its builds row's.
+            Candidates.Kind legacy = sel.kind();
+            String made = legacy != null ? legacy.fileName : sel.label();
             try {
-                data = Candidates.build(dump, kind);
-                result = Candidates.check(kind.fileName, data, ref);
+                data = legacy != null ? Candidates.build(dump, legacy) : Recipe.build(dump, sel);
+                String sha = UpdateCheck.sha256Hex(data, 0, data.length);
+                made = Recipe.fileNameFor(sha) != null ? Recipe.fileNameFor(sha) : legacy.fileNameFor(sha);
+                result = Candidates.check(made, data, ref);
             } catch (RuntimeException e) {
                 data = null;
                 result = null;
@@ -1781,6 +6156,7 @@ public class MainActivity extends Activity {
             final UpdateCheck.Result r = result;
             final String pp = problem;
             final String xx = technical;
+            final String mm = made;
             ui.post(() -> {
                 if (gone() || request != fileRequest) {
                     return;
@@ -1793,8 +6169,9 @@ public class MainActivity extends Activity {
                 } else {
                     // Checked against the backup on record when the download started; applyCheck checks it again if
                     // another backup has come in since.
-                    applyCheck(dd, r, kind.fileName, from + " Made " + kind.fileName + " from it: it matches the"
-                            + " published file exactly. " + kind.label, false);
+                    fileFor = forRoute;
+                    applyCheck(dd, r, mm, from + " Made " + mm + " from it: it matches the reviewed file exactly. "
+                            + (legacy != null ? legacy.label : Recipe.describe(sel)), false);
                 }
                 updateButtons();
             });
@@ -1814,16 +6191,23 @@ public class MainActivity extends Activity {
                 uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
             }
         } catch (RuntimeException e) {
+            if (route != Route.ADVANCED) {
+                go(Route.ADVANCED);
+            }
             showFile("The app could not read the file the other app sent. Tap " + q(USE_FILE) + " and choose it there"
                     + " instead.", detailBlock(why(e)));
             return;
         }
         if (uri != null) {
-            loadFile(uri);
+            if (route != Route.ADVANCED) {
+                go(Route.ADVANCED);
+            }
+            loadFile(uri, Route.ADVANCED);      // a file from another app is checked and written on the Advanced page
         }
     }
 
-    private void loadFile(Uri uri) {
+    /** Reads and checks a file the owner picked (or another app sent), for the route forRoute. */
+    private void loadFile(Uri uri, Route forRoute) {
         // A confirmation for the previous file must not stay on screen once another file is loaded.
         dismissDialog();
         final int request = ++fileRequest;
@@ -1831,6 +6215,7 @@ public class MainActivity extends Activity {
         fileData = null;
         fileCheck = null;
         fileName = null;
+        fileFor = forRoute;        // the file before is gone; the one being read is for this route
         checking = false;          // a check of the earlier file still running is dropped (fileRequest)
         saveStatus.setText("");
         if (!busy()) {
@@ -1845,12 +6230,21 @@ public class MainActivity extends Activity {
             byte[] data = null;
             UpdateCheck.Result result = null;
             byte[] stock = null;
+            byte[] factory = null;
+            boolean factoryKept = false;
             String origin = null;
             boolean chosen = false;
             try {
                 data = readAll(getContentResolver().openInputStream(uri));
-                stock = data.length == Candidates.DUMP_SIZE && Candidates.isStockDump(data) ? Candidates.stockDump(data) : null;
-                if (stock != null) {
+                // The owner's own factory dump first, by its SHA-256: kept, and the factory firmware made from it.
+                factory = Candidates.isFactoryDump(data) ? data : null;
+                stock = factory == null && data.length == Candidates.DUMP_SIZE && Candidates.isStockDump(data)
+                        ? Candidates.stockDump(data) : null;
+                if (factory != null) {
+                    factoryKept = keepFactoryDump(factory);
+                    summary = "";
+                } else if (stock != null) {
+                    keepDump(stock);           // a stock dump picked by hand is kept too
                     summary = "";
                 } else if (data.length == Candidates.DUMP_SIZE) {
                     String problem = UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S);
@@ -1858,20 +6252,21 @@ public class MainActivity extends Activity {
                         // Most likely the owner's own backup, picked in the wrong step.
                         summary = "\"" + name + "\" looks like a dump of a camera's flash chip, not an update file, and a"
                                 + " dump never goes on a card as it is. If it is this camera's backup, choose it with "
-                                + q(BACKUP) + " in step 0: the app then compares the update file with it. An update file"
+                                + q(BACKUP) + ": the app then compares the update file with it. An update file"
                                 + " is made from a dump with charmera pack on a computer.";
                     } else {
                         // Step 0 would refuse it too, so it is not pointed to: what is wrong with it is said instead.
                         summary = "\"" + name + "\" is a 2 MB dump, but not the public stock dump, the one dump the app"
-                                + " makes an update file from. Nor is it one that step 0 takes as a backup: "
+                                + " makes an update file from. Nor is it one the app takes as a backup: "
                                 + sentence(problem) + "\nA dump never goes on a card as it is.";
                         technical = detailBlock("its SHA-256 is " + UpdateCheck.sha256Hex(data, 0, data.length)
-                                + "; the public stock dump's is " + Candidates.STOCK_DUMP_SHA256 + ".");
+                                + "; the public stock dump's is " + Candidates.CLEAN_STOCK_SHA256 + " (the original's "
+                                + Candidates.STOCK_DUMP_SHA256 + ").");
                     }
                 } else {
                     result = Candidates.check(name, data, ref);
                     boolean renamed = result.cardName != null && !result.cardName.equals(name);
-                    boolean restore = Candidates.Kind.RESTORE.sha256.equals(result.sha256);
+                    boolean restore = Candidates.Kind.RESTORE.matches(result.sha256);
                     Candidates.Kind withdrawn = withdrawnKind(result.sha256);
                     if (withdrawn != null) {
                         // A candidate the app no longer offers, whatever its checks say.
@@ -1882,7 +6277,7 @@ public class MainActivity extends Activity {
                                 + " ever flashed, shows the public build.\n"
                                 + "File: " + name + ".\n"
                                 + "If this file is on the card, remove it before the card goes back into the camera:"
-                                + " see step 5.";
+                                + " tap " + q(REMOVE) + ".";
                     } else if (restore && UpdateCheck.nameIsTheOnlyProblem(result)) {
                         // The bytes are the stock restore file and only its name failed; anything else, a sensor
                         // table that differs from the backup's above all, is shown in full by showChecked below.
@@ -1911,6 +6306,7 @@ public class MainActivity extends Activity {
                 data = null;
                 result = null;
                 stock = null;
+                factory = null;
                 summary = "The app could not use this file: " + sentence(cause(e, "it could not be read. It may have"
                         + " been moved, or the app that holds it did not hand it over")) + " Tap " + q(USE_FILE)
                         + " to choose a file again.";
@@ -1921,6 +6317,9 @@ public class MainActivity extends Activity {
             final String t = summary;
             final String x = technical;
             final byte[] s = stock;
+            final byte[] fd = factory;
+            final String fromFactory = "\"" + name + "\" is your factory dump." + (factoryKept
+                    ? " The app keeps it on this phone, so you need not pick it again." : "");
             final String from = "\"" + name + "\" is the public stock dump.";
             final String o = origin;
             final boolean c = chosen;
@@ -1929,13 +6328,55 @@ public class MainActivity extends Activity {
                 if (gone() || request != fileRequest) {
                     return;
                 }
+                if (fd != null) {
+                    // Kept on every route, but made into firmware only where that firmware is written: on the Repair
+                    // route, the factory version picked there (or the newest one, which becomes the pick); on Advanced,
+                    // which writes any checked file, the same version, the Repair pick unchanged. Elsewhere (Restore,
+                    // Probe) nothing is made: those routes never write a factory version.
+                    Recipe.Selection k = Recipe.V012.equals(repairSel.base) ? repairSel : newestFactory();
+                    factoryDump = fd;
+                    if (!buildsFactory(forRoute)) {
+                        // The Repair menu moves to the newest factory version unless the owner picked one already.
+                        if (!Recipe.V012.equals(repairSel.base)
+                                && getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_REPAIR_SET, null) == null) {
+                            repairSel = newestFactory();
+                            repairCustom = false;
+                            freshRunIfStale(FlashFlow.Route.REPAIR);
+                        }
+                        showFile(factoryKeptOnly(fromFactory), null);
+                        updateButtons();
+                        return;
+                    }
+                    if (forRoute == Route.REPAIR && !k.equals(repairSel)) {
+                        repairSel = k;
+                        repairCustom = false;
+                        rememberRepair();
+                        freshRunIfStale(FlashFlow.Route.REPAIR);
+                        render();
+                    } else if (route == Route.REPAIR) {
+                        refreshRepairChoice();
+                    }
+                    buildRestore(fd, request, fromFactory, k, forRoute);
+                    updateButtons();
+                    return;
+                }
                 if (s != null) {
-                    buildRestore(s, request, from, Candidates.Kind.RESTORE);
+                    // On the Repair route a stock dump makes the v006 pick there; elsewhere the restore file.
+                    Recipe.Selection k = forRoute != Route.REPAIR ? Recipe.of(Candidates.Kind.RESTORE)
+                            : Recipe.V006.equals(repairSel.base) ? repairSel : null;
+                    if (k == null) {
+                        stockDump = s;
+                        showFile(from + " " + needsFactory(repairSel), null);
+                        updateButtons();
+                        return;
+                    }
+                    buildRestore(s, request, from, k, forRoute);
                     return;
                 }
                 if (r != null && o != null) {
                     // Checked against the backup on record when the file was picked; applyCheck checks it again if
                     // another backup has come in since.
+                    fileFor = forRoute;
                     applyCheck(d, r, n, o, c);
                 } else {
                     fileData = null;
@@ -1980,7 +6421,7 @@ public class MainActivity extends Activity {
     // --- the card -----------------------------------------------------------------------------------------------
 
     private void pickCard() {
-        if (busy()) {
+        if (busy() || archiving()) {
             return;     // a write or removal reports on the drive it runs on; another one picked now would take its place
         }
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -1990,9 +6431,14 @@ public class MainActivity extends Activity {
             startActivityForResult(i, PICK_CARD);
         } catch (ActivityNotFoundException | SecurityException e) {
             setStatus(cardStatus, "Android could not open its folder picker, so the app cannot reach the card. Instead:"
-                    + " tap " + q(SAVE) + " in step 1. Copy that file to the card's top folder with the Files app."
+                    + " tap " + q(SAVE) + " on the Advanced page. Copy that file to the card's top folder with the Files app."
                     + " Then tap " + q(USE_FILE) + " and choose the copy on the card, so the app checks it there."
                     + detail(why(e)));
+            if (driveAway()) {
+                // The card's readout is hidden while the saved drive is away: say it where it is seen.
+                android.widget.Toast.makeText(this, "Android could not open its folder picker, so the app cannot"
+                        + " reach the card.", android.widget.Toast.LENGTH_LONG).show();
+            }
         }
     }
 
@@ -2017,30 +6463,58 @@ public class MainActivity extends Activity {
         }
         Uri uri = data.getData();
         if (request == PICK_FILE) {
-            loadFile(uri);
+            loadFile(uri, pendingFileFor != null ? pendingFileFor : route);
+            pendingFileFor = null;
         } else if (request == PICK_BACKUP) {
             loadBackup(uri);
         } else if (request == SAVE_COPY) {
             writeCopy(uri);
+        } else if (request == SAVE_ZIP || request == SAVE_SHOTS) {
+            if (card == null && tree != null && !busy() && !archiving()) {
+                // A screen made while the save screen was open has not listed the card yet: the zip starts once it
+                // has (inspectCard), and is refused, its empty file deleted, only if the card cannot be read.
+                pendingZip = uri;
+                pendingZipShots = request == SAVE_SHOTS;
+                clearOutcome(pendingZipShots);      // onResume or a render must not bring an older zip's result back
+                setStatus(pendingZipShots ? shotsStatus : zipStatus, "Looking at the card before saving the zip…");
+            } else {
+                startArchive(uri, request == SAVE_SHOTS);
+            }
         } else if (request == PICK_CARD) {
             // Results about the previous drive, or an earlier look at this one, no longer apply.
             if (!busy()) {
                 writeStatus.setText("");
                 cleanStatus.setText("");
                 sensorStatus.setText("");    // a sensor result read from another drive no longer applies
+                ejectStatus.setText("");     // nor an eject of it
+                ejectAsked = false;
+            }
+            // The same drive chosen again keeps its backup's result; a backup of another drive is not one of this one.
+            String chosenUuid = DocumentsContract.isTreeUri(uri) ? uuidOf(uri) : null;
+            boolean sameDrive = chosenUuid != null && chosenUuid.equalsIgnoreCase(backupSavedFrom);
+            if (!archiving() && !sameDrive) {
+                backupSaved = false;         // a backup of the drive chosen before is not one of this drive
+                zipStatus.setText("");
+                backupArchive = null;
             }
             if (!DocumentsContract.isTreeUri(uri)) {
                 tree = null;
                 card = null;
+                relistedFrom = null;
                 cardRequest++;
                 inspecting = false;
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_TREE).apply();
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_TREE).remove(KEY_DRIVE_NAME).apply();
+                refreshDrive();
                 setStatus(cardStatus, "That was a single file, not a drive. Tap " + q(CHOOSE) + " again, open the"
                         + " camera's drive and tap \"Use this folder\" in its top folder.");
                 updateButtons();
                 return;
             }
             String note = null;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_DRIVE_NAME).apply();   // another drive's name
+            progressEjected = false;
+            ejectedThisMount = false;
+            // Each drive has its own flash runs (runOf), so another drive's progress never shows for this one.
             try {
                 getContentResolver().takePersistableUriPermission(uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
@@ -2051,6 +6525,7 @@ public class MainActivity extends Activity {
                         + " tap " + q(CHOOSE) + " again." + detail(why(e));
             }
             tree = uri;
+            refreshDrive();
             inspectCard(note);
         }
     }
@@ -2063,10 +6538,16 @@ public class MainActivity extends Activity {
         if (tree == null) {
             return;
         }
+        cardDetailToggle.setVisibility(View.GONE);
+        cardDetail.setVisibility(View.GONE);
+        inspectAfterDialog = false;
         final int request = ++cardRequest;
         final Uri t = tree;
         inspecting = true;
         setStatus(cardStatus, "Looking at the card…");
+        if (card != null) {
+            relistedFrom = card;      // a look that supersedes another keeps the listing from before both
+        }
         card = null;
         updateButtons();
         WORKER.execute(() -> {
@@ -2076,11 +6557,75 @@ public class MainActivity extends Activity {
                     return;
                 }
                 inspecting = false;
+                relistedFrom = null;
                 card = c;
-                setStatus(cardStatus, c.state.describe() + (note == null ? "" : "\n\n" + note));
+                noteListing(c);     // the drive's flash runs take in what the card holds (a removal counts on this)
+                refreshDrive();
+                cardNote = note;
+                showCard();
                 updateButtons();
+                TextView shown = revealAfterLook;     // a zip's result, now that the steps are as the listing says
+                revealAfterLook = null;
+                reveal(shown);
+                startPendingZip();
             });
         });
+    }
+
+    /** A zip whose save place came while the card was not listed: starts it now (startArchive refuses an unread card). */
+    private void startPendingZip() {
+        Uri dest = pendingZip;
+        if (dest == null) {
+            return;
+        }
+        pendingZip = null;
+        startArchive(dest, pendingZipShots);
+    }
+
+    /**
+     * The drive step's readout of the card: its one-line verdict and any update file, with what to do about it on this
+     * route; the card's name, free space and DCIM folder go behind Details.
+     */
+    private void showCard() {
+        Card c = card;
+        if (c == null || inspecting) {
+            return;
+        }
+        String all = c.state.describe();
+        int nl = all.indexOf('\n');
+        String head = nl < 0 ? all : all.substring(0, nl);
+        StringBuilder rest = new StringBuilder();
+        if (nl >= 0) {
+            for (String line : all.substring(nl + 1).split("\n")) {
+                if (!line.startsWith("Remove it") && !line.startsWith("Remove them")) {
+                    rest.append(rest.length() == 0 ? "" : "\n").append(line);
+                }
+            }
+        }
+        boolean writes = route == Route.REPAIR || route == Route.PROBE || route == Route.RESTORE
+                || route == Route.ADVANCED;
+        if (!writes && c.state.listed && c.state.problem == null && c.state.updateFiles.isEmpty()) {
+            head = "Ready: the app can read this card.";
+        }
+        StringBuilder sb = new StringBuilder(head);
+        if (c.state.listed && !c.state.updateFiles.isEmpty()) {
+            boolean one = c.state.updateFiles.size() == 1;
+            sb.append('\n').append(c.state.names()).append(". ").append(writes
+                    ? "Remove " + (one ? "it" : "them") + " with " + q(REMOVE) + " after the flash, or before you"
+                    + " write a different file."
+                    : "Remove " + (one ? "it" : "them") + " on the " + routeTitle(Route.REPAIR) + ", "
+                    + routeTitle(Route.PROBE) + " or " + routeTitle(Route.RESTORE) + " screen before you switch"
+                    + " the camera on with this card.");
+        }
+        if (cardNote != null) {
+            sb.append("\n\n").append(cardNote);
+        }
+        setStatus(cardStatus, sb.toString());
+        cardDetail.setText(rest.toString());
+        cardDetail.setVisibility(View.GONE);
+        cardDetailToggle.setText("\u25b8 Details");
+        cardDetailToggle.setVisibility(rest.length() == 0 || cardStatus.getVisibility() != View.VISIBLE ? View.GONE
+                : View.VISIBLE);
     }
 
     /** Lists the card's top folder. Never throws: a card that cannot be read comes back with a problem, not empty. */
@@ -2167,12 +6712,22 @@ public class MainActivity extends Activity {
         final byte[] data = fileData;
         final UpdateCheck.Result check = fileCheck;
         final Card c = card;
-        if (busy() || dialog != null || gate(check, data) != null || c == null || !c.state.writable()) {
+        if (busy() || archiving() || dialog != null || gate(check, data) != null || c == null
+                || !c.state.writable() || !fitsRoute(check)) {
             return;
         }
         final String name = check.cardName;
         final boolean probe = isProbe(check);
-        final boolean bringup = isBringup(check);
+        final Recipe.Selection repair = repairOf(check);
+        final boolean bringup = repair != null;
+        final boolean factory = bringup && Recipe.V012.equals(repair.base);
+        final boolean port = bringup && Recipe.V006.equals(repair.base) && repair.has(Recipe.OV9732_PORT);
+        // Every reviewed file is written without a backup: the dialog says when nothing confirms what the camera runs.
+        // Any reviewed build whose set is experimental says so, even when each of its mods alone is tested.
+        final String unsure = unconfirmed(check);
+        final Recipe.Selection made = Recipe.selectionOf(check.sha256);
+        final String untried = made != null && "experimental".equals(made.status()) ? "Experimental: "
+                + made.label() + " has not yet been tried on a camera as a whole. Keep the way back at hand.\n" : "";
         final String backupLine = backupSha256 == null ? null
                 : backupName + ", SHA-256 " + backupSha256.substring(0, 16) + "…";
         CardState.Item same = c.state.sameFile(check);
@@ -2187,7 +6742,7 @@ public class MainActivity extends Activity {
         }
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle(probe ? "Write the sensor-ID probe to the card?"
-                        : bringup ? "Write the OV9732 bring-up (firmware " + bringupFirmwareVersion() + ") to the card?"
+                        : bringup ? "Write firmware " + repair.name() + " to the card?"
                         : "Write the update file to the card?")
                 .setMessage("The app copies the update file to the card's top folder. Nothing changes on the camera"
                         + " yet: it flashes the file the next time it switches on with this card in it.\n\n"
@@ -2196,21 +6751,33 @@ public class MainActivity extends Activity {
                             ? "This is the sensor-ID probe, written without a backup (one of the reviewed patches the"
                             + " app allows that). It scans the sensor bus and writes a result to SENSOR.TXT; it does not"
                             + " fix the camera.\n"
+                            : factory
+                            ? "This is firmware " + repair.name() + " (" + summaryOf(repair) + "), a reviewed file. The"
+                            + " way back is an older version's file: pick it in Flash custom firmware's version menu.\n"
+                            : port
+                            ? "This is the OV9732 bring-up, a reviewed file. It drives the fitted OV9732 in place of the"
+                            + " SP140A set-up; it changes no boot or update code. The stock restore file does not drive"
+                            + " the OV9732.\n"
                             : bringup
-                            ? "This is the OV9732 bring-up, written without a backup (one of the reviewed patches the app"
-                            + " allows that). It drives the fitted OV9732 in place of the SP140A set-up; it changes no"
-                            + " boot or update code, and the stock restore file reverses it.\n"
-                            : "Compared with this camera's backup: " + backupLine + "\n")
+                            ? "This is " + repair.label() + ", a reviewed file: SP140A firmware.\n"
+                            : backupLine != null && check.compared
+                            ? "Compared with this camera's backup: " + backupLine + "\n"
+                            : isReviewedPatch(check)
+                            ? "A reviewed file, not compared with a backup.\n"
+                            : "")
+                        + (unsure == null ? "" : "\n\u26a0 " + unsure + "\n\n")
+                        + untried
                         + "Card: " + (c.state.label == null ? "the chosen card" : c.state.label) + "\n\n"
                         + (probe
                             ? "After it flashes, open photo mode on the camera, then read the result with "
-                            + q(READ_RESULT) + " in step 4.\n\n"
+                            + q(READ_RESULT) + ".\n\n"
                             : bringup
                             ? "After it flashes, power the camera on and try a photo, then take the card out and look at"
-                            + " the JPEGs. It may take no clean picture on the first try; the stock restore file puts it"
-                            + " back.\n\n"
-                            : "The app cannot tell which camera a backup was read from: write only if that backup is a"
-                            + " read of the camera this card goes into.\n\n")
+                            + " the JPEGs. It may take no clean picture on the first try.\n\n"
+                            : check.compared
+                            ? "The app cannot tell which camera a backup was read from: write only if that backup is a"
+                            + " read of the camera this card goes into.\n\n"
+                            : "")
                         + "Detail: " + UpdateCheck.bytes(check.size) + ", SHA-256 " + check.sha256 + ".")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Write", (di, w) -> write(c, data, check))
@@ -2223,7 +6790,7 @@ public class MainActivity extends Activity {
                 writeDialog = null;
             }
             if (!gone()) {
-                updateButtons();
+                afterDialog();
             }
         });
         dialog = d;
@@ -2251,19 +6818,29 @@ public class MainActivity extends Activity {
                     return;
                 }
                 comparing = false;
+                String uuid = uuidOf(c.tree);
                 if (equal) {
                     writtenWith = check.referenceSha256;
                     writtenName = backupName;
+                    // A flash with this file starts over, as after a write, but nothing was written: no synced claim,
+                    // and Remove is open at once, since it may have been flashed before (FlashFlow.foundOnCard).
+                    newRun(uuid, check.sha256, check.cardName, false, check.referenceSha256);
+                    noteListing(c);
+                } else {
+                    // Not the file the run wrote, under its name: Remove opens for it ("Tap Remove now").
+                    FlashFlow f = runOf(uuid, routeOfFile(check.sha256));
+                    f.differentFileOnCard();
+                    keep(uuid, f);
                 }
                 setStatus(writeStatus, equal
                         ? NOTHING_TO_WRITE + " the card already holds this exact update file, " + check.cardName + ".\n"
-                        + "Eject the drive and go on with step 4. If you have already flashed with it, go on with step"
-                        + " 5 instead."
+                        + "Eject the drive and flash. If you have already flashed with it, tap " + q(REMOVE)
+                        + " instead."
                         : read
                         ? "Nothing was written to the card. It holds a different file with the same name, " + same.name
-                        + ". Tap " + q(REMOVE) + " (under step 5) now, then write again."
+                        + ". Tap " + q(REMOVE) + " now, then write again."
                         : "Nothing was written to the card. It holds a file named " + same.name + ", but the app could"
-                        + " not read it to compare. Tap " + q(REMOVE) + " (under step 5) now, then write again."
+                        + " not read it to compare. Tap " + q(REMOVE) + " now, then write again."
                         + detail(got));
                 updateButtons();
             });
@@ -2272,15 +6849,19 @@ public class MainActivity extends Activity {
 
     private void write(Card c, byte[] data, UpdateCheck.Result check) {
         // Tapped in the confirmation: the gate is asked again, with the backup on record at this moment.
-        String refusal = busy() ? "a write or a removal is already running" : gate(check, data);
+        String refusal = busy() || archiving() ? "a write, a removal or a zip is already running"
+                : gate(check, data);
         if (refusal != null) {
             setStatus(writeStatus, "Nothing was written to the card: " + sentence(refusal));
             updateButtons();
             return;
         }
         final Operation op = start(true, 1);
+        op.sha256 = check.sha256;
+        op.cardName = check.cardName;
         setStatus(writeStatus, WRITING);
         cleanStatus.setText("");          // a result about an earlier removal no longer applies
+        ejectStatus.setText("");          // an eject before this write no longer applies
         sensorStatus.setText("");         // a sensor result from a previous flash no longer applies
         updateButtons();
         WORKER.execute(() -> {
@@ -2288,9 +6869,9 @@ public class MainActivity extends Activity {
             try {
                 outcome = writeAndReport(c.tree, data, check);
             } finally {
-                String o = outcome != null ? outcome : "Writing stopped with an unexpected error. Step 2 shows what the"
-                        + " card holds now: do not switch the camera on with this card in it while it lists an update"
-                        + " file.";
+                String o = outcome != null ? outcome : "Writing stopped with an unexpected error. The Camera drive"
+                        + " step shows what the card holds now: do not switch the camera on with this card in it"
+                        + " while it lists an update file.";
                 finish(op, o, o.startsWith(WRITTEN));
             }
         });
@@ -2299,7 +6880,7 @@ public class MainActivity extends Activity {
     /** Runs on the worker. Checks again, lists the card again, writes, reads back; says what is on the card after a failure. */
     private String writeAndReport(Uri t, byte[] data, UpdateCheck.Result check) {
         // Against the backup on record now, which may have changed since Write was tapped. A check of another file in
-        // step 1 does not concern these bytes; a changed backup shows in its SHA-256.
+        // the file step does not concern these bytes; a changed backup shows in its SHA-256.
         String refusal = WriteGate.refusal(check, data, backupSha256, loadingBackup, false);
         if (refusal != null) {
             return "Nothing was written to the card: " + sentence(refusal);
@@ -2316,7 +6897,7 @@ public class MainActivity extends Activity {
         } catch (IOException | RuntimeException e) {
             return "Writing failed: " + sentence(cause(e, "the card or Android stopped the write. The card may be full,"
                     + " or the cable or card came loose")) + "\n\n"
-                    + readCard(t).state.afterwards() + "\n\nWhen step 2 lists no update file, tap " + q(WRITE)
+                    + readCard(t).state.afterwards() + "\n\nWhen the camera drive step lists no update file, tap " + q(WRITE)
                     + " to try again." + detail(detailOf(e));
         }
     }
@@ -2366,17 +6947,31 @@ public class MainActivity extends Activity {
                     + (failed == null ? "" : "; delete: " + failed));
         }
         return WRITTEN + "\nThe app wrote " + name + " to the card's top folder and read it back: it matches.\n"
-                + "Next: eject the drive before you unplug the cable or take the card out. Tap " + q(EJECT) + ". Then"
-                + " follow step 4." + detail("SHA-256 " + sha + ".");
+                + "Next: eject the drive before you unplug the cable or take the card out: tap " + q(EJECT) + "."
+                + detail("SHA-256 " + sha + ".");
     }
+
+    /** delete()'s answer when the card said no (deleteDocument returned false), as opposed to an error. */
+    private static final String CARD_REFUSED = "the card refused";
+
+    /**
+     * delete()'s answer for false on Android 7: it answers false for an error too (a drive pulled mid-wipe, say), so
+     * the app cannot tell a refusal from a failure, and never calls it a refusal.
+     */
+    private static final String FALSE_ON_7 = "the delete failed (Android 7 gives no reason)";
 
     /** Null when the document was deleted, otherwise why not (Android 7 answers false, later versions throw). */
     private String delete(Uri doc) {
         try {
-            return DocumentsContract.deleteDocument(getContentResolver(), doc) ? null : "the card refused";
+            return DocumentsContract.deleteDocument(getContentResolver(), doc) ? null : falseAnswer();
         } catch (IOException | RuntimeException e) {
             return why(e);
         }
+    }
+
+    /** What deleteDocument's false means: the card said no from Android 8 on; on Android 7 it may be an error too. */
+    private static String falseAnswer() {
+        return android.os.Build.VERSION.SDK_INT >= 26 ? CARD_REFUSED : FALSE_ON_7;
     }
 
     private void writeFully(Uri doc, byte[] data) throws IOException {
@@ -2426,23 +7021,65 @@ public class MainActivity extends Activity {
             return;
         }
         final Uri t = c.tree;
+        // The probe run on this card's drive: the SENSOR.TXT the card held just after the probe was written (or found
+        // there), kept with the run so it survives a restart. Only that same file read again is called unchanged; the
+        // camera's and the phone's clocks are never compared, since the camera's may be off by hours. When the app could
+        // not read it then, or has no probe write on record for this card, the result says it cannot tell.
+        final String uuid = uuidOf(t);
+        final FlashFlow run = runOf(uuid, FlashFlow.Route.PROBE);
+        final boolean onRecord = run.past();
+        final String before = onRecord ? run.sensorAtWrite() : null;
+        final boolean wrote = run.wroteIt();
+        final String id = runId(uuid, run);
+        // Flashed and removed already: a missing file then means photo mode has not run yet, not "flash it first".
+        final boolean removed = run.stage() == FlashFlow.Stage.REMOVED || run.stage() == FlashFlow.Stage.CHECKED;
         readingSensor = true;
         setStatus(sensorStatus, "Reading SENSOR.TXT from the card…");
         updateButtons();
         WORKER.execute(() -> {
             String text;
+            boolean fresh = false;
             try {
-                text = decodeSensor(readCardFile(t, "SENSOR.TXT"));
+                long[] modified = {0};
+                byte[] b = readCardFile(t, "SENSOR.TXT", modified);
+                text = b == null && removed ? "No SENSOR.TXT on the card yet.\n\nPower the camera on and open photo"
+                        + " mode once: it stops there as before, but writes the file first. Then switch it off,"
+                        + " reconnect, and tap " + q(READ_RESULT) + " again." : decodeSensor(b);
+                if (b != null && before != null && !before.isEmpty()
+                        && before.equals(sensorIdentity(b, modified[0]))) {
+                    // The very file the card held when the probe went on it: same date, size and contents.
+                    text = "This SENSOR.TXT is unchanged since the probe was " + (wrote ? "written to" : "found on")
+                            + " the card: same date, size and contents. So the probe may not have run yet; if it ran,"
+                            + " the file is exactly as it was before. With the update file removed, open photo mode once, switch"
+                            + " the camera off, reconnect, then tap " + q(READ_RESULT) + " again.\n\nWhat the file"
+                            + " says:\n" + text;
+                } else if (b != null && onRecord && before == null) {
+                    text = "The app cannot tell whether the probe wrote this file since the last flash: it could not"
+                            + " read the card's SENSOR.TXT when the probe went on it. If you have not opened photo mode"
+                            + " since removing the update file, do that first, switch the camera off, reconnect, then"
+                            + " tap " + q(READ_RESULT) + " again.\n\nWhat the file says:\n" + text;
+                } else if (b != null && !onRecord) {
+                    text = "The app has no probe write on record for this card, so it cannot tell when this file was"
+                            + " written: it may be from an earlier probe.\n\nWhat the file says:\n" + text;
+                } else {
+                    fresh = b != null;      // a file the card did not hold when the probe went on it
+                }
             } catch (RuntimeException e) {
                 text = "Could not read the card: " + sentence(cause(e, "the drive may have come loose")) + " Tap "
-                        + q(CHOOSE) + " in step 2 and pick the drive again." + detail(why(e));
+                        + q(CHOOSE) + " and pick the drive again." + detail(why(e));
             }
             final String tt = text;
+            final boolean news = fresh;
             ui.post(() -> {
                 if (gone()) {
                     return;
                 }
                 readingSensor = false;
+                FlashFlow now = runOf(uuid, FlashFlow.Route.PROBE);
+                if (news && id != null && id.equals(runId(uuid, now))) {
+                    now.checked(true, tt);      // this probe's own result: the run is done (its step stays open)
+                    keep(uuid, now);
+                }
                 setStatus(sensorStatus, tt);
                 reveal(sensorStatus);
                 updateButtons();
@@ -2451,17 +7088,27 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * Who a SENSOR.TXT is, to tell whether a later read is the same file: its last-modified time, size and SHA-256;
+     * "" for no file.
+     */
+    private static String sensorIdentity(byte[] b, long modified) {
+        return b == null ? "" : modified + ":" + b.length + ":" + UpdateCheck.sha256Hex(b, 0, b.length);
+    }
+
+    /**
      * The bytes of the file with this name in the card's top folder (any case), or null when the card was read and
      * there is genuinely no such file. A card that cannot be read now returns a null children cursor (as fillCard
-     * treats it too): that throws, so a dropped or loose drive is never reported as a missing file.
+     * treats it too): that throws, so a dropped or loose drive is never reported as a missing file. modified[0] gets
+     * the file's last-modified time (0 when the provider gives none).
      */
-    private byte[] readCardFile(Uri t, String name) {
+    private byte[] readCardFile(Uri t, String name, long[] modified) {
         String docId = DocumentsContract.getTreeDocumentId(t);
         Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(t, docId);
         String foundId = null;
         try (Cursor q = getContentResolver().query(children, new String[]{
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE}, null, null, null)) {
+                DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_LAST_MODIFIED},
+                null, null, null)) {
             if (q == null) {
                 throw new RuntimeException("the drive did not answer");
             }
@@ -2469,6 +7116,7 @@ public class MainActivity extends Activity {
                 if (name.equalsIgnoreCase(q.getString(1))
                         && !DocumentsContract.Document.MIME_TYPE_DIR.equals(q.getString(2))) {
                     foundId = q.getString(0);
+                    modified[0] = q.isNull(3) ? 0 : q.getLong(3);   // its last-modified time, 0 when not given
                     break;
                 }
             }
@@ -2487,7 +7135,7 @@ public class MainActivity extends Activity {
     /** What SENSOR.TXT means, for the owner: the bus-scan result the probe writes, or an older probe's two bytes. */
     private String decodeSensor(byte[] b) {
         if (b == null) {
-            return "No SENSOR.TXT on the card yet.\n\nFlash the sensor-ID probe (steps 2 to 4), then open photo mode on"
+            return "No SENSOR.TXT on the card yet.\n\nFlash the sensor-ID probe and remove the update file, then open photo mode on"
                     + " the camera: it stops there as before, but writes the file first. Then bring the card back and"
                     + " tap " + q(READ_RESULT) + " again.";
         }
@@ -2750,7 +7398,8 @@ public class MainActivity extends Activity {
 
     private void confirmClean() {
         final Card c = card;
-        if (busy() || dialog != null || c == null || !c.state.listed || c.state.updateFiles.isEmpty()) {
+        if (busy() || archiving() || dialog != null || c == null || !c.state.listed
+                || c.state.updateFiles.isEmpty()) {
             return;
         }
         // Exactly the files the dialog names are removed.
@@ -2771,7 +7420,7 @@ public class MainActivity extends Activity {
                 dialog = null;
             }
             if (!gone()) {
-                updateButtons();
+                afterDialog();
             }
         });
         dialog = d;
@@ -2780,13 +7429,15 @@ public class MainActivity extends Activity {
     }
 
     private void clean(Uri t, List<CardState.Item> files) {
-        if (busy()) {
+        if (busy() || archiving()) {
             return;
         }
         final Operation op = start(false, files.size());
         setStatus(cleanStatus, REMOVING);
         writeStatus.setText("");          // a result about the write before the flash no longer applies
         sensorStatus.setText("");         // a sensor result from a previous flash no longer applies
+        ejectStatus.setText("");          // an eject before this removal no longer applies
+        ejectAsked = false;
         updateButtons();
         WORKER.execute(() -> {
             String outcome = null;
@@ -2813,9 +7464,9 @@ public class MainActivity extends Activity {
                         : files.size() == 1 ? "Done: the update file is removed." : "Done: the update files are removed.";
                 outcome = headline + "\n" + sb + "\n" + readCard(t).state.afterwards(true) + detail(reasons.toString());
             } finally {
-                finish(op, outcome != null ? outcome : "Removing stopped with an unexpected error. Step 2 shows what"
-                        + " the card holds now: do not switch the camera on with this card in it while it lists an"
-                        + " update file.", outcome != null && all);
+                finish(op, outcome != null ? outcome : "Removing stopped with an unexpected error. The Camera drive"
+                        + " step shows what the card holds now: do not switch the camera on with this card in it"
+                        + " while it lists an update file.", outcome != null && all);
             }
         });
     }

@@ -968,10 +968,16 @@ public final class UpdateCheck {
                         + " image-sensor program that its code refers to, and they differ, so the app cannot tell which"
                         + " one the camera would run. Do not use this file from the app.",
                         "several sensor programs: " + marks.programs() + "."));
+            } else if (ref != null && ref.sensorStart < 0 && drivesOv9732(reference)) {
+                // a complete backup of an OV9732 camera (v012, or a build with the OV9732 port): this file is SP140A code
+                out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "the backup is firmware for the"
+                        + " OmniVision OV9732 sensor, and this file drives the SP140A-class sensor: on that camera it boots"
+                        + " but cannot take pictures. Pick firmware for the OV9732 (Flash custom firmware) instead.",
+                        fileTable + "."));
             } else if (ref != null && ref.sensorStart < 0) {
                 out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "the backup given has no image"
                         + " sensor set-up table, so the file cannot be compared with the firmware in it. Choose a"
-                        + " complete dump of your camera's chip in step 0.", fileTable + "."));
+                        + " complete dump of your camera's chip in the backup step.", fileTable + "."));
             } else if (ref != null && ref.severalPrograms()) {
                 out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "the backup holds more than one"
                         + " image-sensor program that its code refers to, and they differ, so the app cannot tell which"
@@ -1324,9 +1330,18 @@ public final class UpdateCheck {
                     + (data.length == UPDATE_SIZE || data.length == OFFICIAL_SIZE ? ". This is an update file, not a dump of a chip" : "");
         }
         String sha = sha256Hex(data, 0, data.length);
+        if (sha.equalsIgnoreCase(Candidates.CLEAN_FACTORY_SHA256)) {
+            return "it is byte for byte the public cleaned copy of the OV9732 cameras' factory build v012"
+                    + " (" + Candidates.CLEAN_FACTORY_NAME + "): a copy anyone can download, or a read of a camera"
+                    + " flashed with a file made from it that has changed no setting since. Either way it is not a read of"
+                    + " this camera taken before any flash, so the app has nothing to compare a file with";
+        }
         for (int i = 0; i < publicSha256.length; i++) {
             if (publicSha256[i].equalsIgnoreCase(sha)) {
-                return (i == 0 ? "it is byte for byte the public stock dump: a copy of someone else's camera, or a read of"
+                boolean stock = i == 0 || sha.equalsIgnoreCase(Candidates.CLEAN_STOCK_SHA256);
+                return (stock ? "it is byte for byte the public stock dump"
+                        + (i == 0 ? "" : " (its cleaned copy, the one the app downloads)")
+                        + ": a copy of someone else's camera, or a read of"
                         + " a camera that was flashed with the public restore file and has changed no setting since"
                         : "it is byte for byte one of the public dumps, not the stock one: a copy of someone else's"
                         + " camera, or a read of a camera that was flashed with a file made from that dump and has"
@@ -1864,6 +1879,24 @@ public final class UpdateCheck {
             sum += b & 0xFF;
         }
         return sum & 0xFFFFFFFFL;
+    }
+
+    /** The SCCB context of the OV9732 driver (bus 0x6C, 16-bit registers), in v012 and in our OV9732 port. */
+    static final byte[] OV9732_SCCB = {0x11, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x10, 0x08, 0x6C};
+
+    /** Whether firmware bytes hold the OV9732 driver's SCCB context below the settings bank. */
+    static boolean drivesOv9732(byte[] data) {
+        int end = Math.min(data.length, 0x170000) - OV9732_SCCB.length;
+        outer:
+        for (int i = 0; i <= end; i++) {
+            for (int j = 0; j < OV9732_SCCB.length; j++) {
+                if (data[i + j] != OV9732_SCCB[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     static String hex8(long v) {

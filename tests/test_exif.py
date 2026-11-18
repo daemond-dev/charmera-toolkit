@@ -546,6 +546,8 @@ def test_stock_image_stored_photos_are_fixed():
     """The two photos stored inside a public stock dump (docs/02-RECOVERY.md), each from its offset to the first
     FF D9 after it. Point CHARMERA_STOCK_IMAGE at the .bin to run this."""
     image = Path(os.environ["CHARMERA_STOCK_IMAGE"]).read_bytes()
+    if all(image[o : o + 2] == bytes([0xFF, 0xFF]) for o in STOCK_PHOTO_OFFSETS):
+        pytest.skip("this stock image is a cleaned copy (the-dumping-grounds): its photo slots are erased")
     for offset in STOCK_PHOTO_OFFSETS:
         assert image[offset : offset + 2] == b"\xff\xd8", f"no JPEG at {offset:#x}"
         end = image.index(b"\xff\xd9", offset) + 2

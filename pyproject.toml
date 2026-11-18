@@ -19,6 +19,9 @@ test = ["pytest>=7", "pillow"]
 [project.scripts]
 charmera = "charmera_toolkit.cli:main"
 
+[tool.setuptools.package-data]
+charmera_toolkit = ["recipes.json"]
+
 [tool.setuptools.packages.find]
 include = ["charmera_toolkit*"]
 

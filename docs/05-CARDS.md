@@ -1,6 +1,6 @@
 # The card: why phones reject it, and how to fix it
 
-Reading order: 5 of 13 · previous: [Putting the file on the card](04-STAGE.md) · next: [Using an Android phone](06-ANDROID.md) · [all docs](README.md)
+Reading order: 5 of 15 · previous: [Putting the file on the card](04-STAGE.md) · next: [Using an Android phone](06-ANDROID.md) · [all docs](README.md)
 
 `card-check` and `card-fix` deal with the microSD card, not with the camera's firmware. They need a computer;
 what a phone alone can do is in [Using an Android phone](06-ANDROID.md).
@@ -121,4 +121,4 @@ Android phone: unmount, optionally `fsck.exfat -y /dev/sdX1`, then `card-fix /de
 
 ---
 
-Reading order: 5 of 13 · previous: [Putting the file on the card](04-STAGE.md) · next: [Using an Android phone](06-ANDROID.md) · [all docs](README.md)
+Reading order: 5 of 15 · previous: [Putting the file on the card](04-STAGE.md) · next: [Using an Android phone](06-ANDROID.md) · [all docs](README.md)

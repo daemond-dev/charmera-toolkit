@@ -98,7 +98,7 @@ public final class WriteGateTest {
         } else {
             byte[] dump = Candidates.stockDump(stock);
             byte[] probe = Candidates.build(dump, Candidates.Kind.PROBE);
-            UpdateCheck.Result probeCheck = UpdateCheck.check(Candidates.Kind.PROBE.fileName, probe,
+            UpdateCheck.Result probeCheck = UpdateCheck.check(Candidates.Kind.PROBE.fileNameFor(UpdateCheck.sha256Hex(probe, 0, probe.length)), probe,
                     UpdateCheck.PUBLIC_BUILD, null);
             expect("the sensor-ID probe goes to the card with no backup on record",
                     WriteGate.refusal(probeCheck, probe, null, false, false) == null, null);
@@ -118,7 +118,7 @@ public final class WriteGateTest {
                     refused(probeCheck, tampered, null, false, false, "changed"));
             // The OV9732 bring-up is the second reviewed patch the gate lets through without a backup (same waiver).
             byte[] bringup = Candidates.build(dump, Candidates.Kind.BRINGUP);
-            UpdateCheck.Result bringupCheck = UpdateCheck.check(Candidates.Kind.BRINGUP.fileName, bringup,
+            UpdateCheck.Result bringupCheck = UpdateCheck.check(Candidates.Kind.BRINGUP.fileNameFor(UpdateCheck.sha256Hex(bringup, 0, bringup.length)), bringup,
                     UpdateCheck.PUBLIC_BUILD, null);
             expect("the OV9732 bring-up goes to the card with no backup on record",
                     WriteGate.refusal(bringupCheck, bringup, null, false, false) == null, null);
@@ -129,10 +129,109 @@ public final class WriteGateTest {
             expect("bring-up bytes changed after the check are refused",
                     refused(bringupCheck, bringupTampered, null, false, false, "changed"));
             byte[] restore = Candidates.build(dump, Candidates.Kind.RESTORE);
-            UpdateCheck.Result restoreCheck = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore,
+            UpdateCheck.Result restoreCheck = UpdateCheck.check(Candidates.Kind.RESTORE.fileNameFor(UpdateCheck.sha256Hex(restore, 0, restore.length)), restore,
                     UpdateCheck.PUBLIC_BUILD, null);
-            expect("the stock restore file is not the probe: with no backup it is still refused",
-                    refused(restoreCheck, restore, null, false, false, "no backup"));
+            expect("the stock restore file is a reviewed file: with no backup on record it goes to the card",
+                    WriteGate.refusal(restoreCheck, restore, null, false, false) == null, restoreCheck.report());
+            expect("but a check of it made without a backup waits for the check against the backup once one is on record",
+                    refused(restoreCheck, restore, sha(dump), false, false, "not checked against the backup"));
+        }
+
+        // v0.25, made from the owner's factory dump, is a Repair version: written with no backup, by the same waiver.
+        String factoryEnv = System.getenv("CHARMERA_FACTORY_DUMP");
+        byte[] factory = factoryEnv == null || factoryEnv.isEmpty() ? null : readMaybe(factoryEnv);
+        if (factory == null || !Candidates.isFactoryDump(factory)) {
+            System.out.println("WriteGateTest: factory-dump checks SKIPPED (set CHARMERA_FACTORY_DUMP to the factory"
+                    + " dump)");
+        } else {
+            byte[] v025 = Candidates.build(factory, Candidates.Kind.V025);
+            UpdateCheck.Result v025Check = Candidates.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025, factory);
+            expect("firmware v0.25 goes to the card with no backup on record",
+                    WriteGate.refusal(v025Check, v025, null, false, false) == null, null);
+            expect("and with a backup on record", WriteGate.refusal(v025Check, v025, sha(factory), false, false) == null,
+                    null);
+            byte[] v025Tampered = v025.clone();
+            v025Tampered[200] ^= 1;
+            expect("v0.25 bytes changed after the check are refused",
+                    refused(v025Check, v025Tampered, null, false, false, "changed"));
+        }
+
+        // The backup waiver per set: every reviewed build goes to the card without a backup; the owner decides. The
+        // SP140A builds (v006 without the port, v008_test) are compared with a backup when one is on record, and a
+        // backup that drives the other sensor makes a loud warning, not a refusal.
+        String[] stockEntry = stock == null ? null : Recipe.dumpFor(stock);
+        if (stockEntry == null || !"v006".equals(stockEntry[1])) {
+            System.out.println("WriteGateTest: per-set v006 checks SKIPPED (set CHARMERA_STOCK_IMAGE to a v006 dump)");
+        } else {
+            byte[] rows = Recipe.build(stock, new Recipe.Selection("v006", "v006/volume-led"));
+            UpdateCheck.Result rowsAlone = Candidates.check(Recipe.fileNameFor(sha(rows)), rows, null);
+            expect("v006 + Volume and LED rows with no backup on record goes to the card",
+                    rowsAlone.ok && WriteGate.refusal(rowsAlone, rows, null, false, false) == null, rowsAlone.report());
+            expect("and a check of it made without a backup is refused once a backup is on record",
+                    refused(rowsAlone, rows, sha(stock), false, false, "not checked against the backup"));
+            UpdateCheck.Result rowsAgainst = Candidates.check(Recipe.fileNameFor(sha(rows)), rows, stock);
+            expect("v006 + Volume and LED rows checked against the backup on record may go to the card",
+                    rowsAgainst.compared && WriteGate.refusal(rowsAgainst, rows, sha(stock), false, false) == null,
+                    rowsAgainst.report());
+            byte[] v023 = Recipe.build(stock, new Recipe.Selection("v006", "v006/ov9732-port"));
+            UpdateCheck.Result v023Check = Candidates.check(Recipe.fileNameFor(sha(v023)), v023, null);
+            expect("v0.23 (v006 + OV9732 port) goes to the card with no backup on record",
+                    WriteGate.refusal(v023Check, v023, null, false, false) == null, v023Check.report());
+            byte[] restore = Recipe.build(stock, new Recipe.Selection("v006"));
+            UpdateCheck.Result restoreAlone = Candidates.check(Recipe.fileNameFor(sha(restore)), restore, null);
+            expect("stock v006 (the restore file) with no backup on record goes to the card",
+                    WriteGate.refusal(restoreAlone, restore, null, false, false) == null, restoreAlone.report());
+        }
+        if (factory == null || Recipe.dumpFor(factory) == null) {
+            System.out.println("WriteGateTest: per-set v012 checks SKIPPED (set CHARMERA_FACTORY_DUMP to a v012 dump)");
+        } else {
+            byte[] v012 = Recipe.build(factory, new Recipe.Selection("v012"));
+            UpdateCheck.Result v012Check = Candidates.check(Recipe.fileNameFor(sha(v012)), v012, null);
+            expect("stock v012 (the factory firmware, unchanged) goes to the card with no backup on record",
+                    WriteGate.refusal(v012Check, v012, null, false, false) == null, v012Check.report());
+            UpdateCheck.Result v012WithStock = stock == null ? v012Check
+                    : Candidates.check(Recipe.fileNameFor(sha(v012)), v012, stock);
+            expect("and whatever backup is on record (it is never compared with one)", !v012WithStock.compared
+                    && WriteGate.refusal(v012WithStock, v012, stock == null ? null : sha(stock), false, false) == null,
+                    v012WithStock.report());
+        }
+        String v008Env = System.getenv("CHARMERA_V008_DUMP");
+        if (v008Env == null || v008Env.isEmpty()) {
+            v008Env = System.getenv("CHARMERA_FILM_MODS_RESTORE");
+        }
+        byte[] v008Dump = v008Env == null || v008Env.isEmpty() ? null : readMaybe(v008Env);
+        if (v008Dump == null || Recipe.dumpFor(v008Dump) == null) {
+            System.out.println("WriteGateTest: per-set v008_test checks SKIPPED (set CHARMERA_V008_DUMP or"
+                    + " CHARMERA_FILM_MODS_RESTORE to the v008_test file)");
+        } else {
+            byte[] v008 = Recipe.build(v008Dump, new Recipe.Selection("v008_test"));
+            String v008Name = Recipe.fileNameFor(sha(v008));
+            UpdateCheck.Result v008Alone = Candidates.check(v008Name, v008, null);
+            expect("stock v008_test with no backup on record goes to the card",
+                    WriteGate.refusal(v008Alone, v008, null, false, false) == null, v008Alone.report());
+            UpdateCheck.Result v008Own = Candidates.check(v008Name, v008, v008Dump);
+            expect("stock v008_test checked against its own build's backup may go to the card", v008Own.ok
+                    && v008Own.compared && WriteGate.refusal(v008Own, v008, sha(v008Dump), false, false) == null,
+                    v008Own.report());
+            if (factory == null) {
+                System.out.println("WriteGateTest: v008_test against an OV9732 backup SKIPPED (set"
+                        + " CHARMERA_FACTORY_DUMP)");
+            } else {
+                // The backup's firmware drives the OV9732 without an SP140A table: for a reviewed SP140A build that is a
+                // loud "Wrong sensor?" warning, not a refusal (the owner decides).
+                UpdateCheck.Result v008OnOv = Candidates.check(v008Name, v008, factory);
+                boolean tableWarns = false;
+                boolean anyFail = false;
+                for (UpdateCheck.Line l : v008OnOv.lines) {
+                    tableWarns |= l.level == UpdateCheck.Level.WARN && l.name.equals("sensor-table")
+                            && l.title.equals("Wrong sensor?");
+                    anyFail |= l.level == UpdateCheck.Level.FAIL;
+                }
+                expect("stock v008_test against an OV9732 backup is OK with a Wrong sensor? warning",
+                        v008OnOv.ok && tableWarns && !anyFail, v008OnOv.report());
+                expect("and the gate lets it through", WriteGate.refusal(v008OnOv, v008, sha(factory), false, false)
+                        == null, v008OnOv.report());
+            }
         }
 
         for (String why : new String[]{WriteGate.refusal(checkedX, data, backupY, false, false),

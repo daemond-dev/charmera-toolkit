@@ -24,6 +24,13 @@ Read in this order. Start with the first one: it walks through a flash and links
 12. [Boot and power notes](12-NOTES-boot-and-power.md): Background: the boot sequence, auto-off and standby analysis behind `tweak` and `settings`.
 13. [Research report](13-PHASE1-REPORT.md): Background: the research everything is built on, each claim labelled verified, reported or inferred.
 
+## Repairing a camera flashed with firmware for the other sensor
+
+14. [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md): Why the public firmware cannot drive an OV9732 camera, and the plan that the bring-up follows.
+15. [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md): The bring-up firmware versions, what each changes, and what each measured on camera.
+
 Also: [The first flash: what was done and what went wrong](FIRST-FLASH-INCIDENT.md), the notes on the 2026-11-06 incident and the open work.
+
+Also: [The camera's buttons and screens](CAMERA-UI.md), photos of every control and stock screen. Check it before you assume a button or menu exists.
 
 Back to the [project README](../README.md).

@@ -550,14 +550,17 @@ def test_stage_a_stock_update_file(stock_image, stock_image_path, card, confirme
     # once more: identical copy already there, nothing to do
     assert run(str(src), "--card", str(card), OVERRIDE) == 0
     assert "nothing to do" in capsys.readouterr().out
-    # the withdrawn candidate C, made the way docs/03 made it, is refused by its hash
+    # candidate C, made the way docs/03 made it, is the stock restore file made from the cleaned copy: named, not refused
     c = pack.prepare_payload(stock_image, factory_settings=True, blank_photos=True)
     if hashlib.sha256(stock_image).hexdigest() == "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f":
         c_path = tmp_path / "c" / checksum.build_update_name(c, "202611050003").filename
         c_path.parent.mkdir()
         c_path.write_bytes(c)
-        assert run(str(c_path), "--card", str(card), OVERRIDE, "--stock", str(stock_image_path)) == 1
-        assert "FAIL withdrawn" in capsys.readouterr().out
+        empty = tmp_path / "card2"
+        (empty / "DCIM").mkdir(parents=True)   # the first card already holds the file above
+        assert run(str(c_path), "--card", str(empty), OVERRIDE, "--stock", str(stock_image_path), "--plan-only") == 0
+        out = capsys.readouterr().out
+        assert "INFO withdrawn" in out and "cleaned copy" in out and "FAIL withdrawn" not in out
         assert card_files(card) == [name.filename]
 
 
@@ -606,12 +609,12 @@ def test_stage_refuses_a_donor_file_without_the_donor_route(donor_case, card, co
     assert card_files(card) == [] and confirmed == []
 
 
-def test_stage_donor_route_needs_the_backup(donor_case, card, confirmed, capsys):
+def test_stage_donor_route_writes_without_the_backup(donor_case, card, confirmed, capsys):
     src, backup_path, donor_path = donor_case
-    assert run(str(src), "--card", str(card), OVERRIDE, "--donor", str(donor_path)) == 2
+    assert run(str(src), "--card", str(card), OVERRIDE, "--donor", str(donor_path)) == 0
     out = capsys.readouterr().out
-    assert "--donor needs --stock" in out and "Nothing written" in out
-    assert card_files(card) == [] and confirmed == []
+    assert "WARN backup" in out and "PASS from-donor" in out and "Donor route:" in out
+    assert (card / src.name).read_bytes() == src.read_bytes() and confirmed == [str(card)]
 
 
 def test_stage_donor_route_writes_and_says_the_fit_is_unknown(donor_case, card, confirmed, capsys):
@@ -622,6 +625,17 @@ def test_stage_donor_route_writes_and_says_the_fit_is_unknown(donor_case, card, 
     assert "PASS vector-table" in out and "WARN software-region" in out
     assert "Donor route:" in out and "only a chip programmer can put --stock back" in out
     assert (card / src.name).read_bytes() == src.read_bytes() and confirmed == [str(card)]
+
+
+def test_stage_donor_route_writes_a_mod_of_the_donor_with_a_warning(donor_case, card, confirmed, capsys):
+    src, backup_path, donor_path = donor_case
+    payload = bytearray(src.read_bytes())
+    payload[0x30000] ^= 1
+    changed = _renamed(src, bytes(payload), "202611041231")
+    assert run(str(changed), "--card", str(card), OVERRIDE, "--stock", str(backup_path), "--donor", str(donor_path)) == 0
+    out = capsys.readouterr().out
+    assert "WARN from-donor" in out and "1 byte(s) changed" in out
+    assert (card / changed.name).read_bytes() == changed.read_bytes() and confirmed == [str(card)]
 
 
 def test_stage_donor_route_refuses_a_donor_with_a_broken_vector_table(donor_case, card, confirmed, tmp_path, capsys):
@@ -717,3 +731,16 @@ def test_stage_help_says_what_stock_is_for():
     text = " ".join(parser()._subparsers._group_actions[0].choices["stage"].format_help().split())
     assert "Only a read made before the camera was ever flashed says whether a firmware fits it" in text
     assert "Without --stock stage warns" in text
+
+
+def test_macos_volume_info_reads_diskutil():
+    """diskutil info -plist for a card in a reader: exFAT, external, ejectable; and an internal APFS disk."""
+    import plistlib
+    card = plistlib.dumps({"DeviceNode": "/dev/disk4s1", "FilesystemType": "exfat", "VolumeName": "CHARMERA",
+                           "Internal": False, "Ejectable": True, "RemovableMedia": True})
+    disk = plistlib.dumps({"DeviceNode": "/dev/disk1s1", "FilesystemType": "apfs", "VolumeName": "Macintosh HD",
+                           "Internal": True, "Ejectable": False, "RemovableMedia": False})
+    assert stage.macos_volume_info(Path("/Volumes/CHARMERA"), run=lambda cmd: card) == (
+        "/dev/disk4s1", "exfat", "CHARMERA", True)
+    assert stage.macos_volume_info(Path("/"), run=lambda cmd: disk) == ("/dev/disk1s1", "apfs", "Macintosh HD", False)
+    assert stage.macos_volume_info(Path("/x"), run=lambda cmd: b"not a plist") == (None, None, None, None)

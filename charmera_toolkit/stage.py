@@ -189,6 +189,27 @@ def windows_volume_info(root: Path) -> Tuple[Optional[str], Optional[str], Optio
         return None, None, None
 
 
+def macos_volume_info(root: Path, run=None) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[bool]]:
+    """(device, filesystem type, label, removable) for a mounted volume, from `diskutil info -plist`, or Nones when
+    macOS does not say. diskutil names FAT32 'msdos' and exFAT 'exfat', as the FAT_FAMILY set does."""
+    import plistlib
+    import subprocess
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, timeout=20).stdout)
+    try:
+        info = plistlib.loads(run(["diskutil", "info", "-plist", str(root)]))
+    except Exception:
+        return None, None, None, None
+    device = info.get("DeviceNode") or None
+    fstype = info.get("FilesystemType") or None
+    label = info.get("VolumeName") or None
+    removable: Optional[bool] = None
+    if info.get("Internal") is False or info.get("RemovableMedia") or info.get("Ejectable") or info.get("Removable"):
+        removable = True                     # a card reader, built in or USB, reports itself as removable or external
+    elif info.get("Internal") is True and info.get("RemovableMedia") is False and not info.get("Ejectable"):
+        removable = False
+    return device, fstype, label, removable
+
+
 def human_size(n: int) -> str:
     if n >= 1024 * MIB:
         return f"{n / (1024 * MIB):.1f} GiB"
@@ -238,7 +259,7 @@ def inspect_card(given: str, override: bool) -> CardInfo:
     if not is_mount:
         if not override:
             raise StageError(f"{given} is not a mount point or drive root. The camera reads only the card root, so give the point "
-                             "where the card is mounted (Linux: /run/media/deck/<label> or /media/<user>/<label>; Windows: E:). "
+                             "where the card is mounted (Linux: /run/media/deck/<label> or /media/<user>/<label>; macOS: /Volumes/<label>; Windows: E:). "
                              f"To test on a plain folder pass {OVERRIDE_FLAG}.", 2)
         notes.append(f"{given} is not a mount point or drive root; going on because of {OVERRIDE_FLAG}")
 
@@ -248,6 +269,8 @@ def inspect_card(given: str, override: bool) -> CardInfo:
     removable: Optional[bool] = None
     if os.name == "nt":  # pragma: no cover - Windows only
         fstype, label, removable = windows_volume_info(root)
+    elif sys.platform == "darwin" and is_mount:  # pragma: no cover - macOS only
+        device, fstype, label, removable = macos_volume_info(root)
     elif is_mount:
         device, fstype = linux_mount_entry(root)
         if device:
@@ -448,7 +471,9 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route:
         print("Donor route: this file is another camera's firmware (--donor), for a camera whose own firmware is gone. Nothing")
         print("here has tested it on this camera. Whether it fits depends on the two cameras having the same image sensor and")
         print("wiring, which only their sensor markings can suggest. If it does not start far enough to run the card updater,")
-        print("only a chip programmer can put --stock back (docs/02-RECOVERY.md, sections B and D).")
+        print("only a chip programmer can bring the camera back (docs/02-RECOVERY.md, sections B and D); if it does, the")
+        print("update file the camera was last flashed with" + (", or a file made from --stock with pack," if stock is not None else "")
+              + " puts it back from a card.")
     print("A file made from a public dump is never for a Millennium or CLOT edition, and on an original 2025 series camera")
     print("(matte body, yellow Kodak boot screen) it fits only one whose image sensor its table drives. The body alone")
     print("proves nothing. A backup of a camera read before it was ever flashed, packed with pack, fits that camera")
@@ -491,11 +516,6 @@ def handler(args) -> int:
             return 2
     donor: Optional[bytes] = None
     if getattr(args, "donor", None):
-        if stock is None:
-            print("error: --donor needs --stock, a read of this camera's own flash chip as it is now: no backup of your own")
-            print("       camera, no flash. The donor route takes this camera off the firmware it runs, and that read is the")
-            print("       only way back. Nothing written.")
-            return 2
         donor_path = Path(args.donor)
         if not donor_path.is_file():
             print(f"error: --donor {args.donor} is not a file")
@@ -616,7 +636,7 @@ def register(subparsers) -> None:
                                    "whether a firmware fits it. Without --stock stage warns that nothing compares the file with this "
                                    "camera's own firmware, and still writes when you confirm")
     p.add_argument("--donor", help="the donor route: a read of another, working camera's chip whose firmware the file is, for a camera whose own "
-                                   "firmware is gone and does not fit it; needs --stock, and says that the fit to this camera is unknown")
+                                   "firmware is gone and does not fit it; --stock is optional, and the route says that the fit to this camera is unknown")
     p.add_argument("--plan-only", action="store_true", help="run every check and print the plan, then exit without asking or writing")
     p.add_argument(OVERRIDE_FLAG, dest="i_know_what_i_am_doing", action="store_true",
                    help="allow a plain folder that is not a mount point (for testing), a non-removable volume, or a filesystem the camera cannot read")

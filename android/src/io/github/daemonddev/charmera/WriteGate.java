@@ -10,13 +10,15 @@ package io.github.daemonddev.charmera;
  * against an earlier one, and nothing may be about to change that: no backup still being read, no check of the file
  * still running. A check names the backup it was made against by SHA-256 (UpdateCheck.Result.referenceSha256).
  *
- * The exception: the reviewed patches, the sensor-ID probe and the OV9732 bring-up (Candidates.isReviewedPatch). Each
- * is built from the public build the camera already runs; its boot and update code are the stock restore file's byte
- * for byte, so a firmware that does not fit leaves the camera as it already is rather than bricking it, and the app
- * itself makes the stock restore file that reverses it. So one may go to the card without a backup on record. The
- * waiver is recognised only by the reviewed SHA-256 of the bytes that passed the check, which confirms() ties to the
- * data about to be written, so it can never reach any other file; every file-level check still runs, and a file still
- * being checked waits.
+ * The exception: every reviewed file (Candidates.isReviewedPatch): the sensor-ID probe, every Repair version and
+ * every build of the recipe table, whatever sensor it drives, the stock restore file among them. Each is a fixed file
+ * this project generated and lists by SHA-256, so it may go to the card without a backup on record: whether it fits
+ * the camera is the owner's call. The app warns when nothing confirms what the camera runs (Recipe.unconfirmed) and
+ * when the backup on record drives the other sensor (Candidates.wrongSensor); it does not refuse. A reviewed SP140A
+ * build that was compared with a backup must have been compared with the one on record now (it is checked again when
+ * the backup changes). The waiver is recognised only by the reviewed SHA-256 of the bytes that passed the check, which
+ * confirms() ties to the data about to be written, so it can never reach any other file; every file-level check still
+ * runs, and a file still being checked waits.
  */
 final class WriteGate {
 
@@ -35,32 +37,35 @@ final class WriteGate {
      */
     static String refusal(UpdateCheck.Result check, byte[] data, String backupSha256, boolean backupLoading,
                           boolean checking) {
-        // The reviewed patches (the sensor-ID probe, the OV9732 bring-up) are the files the app writes without a backup
-        // on record (see the class note). They are recognised only by the reviewed SHA-256 of the bytes that passed the
-        // check, and confirms() ties the data about to be written to that same check, so this waiver can never reach
-        // any other file. The backup clauses are skipped; the file-level checks (confirms) still run, and a file still
-        // being checked waits.
+        // The reviewed files are the ones the app writes without a backup on record (see the class note). They are
+        // recognised only by the reviewed SHA-256 of the bytes that passed the check, and confirms() ties the data
+        // about to be written to that same check, so this waiver can never reach any other file. A reviewed SP140A
+        // build's check must be the one made with the backup on record now (or with none, when there is none).
         if (check != null && Candidates.isReviewedPatch(check.sha256)) {
             if (checking) {
-                return "the update file is being checked again; wait for step 1";
+                return "the update file is being checked again; wait for the file step";
+            }
+            if (!Candidates.checkedAlone(check.sha256)
+                    && (backupLoading || !java.util.Objects.equals(backupSha256, check.referenceSha256))) {
+                return "the update file was not checked against the backup on record now; the file step checks it again";
             }
             return UpdateCheck.confirms(check, data);
         }
         if (backupLoading) {
-            return "a backup is still being read in step 0; wait until step 0 says which backup is on record";
+            return "a backup is still being read; wait until the backup step says which backup is on record";
         }
         if (backupSha256 == null) {
-            return "no backup of this camera is on record; choose it in step 0 first";
+            return "no backup of this camera is on record; choose it in the backup step first (Choose this camera's backup)";
         }
         if (checking) {
-            return "the update file is being checked again, against the backup now on record; wait for step 1";
+            return "the update file is being checked again, against the backup now on record; wait for the file step";
         }
         String refusal = UpdateCheck.confirms(check, data);
         if (refusal != null) {
             return refusal;
         }
         if (!check.compared || !backupSha256.equals(check.referenceSha256)) {
-            return "the update file was not checked against the backup on record now; step 1 checks it again";
+            return "the update file was not checked against the backup on record now; the file step checks it again";
         }
         return null;
     }

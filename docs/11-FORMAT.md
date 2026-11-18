@@ -1,6 +1,6 @@
 # Image layout reference
 
-Reading order: 11 of 13 · previous: [Photo dates (EXIF)](10-EXIF.md) · next: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)
+Reading order: 11 of 15 · previous: [Photo dates (EXIF)](10-EXIF.md) · next: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)
 
 What is where in a 2 MiB Charmera flash dump, and how the SD update file relates to it. Every offset below was
 checked against the two public dumps and the published update files, and those of the film-mods build against that
@@ -17,8 +17,8 @@ File offset = runtime address + 0x200. The flash is a Puya PY25D16HB: 2 MiB, 64 
 | 0x10B130 | to 0x120000 | Zero padding. 0x110000..0x120000 is the heap placeholder. |
 | 0x120000 | 0x48E9A | Resource pack: magic `GP+\0` followed by two u16 words (both 3 in the stock build; meaning unknown) and zero padding to +0x18, then 24-byte directory entries of a 20-byte name plus a u32 sector number (×512 from 0x120000), 43 in the stock build; the list ends at the first name starting with 0x00 or 0xFF. No checksum. Holds the five UI sounds, the logo and menu JPEGs, the GPZP frames, `GPRS.PAK` at 0x141400. Ends at 0x168E9A; 0xFF to 0x16E000. |
 | 0x16E000 | 0x200 | Factory self-test sector. |
-| 0x170000 | 0xF000 | Settings bank: up to 120 512-byte sectors, each a 252-byte record + CRC32 (zlib, little-endian) at +0xFC and a zero second page. The firmware loads the sector before the first erased one. |
-| 0x17F000 | 0x200 | Photo directory: two 8-byte entries {u16 number, u16 used, u32 length}. Also sector 120 of the settings bank, which is why the stock camera misbehaves after about 120 settings saves. |
+| 0x170000 | 0x10000 | Settings bank: 128 512-byte sectors in one 64 KiB erase block, each a 252-byte record + CRC32 (zlib, little-endian) at +0xFC and a zero second page; sector 120 (0x17F000) is the photo directory and the writer steps over it. The firmware loads the sector before the first erased one. A record is appended only when a setting changed (menu language, photo/video stamp, date format, USB mode; the frame selector is RAM only and setting the date writes the clock, not the record), about every 5 s or at power-off. When sector 127 is reached the whole block is erased and writing restarts at sector 0 (static analysis of VA 0x1D0C/0x1B44, 2026-11-11; not observed on a camera). This supersedes the model in the [Research report](13-PHASE1-REPORT.md). The toolkit's settings reader (`charmera_toolkit/settings.py`) follows this model: it reads records in sectors 0..119 and 121..127, reports only a boot that would land on sector 120 (sector 121 the first erased one) as falling back to defaults, and a rewrite of the store keeps the photo directory and erases stale records past it. |
+| 0x17F000 | 0x200 | Photo directory: two 8-byte entries {u16 number, u16 used, u32 length}. Inside the settings bank's erase block, so the bank's wrap-around erases it (internal photos then read as orphaned until the next photo save or delete), and a photo save, delete or FORMAT near the end of the bank can erase the current settings record (inferred from the code, not tested). |
 | 0x180000 | 0x25800 | Internal photo slot 0 (0x590-byte header + JPEG). |
 | 0x1A5800 | 0x25800 | Internal photo slot 1. |
 | 0x1CB000 | to 0x200000 | Unused, 0xFF in every known dump. 0x1E0000..0x1EFFFF is the one block a 0x1E0000-byte update and its final erase never touch (see [Update file](#update-file-jh_5408stamp_sumbin)). |
@@ -29,7 +29,7 @@ Offsets within the 252-byte record. Verified means the firmware's setter and rea
 
 | Offset | Meaning | Status |
 |---|---|---|
-| +0x00 | Capture style / frame selector 0..10 | verified (cycled by its setter) |
+| +0x00 | Menu language: index into the firmware's language table, 0..10 | verified (cycled by its setter, read as the language table index; the owner confirmed that holding Up in photo mode changes the language) |
 | +0x01 | Auto power-off code: 1 = 3 min, 2 = 5 min, n ≥ 3 = n min; default 2 | verified; timer rate unmeasured |
 | +0x05 | Playback volume 0..8 | verified |
 | +0x19 | UI sound level 0..8, 0 = off; default 5 | verified |
@@ -188,4 +188,4 @@ fails any GPZP entry with a block that is not fixed-Huffman, stored blocks inclu
 
 ---
 
-Reading order: 11 of 13 · previous: [Photo dates (EXIF)](10-EXIF.md) · next: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)
+Reading order: 11 of 15 · previous: [Photo dates (EXIF)](10-EXIF.md) · next: [Boot and power notes](12-NOTES-boot-and-power.md) · [all docs](README.md)

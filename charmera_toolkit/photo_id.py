@@ -1,45 +1,56 @@
 """`photo-id`: what the header of a photo says about the firmware that wrote it. Read-only.
 
-Both known builds (image.KNOWN_BUILDS) build every JPEG from header templates in their initialised data, and the
-templates are the same bytes in both (VERIFIED in the public dump, where they sit at file 0xFFB78, 0x107448,
-0x1079D8 and 0x107C48, and in the film-mods build, where they sit 0xC8 further on):
+Every known build builds each JPEG from header templates in its initialised data. Three still-photo headers are known:
 
-- the still template (0x107448): 0x590 bytes, SOI, SOF0, a COM of 15 bytes ("GPEncoder" and six spaces, length
-  field 0x11), two DQT, DRI 0, the four standard Huffman tables, an APP1 'Exif' block and SOS. Every still photo is
-  written from it (the writer at VA 0x6DEC4 writes 0x590 bytes), with Make 'Generalplus', and Model 'CBB3' and
-  Software '20150615' written over the template's own by code;
-- the bare template (the other three, byte-identical): 0x270 bytes, the same segments without the APP1 block and
-  with a 9-byte COM ("GPEncoder", length 0x0B). Both builds use it only for thumbnails, video frames and a Wi-Fi
-  stream, never for a still photo.
+- the v006 / v008_test family's (the SP140A builds, image.KNOWN_BUILDS; our v0.21 to v0.24 are built on v006 and keep
+  it): 0x590 bytes, SOI, SOF0, a COM of 15 bytes ("GPEncoder" and six spaces, length field 0x11), two DQT, DRI 0, the
+  four standard Huffman tables, an APP1 'Exif' block and SOS. In v006 the still template sits at file 0x107448 and
+  the writer at VA 0x6DEC4 writes 0x590 bytes, with Make 'Generalplus', and Model 'CBB3' and Software '20150615'
+  written over the template's own by code; v008_test holds the same templates 0xC8 further on (VERIFIED). A photo
+  cannot tell v006 from v008_test: they share the template.
+- the factory build v012's (the OV9732 cameras' firmware; our v0.25 is v012 with two menu rows and keeps it): the
+  bare template, 0x270 bytes, the same segments without the APP1 block and with a 9-byte COM ("GPEncoder", length
+  0x0B). v012 holds four copies of it (file 0xFFC68, 0x107538, 0x1077A8 and 0x107A18) and no 0x590 template at all
+  (VERIFIED by search of the v012 dump). The v006 family holds the same bare template, byte for byte (file 0xFFB78, 0x1079D8 and
+  0x107C48) but uses it only for thumbnails, video frames and a Wi-Fi stream, never for a still photo.
+- our EXIF mod's (v0.26 and later, built on v012): 0x340 bytes, the SOI, one APP1 'Exif' block of 0xD0 bytes (length
+  field 0xCE) with Make 'Kodak', Model 'Charmera', Software naming the mod's version and the camera clock's dates,
+  then v012's bare template from its SOF0 on, byte for byte (VERIFIED in the v0.26 update file, where it sits at file
+  0x89640).
 
-The camera fills in only the frame size and sampling (SOF), the quantisation tables and, in the still template,
-three dates. The tables are the IJG ones (the JPEG standard's Annex K tables at VA 0x1088B8 and 0x108938, scaled by
-a quality): 85, 80 or 75 for a photo on a card (settings byte +0x0b), 45 without a card (VERIFIED). So a photo
-straight from a camera running either known build has the still header, and a still photo with the bare header, as
-the camera saved it in DCIM, was taken by a camera that ran another build at the time. A header with a mark of an
-editor or a re-encode (an XMP block, an APP2, APP13 or APP14 segment, a progressive frame, a size taller than wide)
-was saved again by another program and says nothing about the camera. An EXIF Make other than Generalplus, a JFIF
-or other APP0 segment (the known builds write none, not even MJPEG's 'AVI1'), the still comment without its EXIF
-block or tables the encoder never writes show only that neither known build writes the header as it is: another
-program may have saved the photo again, or another build may have written it, and nothing in the header tells
+The toolkit's own exif-fix rewrites the EXIF block of COPIES with Make 'Kodak' and Model 'Charmera' and no Software
+tag, where the old block was (or right after the SOI when there was none), and keeps every other segment; with
+--keep-make it keeps the Make and Model the photo had (Generalplus/CBB3 on a v006-family photo), still with no
+Software tag, which the camera always writes. So a copy it made keeps the template of the photo it came from, and it
+is told from the EXIF mod and from the camera's own photo by the missing Software and the header length.
+
+The camera fills in only the frame size and sampling (SOF), the quantisation tables and, in the EXIF templates, the
+dates. The tables are the IJG ones (the JPEG standard's Annex K tables at VA 0x1088B8 and 0x108938 in v006, scaled by
+a quality): 85, 80 or 75 for a photo on a card (settings byte +0x0b), 45 without a card (VERIFIED in v006). A header
+with a mark of an editor or a re-encode (an XMP block, an APP2, APP13 or APP14 segment, a progressive frame, a size
+taller than wide) was saved again by another program and says nothing about the camera. An EXIF Make other than the
+ones above, a JFIF or other APP0 segment (no known build writes one, not even MJPEG's 'AVI1'), the still comment
+without its EXIF block or tables the encoder never writes show only that no known build writes the header as it is:
+another program may have saved the photo again, or another build may have written it, and nothing in the header tells
 which. A header without its quantisation tables or its Huffman tables is cut short, or comes from an encoder that
-leaves them out. That one camera's photos look like a known build's does not show that it runs that build: two
-builds can share a template.
+leaves them out. A photo shows the firmware that took it, not the firmware that fits the camera: a photo taken after
+a flash shows the flashed firmware. And two builds can share a template.
 
 Only the header is read: each segment on its own, from the SOI up to and including the SOS header, never the
 compressed image data after it and never more than the first 64 KiB. For an AVI, the chunk headers up to the first
-video frame are read, and that frame's JPEG header. Both builds copy the whole bare template into each video frame
-and fill in its size and tables of one IJG quality for both, which the rate control moves from frame to frame
-(VERIFIED by static analysis). So a frame header that is the template as filled in does not tell them apart
-(INFERRED: no video of either build was examined here), and any other is not the one they write; a JUNK chunk whose
-text is not the packer text both carry (AVI_PACKER) shows that other code wrote the file.
+video frame are read, and that frame's JPEG header. The v006 family copies the whole bare template into each video
+frame and fills in its size and tables of one IJG quality for both, which the rate control moves from frame to frame
+(VERIFIED by static analysis of v006). So a frame header that is the template as filled in does not tell the builds
+apart (INFERRED: no video of any build was examined here, and v012's video writer was not analysed, though it holds
+the same bare template), and any other is not the one they write; a JUNK chunk whose text is not the packer text
+v006, v008_test and v012 all carry (AVI_PACKER, VERIFIED by search) shows that other code wrote the file.
 """
 from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from .exif import EXIF_HEADER, ExifInfo, read_exif
 
@@ -47,19 +58,26 @@ HEADER_LIMIT = 0x10000   # nothing past the first 64 KiB of a file is read
 
 STILL_HEADER_LEN = 0x590
 BARE_HEADER_LEN = 0x270
+EXIF_MOD_HEADER_LEN = 0x340        # our EXIF mod: SOI, a 0xD0-byte APP1, then the bare template from SOF0 on
+EXIF_MOD_APP1_LEN = 0xD0           # marker included (length field 0xCE)
 STILL_COMMENT = b"GPEncoder      "     # COM length field 0x11
 BARE_COMMENT = b"GPEncoder"            # COM length field 0x0B
 # The segments of the two templates, in order (marker bytes after 0xFF).
 STILL_MARKERS = (0xD8, 0xC0, 0xFE, 0xDB, 0xDB, 0xDD, 0xC4, 0xC4, 0xC4, 0xC4, 0xE1, 0xDA)
 BARE_MARKERS = (0xD8, 0xC0, 0xFE, 0xDB, 0xDB, 0xDD, 0xC4, 0xC4, 0xC4, 0xC4, 0xDA)
+EXIF_MOD_MARKERS = (0xD8, 0xE1) + BARE_MARKERS[1:]
 # The scan header both templates end with, and their two DQT segments as (payload length, Pq/Tq): 8-bit tables 0, 1.
 TEMPLATE_SOS = bytes.fromhex("03010002110311003f00")
 TEMPLATE_DQT = [(65, 0x00), (65, 0x01)]
 CAMERA_MAKE = "Generalplus"
 CAMERA_MODEL = "CBB3"
 CAMERA_SOFTWARE = "20150615"
-# The text the video packer (AviPackerV3) puts in the JUNK chunk of every AVI it writes: a constant in the public
-# build (VERIFIED, static analysis) and present in the film-mods build too (VERIFIED by search).
+# Our EXIF mod's names (v0.26 and later), and the ones the toolkit's exif-fix writes on copies (exif.CAMERA_MAKE and
+# exif.CAMERA_MODEL): the same two, so only the Software tag and the layout tell them apart.
+KODAK_MAKE = "Kodak"
+KODAK_MODEL = "Charmera"
+# The text the video packer (AviPackerV3) puts in the JUNK chunk of every AVI it writes: a constant in v006
+# (VERIFIED, static analysis) and present once in v008_test and v012 too (VERIFIED by search).
 AVI_PACKER = b"GP$322 Generalplus AviPackerV3 20140916"
 XMP_HEADER = b"http://ns.adobe.com/xap/1.0/"
 
@@ -98,22 +116,45 @@ STANDARD_DHT = (
         "a2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9fa")),
 )
 
+# The firmware families a camera-written still photo can show, by key: what the header names, and the base a build
+# for that camera would start from. A photo cannot tell v006 from v008_test.
+FAMILY_SP140A = "v006-v008_test"
+FAMILY_OV9732 = "v012"
+FAMILIES = {
+    FAMILY_SP140A: "the v006 / v008_test family (SP140A builds; our v0.21-v0.24 write it too; a photo cannot tell v006 "
+                   "from v008_test)",
+    FAMILY_OV9732: "the factory build v012's family (OV9732 cameras; our v0.25 keeps its header, our v0.26 and later "
+                   "add one EXIF block to it)",
+}
+# Which family each camera-written kind shows. An exif-fix copy shows the family of the photo it was made from, by
+# its layout (see family_of).
+KIND_FAMILY = {"still": FAMILY_SP140A, "bare": FAMILY_OV9732, "exif-mod": FAMILY_OV9732}
+# The kinds a camera writes for a still photo as it saves it in DCIM.
+CAMERA_KINDS = ("still", "bare", "exif-mod")
+
+CUT_SHORT = "the header could not be read to the start of scan: nothing to conclude from it"
 CONCLUSIONS = {
-    "still": "the still-photo header both known builds write",
-    "bare": ("a bare header that neither known build writes for a still photo: if this is a photo as the camera saved it "
-             "in DCIM, the camera ran another build when it took it"),
+    "still": ("the v006 / v008_test family's still-photo header (SP140A builds; our v0.21-v0.24 write it too; a photo "
+              "cannot tell v006 from v008_test)"),
+    "bare": ("the factory build v012's still-photo header (OV9732 cameras), which our v0.25 keeps; the v006 family "
+             "writes it only for thumbnails and video frames, so a frame taken out of a video has it too"),
+    "exif-mod": "our EXIF mod's still-photo header (v0.26 and later, built on the factory build v012)",
+    "exif-fix": ("a copy the toolkit's exif-fix made (Make Kodak, Model Charmera, no Software; with --keep-make the "
+                 "camera's Generalplus/CBB3, no Software), not a photo as the camera saved it and not the EXIF mod; "
+                 "the rest of its header is the template of the photo it came from"),
     "resave": "re-saved by another program: says nothing about the camera",
-    "resave-or-build": ("neither known build writes this header as it is; another program saved it again, or another build "
+    "resave-or-build": ("no known build writes this header as it is; another program saved it again, or another build "
                         "wrote it; nothing here tells which"),
-    "unknown": ("a header neither known build writes, and nothing in it names another program: nothing here can tell what "
+    "unknown": ("a header no known build writes, and nothing in it names another program: nothing here can tell what "
                 "wrote it"),
     "no-tables": ("a header without its quantisation tables (DQT) or its Huffman tables (DHT) is cut short, or comes from "
                   "an encoder that leaves them out: nothing to conclude from it"),
 }
-VIDEO = "the frame header both known builds write for video: it does not tell the known builds apart (INFERRED)"
-NOT_VIDEO = "not the frame header the known builds write for video: nothing here can tell what wrote it"
+VIDEO = ("the bare frame header the v006 family writes for video (v012 holds the same template): it does not tell "
+         "the builds apart (INFERRED)")
+NOT_VIDEO = "not the bare frame header the v006 family writes for video: nothing here can tell what wrote it"
 OTHER_PACKER = ("other code wrote this file: its JUNK text is not " + repr(AVI_PACKER.decode("ascii"))
-                + ", the packer text both known builds carry")
+                + ", the packer text v006, v008_test and v012 all carry")
 
 
 # --- Reading the header -----------------------------------------------------------------------------------------
@@ -255,8 +296,8 @@ def exif_of(segments: List[Segment]) -> Optional[ExifInfo]:
 
 @dataclass
 class Header:
-    """What the header of one JPEG says, and the kind it is: 'still', 'bare', 'resave', 'resave-or-build', 'unknown'
-    or 'no-tables' (the keys of CONCLUSIONS)."""
+    """What the header of one JPEG says, and the kind it is: 'still', 'bare', 'exif-mod', 'exif-fix', 'resave',
+    'resave-or-build', 'unknown' or 'no-tables' (the keys of CONCLUSIONS)."""
     segments: List[Segment]
     length: int
     problem: Optional[str]
@@ -265,7 +306,7 @@ class Header:
     comments: List[bytes]
     exif: Optional[ExifInfo]
     kind: str = "unknown"
-    reasons: List[str] = field(default_factory=list)    # what shows another program, or what differs from both templates
+    reasons: List[str] = field(default_factory=list)    # what shows another program, or what differs from the templates
 
     @property
     def markers(self) -> Tuple[int, ...]:
@@ -322,9 +363,10 @@ def _an_editor(h: Header) -> List[str]:
 
 
 def _resaved_or_another_build(h: Header) -> List[str]:
-    """What neither known build writes, but another program that saves a photo again could write as well as another
-    build: from these alone, nothing tells which of the two wrote the header. The known builds write no APP0 at all,
-    not even the 'AVI1' one that MJPEG writers put in video frames (VERIFIED: neither image holds the bytes)."""
+    """What no known build writes, but another program that saves a photo again could write as well as another
+    build: from these alone, nothing tells which of the two wrote the header. The v006 family writes no APP0 at all,
+    not even the 'AVI1' one that MJPEG writers put in video frames (VERIFIED: neither image holds the bytes). An EXIF
+    Make 'Kodak' gets here only when the header is neither the EXIF mod's nor an exif-fix copy's."""
     out = []
     for s in h.segments:
         if s.marker == 0xE0:
@@ -337,6 +379,10 @@ def _resaved_or_another_build(h: Header) -> List[str]:
     return out + _other_tables(h)
 
 
+def _kodak(exif: Optional[ExifInfo]) -> bool:
+    return exif is not None and (exif.make, exif.model) == (KODAK_MAKE, KODAK_MODEL)
+
+
 def classify(h: Header) -> None:
     """Set h.kind and h.reasons."""
     if h.problem:
@@ -347,33 +393,86 @@ def classify(h: Header) -> None:
         h.kind, h.reasons = "no-tables", missing
         return
     structure = _camera_structure(h)
-    camera = not structure and not _other_tables(h)
+    camera = not structure and not _other_tables(h) and h.frame.width >= h.frame.height
     exif = h.exif
-    if (camera and h.markers == STILL_MARKERS and h.length == STILL_HEADER_LEN and h.comments == [STILL_COMMENT]
-            and exif is not None and (exif.make, exif.model, exif.software) == (CAMERA_MAKE, CAMERA_MODEL, CAMERA_SOFTWARE)
-            and h.frame.width >= h.frame.height):
+    still_layout = h.markers == STILL_MARKERS and h.comments == [STILL_COMMENT]
+    bare_layout = h.markers == BARE_MARKERS and h.comments == [BARE_COMMENT]
+    # One APP1 right after the SOI, then the bare template from its SOF0 on: our EXIF mod's layout, and the one
+    # exif-fix gives a copy of a bare-header photo.
+    mod_layout = h.markers == EXIF_MOD_MARKERS and h.comments == [BARE_COMMENT]
+    if (camera and still_layout and h.length == STILL_HEADER_LEN and exif is not None
+            and (exif.make, exif.model, exif.software) == (CAMERA_MAKE, CAMERA_MODEL, CAMERA_SOFTWARE)):
         h.kind = "still"
         return
-    if (camera and h.markers == BARE_MARKERS and h.length == BARE_HEADER_LEN and h.comments == [BARE_COMMENT]
-            and h.frame.width >= h.frame.height):
+    if camera and bare_layout and h.length == BARE_HEADER_LEN:
         h.kind = "bare"
         return
+    differs = []
+    if camera and mod_layout and _kodak(exif) and exif.software:
+        app1 = next(s for s in h.segments if s.marker == 0xE1)
+        if h.length == EXIF_MOD_HEADER_LEN and 4 + len(app1.payload) == EXIF_MOD_APP1_LEN:
+            h.kind = "exif-mod"
+            return
+        differs.append(f"a Kodak/Charmera EXIF header of {h.length:#x} bytes, not the EXIF mod's "
+                       f"{EXIF_MOD_HEADER_LEN:#x}")
+    # exif-fix writes no Software tag: that, with the layout it keeps, tells its copies from the EXIF mod
+    if camera and (still_layout or mod_layout) and _kodak(exif) and not exif.software:
+        h.kind = "exif-fix"
+        return
+    # exif-fix --keep-make keeps the camera's Make 'Generalplus' and Model 'CBB3' on a copy of a v006-family photo,
+    # still with no Software tag, which the camera always writes ('20150615')
+    if (camera and still_layout and exif is not None and (exif.make, exif.model) == (CAMERA_MAKE, CAMERA_MODEL)
+            and not exif.software):
+        h.kind = "exif-fix"
+        return
+    if camera and still_layout and _kodak(exif) and exif.software:
+        differs.append(f"Make 'Kodak', Model 'Charmera' and Software {exif.software!r} on the v006 family's template, "
+                       "which neither the EXIF mod nor exif-fix writes")
     editor = _an_editor(h)
     if editor:
         h.kind, h.reasons = "resave", editor
         return
-    differs = structure[:]
-    if h.markers not in (STILL_MARKERS, BARE_MARKERS):
-        differs.append("other segments than either template")
+    differs += structure
+    if h.markers not in (STILL_MARKERS, BARE_MARKERS, EXIF_MOD_MARKERS):
+        differs.append("other segments than any template")
     if not any(c in (STILL_COMMENT, BARE_COMMENT) for c in h.comments):
         differs.append("no GPEncoder comment")
-    if exif is not None and (exif.model, exif.software) != (CAMERA_MODEL, CAMERA_SOFTWARE):
+    if exif is not None and exif.make == CAMERA_MAKE and (exif.model, exif.software) != (CAMERA_MODEL, CAMERA_SOFTWARE):
         differs.append(f"EXIF Model {exif.model!r} and Software {exif.software!r}")
     either = _resaved_or_another_build(h)
     if either:
         h.kind, h.reasons = "resave-or-build", either + differs
         return
-    h.kind, h.reasons = "unknown", differs or [f"a {h.length:#x}-byte header, the size of neither template"]
+    h.kind, h.reasons = "unknown", differs or [f"a {h.length:#x}-byte header, the size of no template"]
+
+
+class Verdict(NamedTuple):
+    """The machine-readable result for one header: its kind (a key of CONCLUSIONS), the firmware family it shows (a
+    key of FAMILIES, or None when it shows none) and why it is the kind it is."""
+    kind: str
+    family: Optional[str]
+    reasons: List[str]
+
+
+def family_of(h: Header) -> Optional[str]:
+    """The firmware family a header shows: its kind's, or for an exif-fix copy the family of the template it kept
+    (the v006 family's still layout, or v012's bare template after one APP1). None for every other kind."""
+    if h.kind == "exif-fix":
+        return FAMILY_SP140A if h.markers == STILL_MARKERS else FAMILY_OV9732
+    return KIND_FAMILY.get(h.kind)
+
+
+def verdict(h: Header) -> Verdict:
+    return Verdict(h.kind, family_of(h), list(h.reasons))
+
+
+def conclusion_of(h: Header) -> str:
+    """The text of the conclusion line for one JPEG header."""
+    if h.problem:
+        return CUT_SHORT
+    if h.kind == "exif-fix":
+        return CONCLUSIONS["exif-fix"] + "; that is " + FAMILIES[family_of(h)]
+    return CONCLUSIONS[h.kind]
 
 
 def read_header(read: Callable[[int, int], bytes], start: int = 0) -> Header:
@@ -454,9 +553,12 @@ def describe_header(h: Header, indent: str = "") -> List[str]:
     if h.problem:
         lines = [f"header:      {h.length:#x} bytes read ({names}), then {h.problem}"]
     else:
-        what = {"still": "the EXIF still template", "bare": "the bare template, no EXIF block",
-                "resave": "written by another program", "resave-or-build": "neither template as it is",
-                "unknown": "neither template", "no-tables": "tables missing"}[h.kind]
+        what = {"still": "the v006 family's EXIF still template", "bare": "the bare template, no EXIF block",
+                "exif-mod": "the EXIF mod's: one Kodak/Charmera EXIF block, then the bare template",
+                "exif-fix": ("an exif-fix copy: " + ("Kodak/Charmera" if _kodak(h.exif) else "Generalplus/CBB3 (--keep-make)")
+                             + " EXIF without Software, the rest a camera template"),
+                "resave": "written by another program", "resave-or-build": "no template as it is",
+                "unknown": "no template", "no-tables": "tables missing"}[h.kind]
         lines = [f"header:      {what}, {h.length:#x} bytes ({names})"]
         if h.reasons:
             lines.append(("why:         " if h.kind == "resave" else "differs:     ") + "; ".join(h.reasons))
@@ -473,13 +575,25 @@ def describe_header(h: Header, indent: str = "") -> List[str]:
         lines.append("quality:     none (no quantisation tables)")
     lines.append("comment:     " + (", ".join(repr(c.decode("latin-1")) for c in h.comments) if h.comments else "none"))
     if h.exif is not None:
-        lines.append(f"exif:        Make {h.exif.make!r}, Model {h.exif.model!r}, Software {h.exif.software!r}")
+        lines.append(f"exif:        Make {h.exif.make!r}, Model {h.exif.model!r}, Software {h.exif.software!r}"
+                     + (f", DateTime {h.exif.date_time!r}" if h.kind == "exif-mod" and h.exif.date_time else ""))
     elif h.segments:
         lines.append("exif:        none")
     return [indent + line for line in lines]
 
 
-CUT_SHORT = "the header could not be read to the start of scan: nothing to conclude from it"
+def open_header(path: Path) -> Tuple[Optional[Header], Optional[AviHeader], Optional[Header]]:
+    """(the JPEG header, None, None) for a JPEG, (None, the AVI's chunk headers, its first frame's header or None) for
+    an AVI, (None, None, None) for anything else. Only headers are read. Raises OSError when it cannot be read."""
+    with open(path, "rb", buffering=0) as f:
+        read = _reader(f)
+        if read(0, 2) == b"\xff\xd8":
+            return read_header(read), None, None
+        start = read(0, 12)
+        if start[:4] == b"RIFF" and start[8:12] == b"AVI ":
+            avi = read_avi(read)
+            return None, avi, (read_header(read, avi.frame_at) if avi.frame_at is not None else None)
+    return None, None, None
 
 
 def identify(path: Path) -> List[str]:
@@ -488,7 +602,7 @@ def identify(path: Path) -> List[str]:
         read = _reader(f)
         if read(0, 2) == b"\xff\xd8":
             h = read_header(read)
-            return describe_header(h) + [f"conclusion:  {CUT_SHORT if h.problem else CONCLUSIONS[h.kind]}"]
+            return describe_header(h) + [f"conclusion:  {conclusion_of(h)}"]
         start = read(0, 12)
         if start[:4] == b"RIFF" and start[8:12] == b"AVI ":
             return _identify_avi(read)
@@ -496,12 +610,12 @@ def identify(path: Path) -> List[str]:
 
 
 def _identify_avi(read: Callable[[int, int], bytes]) -> List[str]:
-    """An AVI's header lines and its first frame's. Both known builds copy the whole bare template into each video frame
+    """An AVI's header lines and its first frame's. v006 and v008_test copy the whole bare template into each video frame
     and fill in its size and its tables, one IJG quality for both; the rate control moves that quality from frame to
     frame, from 50 in steps of 5 between 15 and 60 by its thresholds (VERIFIED by static analysis, the range
     INFERRED). So a frame header is theirs exactly when it is of the "bare" kind, and it then does not tell them
     apart; a JUNK text other than AVI_PACKER shows that other code wrote the file. (INFERRED from the firmware: no
-    video of either build was examined here.)"""
+    video of any build was examined here, and v012's video writer was not analysed.)"""
     avi = read_avi(read)
     lines = ["header:      an AVI"
              + (f", {avi.width}x{avi.height}" if avi.width else "")
@@ -527,7 +641,7 @@ def _identify_avi(read: Callable[[int, int], bytes]) -> List[str]:
     if h.kind == "bare":
         return lines + [f"conclusion:  {VIDEO}"]
     if h.kind in ("resave", "resave-or-build"):
-        return lines + [f"conclusion:  {CONCLUSIONS[h.kind]}"]
+        return lines + [f"conclusion:  {conclusion_of(h)}"]
     return lines + [f"conclusion:  {NOT_VIDEO}"]
 
 
@@ -560,33 +674,39 @@ def register(subparsers) -> None:
             "file to the start of the compressed image data, never more than the first 64 KiB. It names the header "
             "kind and its length, the frame size and sampling, the IJG quality that reproduces the quantisation "
             "tables exactly, the comment, and EXIF Make, Model and Software when there are any, then says what the "
-            "header shows. Both known builds (the public dump's and the film-mods build) write every still photo "
-            "with the same 0x590-byte header: an EXIF block with Make Generalplus, Model CBB3 and Software 20150615, "
-            "and the comment 'GPEncoder' and six spaces. They write a bare 0x270-byte header, no EXIF block and the "
-            "comment 'GPEncoder', only for thumbnails, video frames and a Wi-Fi stream."
+            "header shows. Three still-photo headers are known. The v006 / v008_test family (the SP140A builds, and "
+            "our v0.21-v0.24 built on v006) writes 0x590 bytes: an EXIF block with Make Generalplus, Model CBB3 and "
+            "Software 20150615, and the comment 'GPEncoder' and six spaces. The factory build v012 (OV9732 cameras) "
+            "and our v0.25 write a bare 0x270-byte header: no EXIF block and the comment 'GPEncoder'. Our EXIF mod "
+            "(v0.26 and later) writes 0x340 bytes: one EXIF block with Make Kodak, Model Charmera and Software naming "
+            "its version right after the start marker, then v012's bare header. For the whole card at once, use "
+            "identify."
         ),
         epilog=(
-            "What the conclusions mean. 'The still-photo header both known builds write': the camera writes photos the "
-            "way both known builds do; that does not show which build it runs, or that it runs either, since two builds "
-            "can share a header. 'A bare header that neither known build writes for a still photo': if the file is a "
-            "photo as the camera saved it in DCIM, the camera ran another build when it took it. 'Re-saved by another "
-            "program': the header carries a mark of an "
-            "editor or a re-encode (an XMP block, an APP2, APP13 or APP14 segment, a progressive frame or a size taller "
-            "than wide), so a phone, an editor or a messaging app wrote the file again, and its header says nothing "
-            "about the camera. 'Neither known build writes this header as it is': an EXIF Make other than Generalplus, "
-            "a JFIF or other APP0 segment, the still comment without its EXIF block, or tables the camera's encoder "
-            "never writes; "
-            "another program may have saved the file again, or another build may have written it, and nothing here "
-            "tells which. 'A header neither known build writes, and nothing in it names another program': it differs "
-            "from both in other ways, and nothing here can tell what wrote it. A header without its quantisation "
-            "tables or its Huffman tables is cut short, or comes from an encoder that leaves them out, and there is "
-            "nothing to conclude from it. For a video, a frame header that is the bare template as the encoder fills "
-            "it in (one IJG quality for both tables, which the rate control moves from frame to frame) does not tell "
-            "the known builds apart (INFERRED), any other frame header is not the one they write, and a JUNK text "
-            "other than "
-            "'GP$322 Generalplus AviPackerV3 20140916', the packer text both carry, shows that other code wrote the "
-            "file. Give photo-id the camera's own files, as copied from the card's DCIM folder: a frame taken out of "
-            "a video without re-encoding has the bare header too. Nothing here says whether a firmware fits a camera."
+            "What the conclusions mean. 'The v006 / v008_test family's still-photo header': the camera ran an SP140A "
+            "build when it took the photo; a photo cannot tell v006 from v008_test, since they share the header. "
+            "'The factory build v012's still-photo header': the camera ran v012 or our v0.25 when it took the photo; "
+            "the v006 family writes the same bare header for thumbnails and video frames, so give photo-id the files "
+            "as they came off the card's DCIM folder, not a frame taken out of a video. 'Our EXIF mod's still-photo "
+            "header': the camera ran v0.26 or later. 'A copy the toolkit's exif-fix made': Make Kodak and Model "
+            "Charmera (or, with --keep-make, the camera's Generalplus and CBB3) without a Software tag, on a copy; "
+            "it is not the EXIF mod, and the rest of its header still "
+            "names the family of the photo it was made from. 'Re-saved by another program': the header carries a "
+            "mark of an editor or a re-encode (an XMP block, an APP2, APP13 or APP14 segment, a progressive frame or "
+            "a size taller than wide), so a phone, an editor or a messaging app wrote the file again, and its header "
+            "says nothing about the camera. 'No known build writes this header as it is': an EXIF Make other than "
+            "these, a JFIF or other APP0 segment, the still comment without its EXIF block, or tables the camera's "
+            "encoder never writes; another program may have saved the file again, or another build may have "
+            "written it, and nothing here tells which. 'A header no known build writes, and nothing in it names "
+            "another program': it differs from all of them in other ways, and nothing here can tell what wrote it. "
+            "A header without its quantisation tables or its Huffman tables is cut short, or comes from an encoder "
+            "that leaves them out, and there is nothing to conclude from it. For a video, a frame header that is the "
+            "bare template as the encoder fills it in does not tell the builds apart (INFERRED), any other frame "
+            "header is not the one they write, and a JUNK text other than "
+            "'GP$322 Generalplus AviPackerV3 20140916', the packer text v006, v008_test and v012 all carry, shows "
+            "that other code wrote the file. A photo shows the firmware that took it, not the one that fits the "
+            "camera: a photo taken after a flash shows the flashed firmware. Nothing here says whether a firmware "
+            "fits a camera."
         ),
     )
     p.add_argument("files", nargs="+", metavar="FILE", help="a JPEG or AVI file (only its header is read)")

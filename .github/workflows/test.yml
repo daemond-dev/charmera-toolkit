@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.9", "3.12"]
     steps:
       - uses: actions/checkout@v4
@@ -25,21 +25,33 @@ jobs:
       - name: Install dosfstools and ffmpeg (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y dosfstools ffmpeg
-      # Without the public dump every test on real firmware is skipped, so it is fetched from upstream at a fixed
-      # commit and must match its hash. The film-mods restore file is optional: its tests skip when it is gone.
-      - name: Public firmware files for the tests (downloaded from upstream, never stored)
+      # Without the public dump every test on real firmware is skipped, so its cleaned copy (v006) is fetched from
+      # the-dumping-grounds/charmera-firmware-v006 at a fixed commit and must match its hash. The tests tied to the original
+      # dump's own settings and photos skip with it. The film-mods restore file (v008_test, the same bytes as
+      # Hyperlite-Media's Charmera_Restore) is optional: its tests skip when it is gone.
+      - name: Public firmware files for the tests (downloaded from the-dumping-grounds' firmware repositories at fixed commits, never stored)
         shell: bash
         run: |
+          # the hash check in Python, so it is the same on Linux, Windows and macOS
+          check() { python -c "import hashlib,sys; sys.exit(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest() != sys.argv[2])" "$1" "$2"; }
           curl -fsSL --retry 5 -o "$RUNNER_TEMP/stock.bin" \
-            "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin"
-          echo "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f  $RUNNER_TEMP/stock.bin" | sha256sum -c -
+            "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v006/123b76a8ead1322678bbb750ac1c85c8d8bd2099/charmera-v006-2025-10-14-clean.bin"
+          check "$RUNNER_TEMP/stock.bin" 75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082
           echo "CHARMERA_STOCK_IMAGE=$RUNNER_TEMP/stock.bin" >> "$GITHUB_ENV"
           if curl -fsSL --retry 5 -o "$RUNNER_TEMP/film-restore.bin" \
-               "https://github.com/Hyperlite-Media/charmera-film-mods/releases/download/Charmera_Restore/JH_5408202505201029_0852C329.bin" \
-             && echo "5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f  $RUNNER_TEMP/film-restore.bin" | sha256sum -c -; then
+               "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v008_test/155571606f4a33e7912fc44f84b0b29f73f25347/charmera-v008_test-2025-11-19.bin" \
+             && check "$RUNNER_TEMP/film-restore.bin" 5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f; then
             echo "CHARMERA_FILM_MODS_RESTORE=$RUNNER_TEMP/film-restore.bin" >> "$GITHUB_ENV"
           else
             echo "::warning::The film-mods restore file could not be fetched or did not match its hash; its tests are skipped."
+          fi
+          # The factory build v012's cleaned copy: charmera build rebuilds every v012 combination from it (tests skip without it).
+          if curl -fsSL --retry 5 -o "$RUNNER_TEMP/factory.bin" \
+               "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v012/39150fbc584e4cb7c5bf091f56b9888f07379578/charmera-v012-2026-01-12-clean.bin" \
+             && check "$RUNNER_TEMP/factory.bin" 63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c; then
+            echo "CHARMERA_FACTORY_DUMP=$RUNNER_TEMP/factory.bin" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The v012 factory dump could not be fetched or did not match its hash; its tests are skipped."
           fi
       - name: Run the tests
         env:

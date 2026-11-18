@@ -46,16 +46,17 @@ public final class CandidatesTest {
         expect("a synthetic dump never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.C),
                 "is not exactly candidate C, so the app will not use it"));
         expect("a synthetic restore never passes build()", refused(() -> Candidates.build(img, Candidates.Kind.RESTORE),
-                "is not exactly the published stock restore file"));
+                "is not exactly the stock restore file"));
         expect("a refusal says the cause first and keeps the SHA-256 for its last line", refused(
                 () -> Candidates.stockDump(junk), "so the app will not use it") && refused(() -> Candidates.stockDump(junk),
                 "\nDetail: its SHA-256 is "));
         // Whether a 2 MiB file could be a backup is for UpdateCheck.backupProblem to say: step 0 may refuse it too.
         expect("a refused dump is not pointed to step 0", !refused(() -> Candidates.stockDump(junk), "step 0")
                 && !refused(() -> Candidates.stockDump(junk), "Choose this camera's backup"));
-        expect("the stock restore, the sensor-ID probe and the OV9732 bring-up are offered, in that order",
-                java.util.Arrays.equals(Candidates.Kind.offeredKinds(), new Candidates.Kind[]{Candidates.Kind.RESTORE,
-                        Candidates.Kind.PROBE, Candidates.Kind.BRINGUP}));
+        expect("the stock restore, the sensor-ID probe, the OV9732 bring-up and firmware v0.25, v0.26 and v0.27 are"
+                + " offered, in that order", java.util.Arrays.equals(Candidates.Kind.offeredKinds(), new Candidates.Kind[]{
+                        Candidates.Kind.RESTORE, Candidates.Kind.PROBE, Candidates.Kind.BRINGUP, Candidates.Kind.V025,
+                        Candidates.Kind.V026, Candidates.Kind.V027}));
         byte[] restore0 = invokeTransform(img, Candidates.Kind.RESTORE);
         expect("the restore is the dump's first 0x1E0000 bytes, untouched",
                 java.util.Arrays.equals(restore0, java.util.Arrays.copyOf(img, UpdateCheck.UPDATE_SIZE)));
@@ -69,10 +70,16 @@ public final class CandidatesTest {
         } else {
             byte[] dump = Candidates.stockDump(given);
             for (Candidates.Kind k : Candidates.Kind.values()) {
+                if (k.base != Candidates.Base.STOCK) {
+                    expect("the stock dump never makes " + k, refused(() -> Candidates.build(dump, k),
+                            "not the factory dump"));
+                    continue;
+                }
                 byte[] out = Candidates.build(dump, k);   // throws unless the SHA-256 is the published or reviewed one
-                UpdateCheck.Result r = UpdateCheck.check(k.fileName, out);
-                expect("real " + k + " is the reviewed file and passes the checker", r.ok && k.fileName.equals(r.cardName)
-                        && k.sha256.equals(r.sha256));
+                String want = k.shaFrom(dump);            // the cleaned copy makes the clean variant of each kind
+                UpdateCheck.Result r = UpdateCheck.check(k.fileNameFor(want), out);
+                expect("real " + k + " is the reviewed file and passes the checker", r.ok
+                        && k.fileNameFor(want).equals(r.cardName) && want.equals(r.sha256) && k.matches(r.sha256));
             }
             byte[] restore = Arrays.copyOf(dump, UpdateCheck.UPDATE_SIZE);
             expect("the published restore file is accepted as the dump", Arrays.equals(Candidates.stockDump(restore), dump));
@@ -81,14 +88,14 @@ public final class CandidatesTest {
             // fail its sensor-table line and refuse the one file that needs no backup. Every other file is checked
             // against the reference. Run here because this logic is safety-critical and must not rest on a source test.
             byte[] probe7 = Candidates.build(dump, Candidates.Kind.PROBE);
-            UpdateCheck.Result probeWithBackup = Candidates.check(Candidates.Kind.PROBE.fileName, probe7, dump);
-            UpdateCheck.Result probeNoBackup = Candidates.check(Candidates.Kind.PROBE.fileName, probe7, null);
+            UpdateCheck.Result probeWithBackup = Candidates.check(Candidates.Kind.PROBE.fileNameFor(UpdateCheck.sha256Hex(probe7, 0, probe7.length)), probe7, dump);
+            UpdateCheck.Result probeNoBackup = Candidates.check(Candidates.Kind.PROBE.fileNameFor(UpdateCheck.sha256Hex(probe7, 0, probe7.length)), probe7, null);
             expect("the probe is checked with no reference even when a backup is passed", probeWithBackup.ok
                     && !probeWithBackup.compared && probeWithBackup.referenceSha256 == null);
             expect("the probe comes out identical with or without a backup passed", probeNoBackup.ok
                     && !probeNoBackup.compared && probeNoBackup.referenceSha256 == null
                     && probeWithBackup.sha256.equals(probeNoBackup.sha256));
-            UpdateCheck.Result restoreWithBackup = Candidates.check(Candidates.Kind.RESTORE.fileName, restore, dump);
+            UpdateCheck.Result restoreWithBackup = Candidates.check(Candidates.Kind.RESTORE.fileNameFor(UpdateCheck.sha256Hex(restore, 0, restore.length)), restore, dump);
             expect("a non-probe file is still checked against the backup passed (the rule is probe-only)",
                     restoreWithBackup.compared && restoreWithBackup.referenceSha256 != null);
             expect("Candidates.isProbe keys on the exact probe bytes", Candidates.isProbe(probe7)
@@ -96,12 +103,13 @@ public final class CandidatesTest {
             // The OV9732 bring-up is the second reviewed patch: like the probe it is checked with no reference, so a
             // backup it was never meant to match cannot fail its sensor-table line and refuse it (finding 7).
             byte[] bringup7 = Candidates.build(dump, Candidates.Kind.BRINGUP);
-            UpdateCheck.Result bringupWithBackup = Candidates.check(Candidates.Kind.BRINGUP.fileName, bringup7, dump);
+            UpdateCheck.Result bringupWithBackup = Candidates.check(Candidates.Kind.BRINGUP.fileNameFor(UpdateCheck.sha256Hex(bringup7, 0, bringup7.length)), bringup7, dump);
             expect("the bring-up is checked with no reference even when a backup is passed", bringupWithBackup.ok
                     && !bringupWithBackup.compared && bringupWithBackup.referenceSha256 == null);
-            expect("isReviewedPatch covers both the probe and the bring-up, and nothing else",
+            expect("isReviewedPatch covers the probe, the bring-up and the restore file; only the first two are checked alone",
                     Candidates.isReviewedPatch(probe7) && Candidates.isReviewedPatch(bringup7)
-                    && !Candidates.isReviewedPatch(restore) && !Candidates.isProbe(bringup7));
+                    && Candidates.isReviewedPatch(restore) && !Candidates.isProbe(bringup7)
+                    && !Candidates.checkedAlone(UpdateCheck.sha256Hex(restore, 0, restore.length)));
             UpdateCheck.Marks mk = UpdateCheck.findMarks(dump);
             expect("the real dump's marks are found by content where the research put them", mk.complete()
                     && mk.stampOffset == 0x218C4 && "202505201029".equals(mk.stamp) && mk.buildOffset == 0x18964
@@ -113,16 +121,20 @@ public final class CandidatesTest {
                     && mk.sourceTrees.get("v006") == 27 && mk.sourceTreeOffset == 0x3A4D2
                     && "v006".equals(new String(dump, mk.sourceTreeOffset, 4, StandardCharsets.US_ASCII))
                     && mk.stampConflict.isEmpty() && "Oct 14 2025".equals(mk.compiled) && mk.compiledOffset == 0xF3978);
-            UpdateCheck.Result rr = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore, UpdateCheck.PUBLIC_BUILD, dump);
+            UpdateCheck.Result rr = UpdateCheck.check(Candidates.Kind.RESTORE.fileNameFor(UpdateCheck.sha256Hex(restore, 0, restore.length)), restore, UpdateCheck.PUBLIC_BUILD, dump);
             expect("the restore file against the dump it came from passes, and the sensor line says what a public"
                     + " backup proves", rr.ok && rr.compared && level(rr, "software") == UpdateCheck.Level.PASS
                     && level(rr, "vector-table") == UpdateCheck.Level.PASS
                     && level(rr, "sensor-table") == UpdateCheck.Level.WARN
-                    && rr.verdict().startsWith("OK to put on the card. Read these 2 warnings first. Image sensor set-up:"
+                    && rr.verdict().startsWith("OK to put on the card. Read "
+                    + (Candidates.isClean(dump) ? "this warning" : "these 2 warnings")   // the clean copy stores no photos
+                    + " first. Image sensor set-up:"
                     + " the same as in the firmware in your backup. That firmware is the public dump's build, unchanged")
-                    && rr.verdict().contains("Stored photos:"));
+                    && (Candidates.isClean(dump) || rr.verdict().contains("Stored photos:")));   // the clean copy has none
             expect("the public dump is refused as a backup of your camera",
-                    UpdateCheck.backupProblem(dump, new String[]{Candidates.STOCK_DUMP_SHA256}) != null);
+                    UpdateCheck.backupProblem(dump, Candidates.PUBLIC_DUMP_SHA256S) != null
+                    && UpdateCheck.backupProblem(dump, Candidates.PUBLIC_DUMP_SHA256S).startsWith(
+                    "it is byte for byte the public stock dump"));   // the cleaned copy too: it is what the app downloads
             // A read of a camera flashed with the restore file, once one setting was saved: taken, with the note.
             byte[] read = dump.clone();
             read[0x170100] ^= 1;
@@ -131,7 +143,7 @@ public final class CandidatesTest {
                             && UpdateCheck.backupNotes(read, UpdateCheck.PUBLIC_BUILD).size() == 1
                             && UpdateCheck.backupNotes(read, UpdateCheck.PUBLIC_BUILD).get(0).contains("the public dump's"
                             + " build, unchanged"));
-            UpdateCheck.Result plain = UpdateCheck.check(Candidates.Kind.RESTORE.fileName, restore);
+            UpdateCheck.Result plain = UpdateCheck.check(Candidates.Kind.RESTORE.fileNameFor(UpdateCheck.sha256Hex(restore, 0, restore.length)), restore);
             expect("without a backup the restore file's own checks pass, its vector table is the public build's, and"
                     + " it is not OK yet", plain.ok && !plain.compared && level(plain, "vector-table") == UpdateCheck.Level.PASS
                     && plain.verdict().startsWith("Not OK to put on the card yet:"));
@@ -182,6 +194,108 @@ public final class CandidatesTest {
             expect("the restore file with its vector table destroyed is refused", !vr.ok
                     && level(vr, "vector-table") == UpdateCheck.Level.FAIL);
         }
+        // The owner's factory dump (private, never in the repository): v0.25 is made from it and from nothing else.
+        String factoryPath = System.getenv("CHARMERA_FACTORY_DUMP");
+        byte[] factory = factoryPath == null || factoryPath.isEmpty() ? null : Files.readAllBytes(Paths.get(factoryPath));
+        if (factory == null) {
+            System.out.println("CandidatesTest: factory-dump checks SKIPPED (set CHARMERA_FACTORY_DUMP to the factory dump)");
+        } else if (!Candidates.isFactoryDump(factory)) {
+            System.out.println("CandidatesTest: factory-dump checks SKIPPED (CHARMERA_FACTORY_DUMP is not the factory dump)");
+        } else {
+            String asBackup = UpdateCheck.backupProblem(factory, Candidates.PUBLIC_DUMP_SHA256S);
+            expect("the cleaned v012 copy is refused as a backup and named; the owner's own read is not refused for being"
+                    + " public", Candidates.isClean(factory) ? asBackup != null && asBackup.contains("factory build v012")
+                    : asBackup == null || !asBackup.contains("public"));
+            byte[] v025 = Candidates.build(factory, Candidates.Kind.V025);   // throws unless it is the reference file
+            expect("the factory dump makes the v0.25 reference file", Candidates.Kind.V025.shaFrom(factory).equals(
+                    UpdateCheck.sha256Hex(v025, 0, v025.length)) && v025.length == UpdateCheck.UPDATE_SIZE
+                    && "a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0".equals(Candidates.Kind.V025.sha256)
+                    && "bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a".equals(Candidates.Kind.V025.cleanSha256));
+            int differ = 0;
+            for (int i = 0; i < v025.length; i++) {
+                boolean photos = i >= Candidates.FACTORY_PHOTOS_START && i < Candidates.FACTORY_PHOTOS_END;
+                if (!photos && v025[i] != factory[i]) {
+                    differ++;
+                }
+            }
+            expect("outside the blanked photo slots, v0.25 differs from the dump in exactly its 172 authored bytes",
+                    differ == 172 && allEqual(v025, Candidates.FACTORY_PHOTOS_START, Candidates.FACTORY_PHOTOS_END, 0xFF));
+            UpdateCheck.Result withBackup = Candidates.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025, factory);
+            UpdateCheck.Result plain = Candidates.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025, null);
+            expect("v0.25 passes with its unknown build marks as a warning, never a failure, and no backup comparison",
+                    withBackup.ok && plain.ok && !withBackup.compared && withBackup.referenceSha256 == null
+                    && level(plain, "series") == UpdateCheck.Level.WARN
+                    && Candidates.Kind.V025.fileNameFor(plain.sha256).equals(plain.cardName));
+            expect("every other line UpdateCheck gives v0.25 is unchanged", level(plain, "checksum") == UpdateCheck.Level.PASS
+                    && level(plain, "magic") == UpdateCheck.Level.PASS && level(plain, "name") == UpdateCheck.Level.PASS
+                    && level(plain, "size") == UpdateCheck.Level.PASS);
+            expect("UpdateCheck alone still refuses v0.25 for its build marks (the warning is Candidates.check's)",
+                    !UpdateCheck.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025).ok);
+            expect("v0.25 is a reviewed patch and the Repair version it says", Candidates.isReviewedPatch(v025)
+                    && Candidates.repairVersion(plain.sha256) == Candidates.Kind.V025);
+            byte[] other = v025.clone();
+            other[0x62390] ^= 1;
+            UpdateCheck.Result changed = Candidates.check(named(other), other, null);
+            expect("a v0.25 with one byte changed is not v0.25: its build marks fail again", !changed.ok
+                    && level(changed, "series") == UpdateCheck.Level.FAIL);
+            expect("the factory dump never makes a stock kind", refused(() -> Candidates.build(factory,
+                    Candidates.Kind.BRINGUP), "is not exactly firmware v0.24"));
+            // v0.26: v0.25 plus the EXIF header, its vendor template part copied from the dump at run time.
+            byte[] v026 = Candidates.build(factory, Candidates.Kind.V026);   // throws unless it is the reference file
+            expect("the factory dump makes the v0.26 reference file", v026.length == UpdateCheck.UPDATE_SIZE
+                    && (Candidates.isClean(factory) ? "be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738"
+                    : "617770c3f3c9d880f93f06043090d3d07909c845633ca08e9c183deb44fa06d2").equals(
+                    UpdateCheck.sha256Hex(v026, 0, v026.length))
+                    && Candidates.Kind.V026.shaFrom(factory).equals(UpdateCheck.sha256Hex(v026, 0, v026.length)));
+            int[] cp = {0x10753A, 0x89712, 0x26E};   // Candidates.V026_COPIES (package-private)
+            expect("the copied template is the dump's own, identical in v0.25", java.util.Arrays.equals(
+                    java.util.Arrays.copyOfRange(factory, cp[0], cp[0] + cp[2]),
+                    java.util.Arrays.copyOfRange(v025, cp[0], cp[0] + cp[2])));
+            int differ26 = 0;
+            int copyDiffers = 0;
+            for (int i = 0; i < v026.length; i++) {
+                if (v026[i] != v025[i]) {
+                    differ26++;
+                    if (i >= cp[1] && i < cp[1] + cp[2]) {
+                        copyDiffers++;
+                    }
+                }
+            }
+            expect("v0.26 differs from v0.25 in its 332 authored bytes and the copied range only",
+                    differ26 == 332 + copyDiffers);
+            UpdateCheck.Result plain26 = Candidates.check(Candidates.Kind.V026.fileNameFor(UpdateCheck.sha256Hex(v026, 0, v026.length)), v026, factory);
+            expect("v0.26 passes its checks, with no backup comparison, under its own name", plain26.ok
+                    && !plain26.compared && Candidates.Kind.V026.fileNameFor(plain26.sha256).equals(plain26.cardName)
+                    && level(plain26, "checksum") == UpdateCheck.Level.PASS);
+            expect("v0.26 is a reviewed patch and the Repair version it says", Candidates.isReviewedPatch(v026)
+                    && Candidates.repairVersion(plain26.sha256) == Candidates.Kind.V026);
+            byte[] v027 = Candidates.build(factory, Candidates.Kind.V027);   // throws unless it is the reference file
+            UpdateCheck.Result plain27 = Candidates.check(Candidates.Kind.V027.fileNameFor(
+                    UpdateCheck.sha256Hex(v027, 0, v027.length)), v027, factory);
+            expect("the factory dump makes the v0.27 reference file, which passes its checks under its own name",
+                    (Candidates.isClean(factory) ? "89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639"
+                    : "108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968").equals(
+                    UpdateCheck.sha256Hex(v027, 0, v027.length)) && plain27.ok && !plain27.compared
+                    && Candidates.Kind.V027.fileNameFor(plain27.sha256).equals(plain27.cardName)
+                    && Candidates.isReviewedPatch(v027) && Candidates.repairVersion(plain27.sha256) == Candidates.Kind.V027);
+        }
+        // The cleaned copies (the-dumping-grounds): each kind has a second reviewed file, the same code with only the
+        // factory settings record and no stored photos; the withdrawn candidates already are that file.
+        for (Candidates.Kind k : Candidates.Kind.values()) {
+            expect(k + " matches both its files, and names each by its own name", k.matches(k.sha256)
+                    && k.matches(k.cleanSha256) && k.fileName.equals(k.fileNameFor(k.sha256))
+                    && k.cleanFileName.equals(k.fileNameFor(k.cleanSha256)) && !k.matches("0".repeat(64)));
+            expect(k + "'s clean file is renamed only by its byte sum", k.cleanFileName.substring(0, 20)
+                    .equals(k.fileName.substring(0, 20)));
+        }
+        expect("the restore file from the cleaned copy is candidate C's bytes",
+                Candidates.Kind.RESTORE.cleanSha256.equals(Candidates.Kind.C.sha256));
+        expect("the cleaned copies are public dumps, never a backup", Arrays.asList(Candidates.PUBLIC_DUMP_SHA256S)
+                .containsAll(Arrays.asList(Candidates.CLEAN_STOCK_SHA256, Candidates.CLEAN_FACTORY_SHA256)));
+        expect("the app downloads the cleaned copy from its repository at a fixed commit",
+                Candidates.STOCK_DUMP_DOWNLOAD.startsWith("https://raw.githubusercontent.com/the-dumping-grounds/"
+                        + "charmera-firmware-v006/") && Candidates.STOCK_DUMP_DOWNLOAD.endsWith(
+                        "/charmera-v006-2025-10-14-clean.bin") && Candidates.STOCK_DUMP_DOWNLOAD.matches(".*/[0-9a-f]{40}/.*"));
         String film = System.getenv("CHARMERA_FILM_MODS_RESTORE");
         byte[] f = film == null || film.isEmpty() || !Files.isRegularFile(Paths.get(film)) ? null
                 : Files.readAllBytes(Paths.get(film));

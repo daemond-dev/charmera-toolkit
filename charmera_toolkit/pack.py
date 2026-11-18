@@ -94,6 +94,10 @@ def prepare_payload(image: bytes, blank_settings: bool = False, blank_photos: bo
         payload = bytearray(settings_mod.rewrite_store(bytes(payload), recs[0]))
     if blank_settings:
         payload[SETTINGS_BASE: settings_mod.SETTINGS_END] = b"\xff" * (settings_mod.SETTINGS_END - SETTINGS_BASE)
+        high = settings_mod.PHOTO_DIRECTORY + settings_mod.SECTOR_SIZE     # sectors 121..127, past the directory
+        end = min(settings_mod.BANK_END, len(payload))
+        if end > high:
+            payload[high:end] = b"\xff" * (end - high)
     if blank_photos:
         # The firmware's own "delete all" leaves a zeroed directory sector; an 0xFF directory would decode
         # as two used entries of length 0xFFFFFFFF, so write zeros there and erase only the photo data.

@@ -1,6 +1,6 @@
 # Photo frames
 
-Reading order: 8 of 13 · previous: [Command reference](07-USAGE.md) · next: [Resource pack and boot logo](09-RESOURCES.md) · [all docs](README.md)
+Reading order: 8 of 15 · previous: [Command reference](07-USAGE.md) · next: [Resource pack and boot logo](09-RESOURCES.md) · [all docs](README.md)
 
 The camera's frame mode lays one of four decorative overlays over the live view and the saved photo. The
 four overlays and their menu thumbnails live in the resource pack at 0x120000, so a modified image can carry
@@ -201,4 +201,4 @@ draws, and editing one keeps you inside its budgets.
 
 ---
 
-Reading order: 8 of 13 · previous: [Command reference](07-USAGE.md) · next: [Resource pack and boot logo](09-RESOURCES.md) · [all docs](README.md)
+Reading order: 8 of 15 · previous: [Command reference](07-USAGE.md) · next: [Resource pack and boot logo](09-RESOURCES.md) · [all docs](README.md)
