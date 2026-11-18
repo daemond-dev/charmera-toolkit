@@ -2,100 +2,101 @@
 
 Reading order: 10 of 15 · previous: [Resource pack and boot logo](09-RESOURCES.md) · next: [Image layout](11-FORMAT.md) · [all docs](README.md)
 
-`charmera exif-fix` copies the photos and videos off a Charmera card and repairs the copies. The card is
-only ever read. If the computer or phone will not open the card at all, fix that first:
-[SD card problems](05-CARDS.md).
+`charmera exif-fix` copies the photos and videos off a Charmera card and repairs the copies. It only ever
+reads the card. If the computer or phone won't open the card at all, fix that first
+([SD card problems](05-CARDS.md)).
 
 ## The problem
 
 The Generalplus firmware writes an EXIF block that standard tools reject, and a wrong date into every
-video. These defects were documented and fixed by two community projects, jphastings/charmera (Go) and
-RickCaleg/charmera-importer (C#); `charmera_toolkit/exif.py` is a port of their logic.
+video. Two community projects documented and fixed these defects: jphastings/charmera (Go) and
+RickCaleg/charmera-importer (C#). `charmera_toolkit/exif.py` is a port of their logic.
 
 In every JPEG the known builds write:
 
-- `DateTime`, `DateTimeOriginal` and `DateTimeDigitized` are written as `2026:03:03:12:16:29`, a colon
-  where EXIF wants a space. Readers reject the value, so the capture time is lost and photo libraries
-  sort the pictures by import date.
+- `DateTime`, `DateTimeOriginal` and `DateTimeDigitized` are written as `2026:03:03:12:16:29`, with a colon
+  where EXIF wants a space. Readers reject the value, so the capture time is lost and photo libraries sort
+  the pictures by import date.
 - `PixelXDimension`/`PixelYDimension` say 640x480 while the frame is 1440x1080.
-- The MakerNote offset points at the end of the EXIF block, i.e. at data that is not there. exiftool
-  reports `Bad ExifIFD offset for MakerNoteUnknown` and refuses to write the file; stricter parsers drop
-  the whole block.
-- `Make`/`Model` are `Generalplus`/`CBB3`, the chip rather than the camera, so libraries group the
+- The MakerNote offset points at the end of the EXIF block, where there's no data. exiftool reports
+  `Bad ExifIFD offset for MakerNoteUnknown` and refuses to write the file, and stricter parsers drop the
+  whole block.
+- `Make`/`Model` are `Generalplus`/`CBB3`, which name the chip and not the camera, so libraries group the
   photos under "Generalplus CBB3".
 - Some files carry no usable date at all.
 
 A photo the 2026-11-06 camera took on its original firmware, before it was flashed, has no EXIF block at
-all (VERIFIED from its header): nothing in it is wrong, and nothing in it gives a date. `exif-fix` gives
-such a photo a fresh EXIF block dated from the file's modification time, and its line says `no EXIF in
-source`. `photo-id` in the [Command reference](07-USAGE.md) says which kind of header a photo has.
+all (VERIFIED from its header). Nothing in it is wrong, and nothing in it gives a date. `exif-fix` gives
+such a photo a fresh EXIF block dated from the file's modification time, and its line says
+`no EXIF in source`. `photo-id` in the [Command reference](07-USAGE.md) tells you which kind of header a
+photo has.
 
 In every AVI the public build writes (Motion-JPEG video plus PCM audio in a RIFF container):
 
 - The recording date inside the file is always 2010-06-29. The public build writes an `INFO` list whose
   `ICRD` (creation date) chunk holds the fixed text `2010-06-29`, next to `ISRC`, `IART` and `ICOP` chunks
-  that hold `Generplus` (sic), and it writes no `IDIT` chunk anywhere (VERIFIED in the public dump by static
-  analysis: the code that builds the list, the strings, and no `IDIT` tag built byte by byte either). The
+  that hold `Generplus` (sic). It writes no `IDIT` chunk anywhere. (VERIFIED in the public dump by static
+  analysis: the code that builds the list, the strings, and no `IDIT` tag built byte by byte either.) The
   film-mods build carries the same strings and no `IDIT` string (VERIFIED by search; its code was not
   traced). Software that takes a video's date from `ICRD` sorts every such video into 2010.
-- The `IDIT` chunk (in the header list `hdrl`, C `asctime` form, `Tue Jun 29 12:00:00 2010`) comes from
-  the community tools `exif-fix` was ported from, which expect it in Charmera videos and rewrite it when it
-  is there. This project has not seen the Charmera write one; `exif-fix` handles it too, if a file has it.
-- The real recording time is the file's modification time, which the camera writes correctly to the
-  card (REPORTED by the community tools; not traced in the firmware).
+- The `IDIT` chunk (in the header list `hdrl`, in C `asctime` form, `Tue Jun 29 12:00:00 2010`) comes from
+  the community tools `exif-fix` was ported from. They expect it in Charmera videos and rewrite it when it's
+  there. This project hasn't seen the Charmera write one, but `exif-fix` handles it too if a file has it.
+- The real recording time is the file's modification time, which the camera writes correctly to the card
+  (REPORTED by the community tools; not traced in the firmware).
 
 ## The fix
 
-Photos. The old EXIF block is never edited in place, because its offsets cannot be trusted. Instead:
+For photos, the old EXIF block is never edited in place, because its offsets can't be trusted. Instead:
 
 1. The JPEG's marker segments are walked up to the scan data to find the APP1 Exif segment (if any) and
    the frame header (SOF), which gives the true dimensions.
-2. A bounds-checked reader salvages what is usable from the old block, little or big endian:
+2. A bounds-checked reader salvages what's usable from the old block, little or big endian:
    `Orientation`, `YCbCrPositioning`, `Make`, `Model` and the three date tags. The MakerNote is ignored.
 3. The best date is chosen: `DateTimeOriginal`, then `DateTimeDigitized`, then `DateTime`, each
    normalised from the extra-colon form. Empty and zeroed dates are rejected. With no usable EXIF date
    the file's modification time is used.
-4. A fresh little-endian EXIF is written: IFD0 with `Make`, `Model`, `Orientation`, `DateTime`,
-   `YCbCrPositioning` and the Exif IFD pointer; Exif IFD with `FNumber` 2.4, `ExifVersion` 0230,
+4. A fresh little-endian EXIF is written. IFD0 gets `Make`, `Model`, `Orientation`, `DateTime`,
+   `YCbCrPositioning` and the Exif IFD pointer. The Exif IFD gets `FNumber` 2.4, `ExifVersion` 0230,
    `DateTimeOriginal`, `DateTimeDigitized`, `ComponentsConfiguration`, `FlashpixVersion`, `ColorSpace`
    sRGB, `PixelXDimension`/`PixelYDimension` from the frame, `FocalLengthIn35mmFilm` 35, `LensMake` and
-   `LensModel` (the published spec: fixed 35 mm-equivalent f/2.4; the real focal length is not published
-   and is not invented). `Orientation` is copied when it is 1 to 8; any other value becomes 1 and the
-   report says so (`orientation 1 (source had 9)`). `YCbCrPositioning` is copied from the source (the
-   camera writes 2, co-sited); 1 when absent or invalid.
-5. The new segment replaces the old APP1; when there was none, it goes right after the JFIF APP0, or right
+   `LensModel`. Those lens values come from the published spec, a fixed 35 mm-equivalent f/2.4. The real
+   focal length isn't published, and the tool doesn't make one up. `Orientation` is copied when it's 1 to 8.
+   Any other value becomes 1 and the report says so (`orientation 1 (source had 9)`). `YCbCrPositioning` is
+   copied from the source (the camera writes 2, co-sited), or set to 1 when absent or invalid.
+5. The new segment replaces the old APP1. When there was none, it goes right after the JFIF APP0, or right
    after the start marker in a file without one, as in a photo with no EXIF block. A file that carries
    more than one Exif APP1 loses them all and gets the one rebuilt block, at the position of the first.
    Every other byte of the file, including the compressed image data, is copied unchanged.
 
-`Make`/`Model` become `Kodak`/`Charmera`; `--keep-make` keeps the camera's `Generalplus`/`CBB3`.
+`Make`/`Model` become `Kodak`/`Charmera`. `--keep-make` keeps the camera's `Generalplus`/`CBB3`.
 
 Which JPEGs get this treatment is decided per file, not per folder. A JPEG is a Charmera photo when its
 first 4 KiB contain the Generalplus `GPEncoder` comment, or its salvaged `Make` is `Generalplus`, or one
 of its dates has the all-colons form. Any other JPEG under the source (a phone picture dropped into
 `DCIM`, an export from an editor) is copied unchanged, with the same naming and modification time, and
-its line says `not a Charmera photo, copied unchanged`: rebuilding it would throw away GPS, exposure and
-every other tag this tool does not write, and label another camera's picture Kodak/Charmera.
-`--relabel-all` turns the check off and rebuilds every JPEG, for a folder that is known to hold only
-Charmera photos whose fingerprints were stripped by some earlier tool.
+its line says `not a Charmera photo, copied unchanged`. Rebuilding it would throw away GPS, exposure and
+every other tag this tool doesn't write, and label another camera's picture Kodak/Charmera.
+`--relabel-all` turns the check off and rebuilds every JPEG. It's meant for a folder you know holds only
+Charmera photos whose fingerprints some earlier tool stripped.
 
-Videos. The default, `--video fix-date`, copies the AVI and rewrites the date chunks in the copy, in
-place. It looks for `IDIT` and `ICRD` chunks wherever they sit in the file's lists (it does not read the
-frame data, `movi`), and rewrites each one that holds the date 2010-06-29 with the file's modification
-time: same text form (asctime, EXIF or ISO, trailing newline kept), same byte length, NUL-padded, so no
-other byte of the file moves and the RIFF structure stays valid. In a video of the public build that is
+For videos, the default, `--video fix-date`, copies the AVI and rewrites the date chunks in the copy, in
+place. It looks for `IDIT` and `ICRD` chunks wherever they sit in the file's lists (it doesn't read the
+frame data, `movi`). Each one that holds the date 2010-06-29 is rewritten with the file's modification time
+in the same text form (asctime, EXIF or ISO, trailing newline kept) and the same byte length, NUL-padded,
+so no other byte of the file moves and the RIFF structure stays valid. In a video of the public build that's
 the one `ICRD` chunk. A genuine date is left alone and reported, and a file with neither chunk is copied
-unchanged with a line that says so. A chunk too small for the new text (which cannot happen with the
-forms above, since they are fixed width) is left alone and reported rather than truncated into something
-unreadable.
+unchanged with a line that says so. A chunk too small for the new text is left alone and reported instead of
+being truncated into something unreadable. That can't happen with the forms above, since they're fixed
+width.
 
 `--video transcode` runs ffmpeg instead: `-c:v libx264 -crf 26 -preset medium -c:a aac -b:a 128k
 -ar 44100 -metadata creation_time=<mtime>` into an MP4, the same settings the Go tool uses. Without
 ffmpeg on PATH the command says so once and falls back to fix-date. `--video copy` copies the AVI
 unchanged.
 
-Output files keep the source's modification time, so the real recording time survives even in tools
-that only look at file dates.
+Output files keep the source's modification time, so the real recording time survives even in tools that
+only look at file dates.
 
 ## The command
 
@@ -105,43 +106,44 @@ charmera exif-fix [--source DIR] --out DIR [--video {fix-date,transcode,copy}]
 ```
 
 - `--source DIR`: the card root (its `DCIM` is read, recursively) or any folder of Charmera files. When
-  omitted, mounted volumes are checked by content: `/media/*/*`, `/run/media/*/*` and `/mnt/*` on Linux,
-  drive letters D: to Z: on Windows. A volume is a Charmera when it has a `DCIM` directory plus either a
-  `SPIDCIM` sibling directory or a JPEG whose first 4 KiB contain the Generalplus `GPEncoder` comment.
-  Volume labels are never trusted. With no match, or more than one, the command stops and asks for
-  `--source`.
+  it's omitted, mounted volumes are checked by content: `/media/*/*`, `/run/media/*/*` and `/mnt/*` on
+  Linux, drive letters D: to Z: on Windows. A volume is a Charmera when it has a `DCIM` directory plus
+  either a `SPIDCIM` sibling directory or a JPEG whose first 4 KiB contain the Generalplus `GPEncoder`
+  comment. Volume labels are never trusted. With no match, or more than one, the command stops and asks
+  for `--source`.
 - `--out DIR`: created if needed. Outputs are named `IMG_YYYYMMDD_HHMMSS_<hash>.jpg` and
-  `VID_YYYYMMDD_HHMMSS_<hash>.avi` (`.mp4` when transcoded), the time being the source's modification
-  time and the hash the first 16 hex digits of the SHA-256 of the source file. On a second run every
-  source whose hash token already exists in the output directory is skipped, so the output directory
-  is its own import record.
+  `VID_YYYYMMDD_HHMMSS_<hash>.avi` (`.mp4` when transcoded). The time is the source's modification time and
+  the hash is the first 16 hex digits of the SHA-256 of the source file. On a second run every source whose
+  hash token already exists in the output directory is skipped, so the output directory is its own import
+  record.
 - `--keep-names` keeps the source names instead. Both known builds write every photo and video straight
   into the card's `DCIM` folder, with no subfolder, each new file numbered one above the highest of its
   kind there (VERIFIED by static analysis of the public build; the film-mods build carries the same name
-  formats, VERIFIED by search), so the files of one card never share a name. Names repeat between cards,
-  and on a card that was emptied (INFERRED from that numbering): a folder of earlier copies can hold
-  `card-a/PICT0001.JPG` and `card-b/PICT0001.JPG`. A name that occurs more than once among the sources
+  formats, VERIFIED by search). So the files of one card never share a name. Names do repeat between
+  cards, and on a card that was emptied (INFERRED from that numbering), so a folder of earlier copies can
+  hold `card-a/PICT0001.JPG` and `card-b/PICT0001.JPG`. A name that occurs more than once among the sources
   gets the name of its own folder in front (`card-a_PICT0001.JPG`, `card-b_PICT0001.JPG`), so keep the
   copies of different cards in folders with different names. An output that already exists with the
   source's modification time (within 2 s, FAT's resolution) is an earlier import of the same file and is
-  skipped; one with a different time belongs to a different file, so the new copy gets a numbered name
+  skipped. One with a different time belongs to a different file, so the new copy gets a numbered name
   (`PICT0001_1.JPG`) and the line says `name taken by a different file, written as ...`. The summary
   counts these name collisions separately from the files already imported.
-- `--relabel-all` rebuilds the EXIF of every JPEG, including ones that do not look like Charmera
-  photos (see "The fix").
-- Files are `.jpg`, `.jpeg` and `.avi`, any case. Names starting with `._` (macOS metadata) are
+- `--relabel-all` rebuilds the EXIF of every JPEG, including ones that don't look like Charmera photos
+  (see "The fix").
+- Files are `.jpg`, `.jpeg` and `.avi`, in any case. Names starting with `._` (macOS metadata) are
   skipped.
 - `--dry-run` prints the per-file report and writes nothing, not even the output directory.
 - `--verbose` adds what the camera wrote: the old Make/Model, orientation, YCbCr positioning and raw
   dates, and the AVI date chunks with their offsets.
 - Each file gets one line: the output name, the dimensions, the orientation (with `source had N` when
   the source's value was out of range), the date and where it came from (`exif`, with `extra colon
-  repaired` when that happened, or `mtime`), and the Make/Model written; or `not a Charmera photo,
-  copied unchanged`. For videos: which chunks were rewritten, or why none were. A final line gives the
-  counts. Lines are printed in a form the console can show: on a Windows code page that cannot encode a
-  file name the non-ASCII characters appear escaped instead of stopping the run.
-- Exit code 0 when every file was handled, 1 when any file failed (the others are still processed) or
-  no source could be found.
+  repaired` when that happened, or `mtime`), and the Make/Model written. A JPEG that fails the Charmera
+  check gets `not a Charmera photo, copied unchanged` instead. For videos, the line says which chunks were
+  rewritten, or why none were. A final line gives the counts. Lines are printed in a form the console can
+  show: on a Windows code page that can't encode a file name, the non-ASCII characters appear escaped
+  instead of stopping the run.
+- The exit code is 0 when every file was handled, and 1 when any file failed (the others are still
+  processed) or no source could be found.
 
 Example:
 
@@ -155,33 +157,35 @@ Done: 1 photos fixed, 1 photos copied unchanged (not Charmera), 1 videos date-fi
 
 ## Verifying
 
-`python -m pytest tests/test_exif.py` rebuilds EXIF on generated JPEGs and checks it with the module's
-own reader and with Pillow's independent one (dimensions, dates, Make/Model, FNumber, lens tags,
-identical decoded pixels). Pillow is part of the test extra (`pip install -e .[test]`); it is never
-imported by the tool itself. Without it the Pillow-backed tests are skipped, not run, and pytest reports
-them as skipped. One fixture reproduces the camera's own segment order (SOF0 first, the `GPEncoder`
-comment, DQT, DQT, DRI, four DHTs, then the little-endian Exif APP1 with the MakerNote pointing at the
-end of the block and an InteropIFD pointer past it, right before SOS, no APP0) and checks that the
-rebuilt APP1 lands at the same offset and the pixels decode identically. Set `CHARMERA_STOCK_IMAGE` to
-the path of a public stock dump to run the same checks on the two photos stored inside it (at
-`0x180000` and `0x1A5800`); that test is skipped when the variable is unset. When ffmpeg is on PATH the
-suite also generates a real MJPEG/PCM AVI, injects an `IDIT` and an `ICRD` chunk the way the C# importer
-lays them out (the two forms the rewrite handles), and confirms with ffprobe that `creation_time` changes
-from 2010-06-29 to the file time while the file still decodes.
+`python -m pytest tests/test_exif.py` rebuilds EXIF on generated JPEGs and checks it with the module's own
+reader and with Pillow's independent one (dimensions, dates, Make/Model, FNumber, lens tags, identical
+decoded pixels). Pillow is part of the test extra (`pip install -e .[test]`), and the tool itself never
+imports it. Without it, pytest reports the Pillow-backed tests as skipped.
+
+One fixture reproduces the camera's own segment order: SOF0 first, the `GPEncoder` comment, DQT, DQT, DRI,
+four DHTs, then the little-endian Exif APP1 with the MakerNote pointing at the end of the block and an
+InteropIFD pointer past it, right before SOS, and no APP0. It checks that the rebuilt APP1 lands at the same
+offset and the pixels decode identically.
+
+Set `CHARMERA_STOCK_IMAGE` to the path of a public stock dump to run the same checks on the two photos
+stored inside it (at `0x180000` and `0x1A5800`). That test is skipped when the variable is unset.
+
+When ffmpeg is on PATH, the suite also generates a real MJPEG/PCM AVI and injects an `IDIT` and an `ICRD`
+chunk the way the C# importer lays them out (the two forms the rewrite handles). It then confirms with
+ffprobe that `creation_time` changes from 2010-06-29 to the file time while the file still decodes.
 
 ## Limitations
 
-- What the public build writes into a video, `ICRD` in `INFO` as an ISO date and no `IDIT`, comes from
-  its code, not from a video an actual camera recorded; none has been examined here. The C# importer's
-  code and tests expect `IDIT` in `hdrl` as asctime as well. The rewrite handles every form that code
-  accepts, and leaves anything else untouched, so an unexpected layout results in an unchanged copy and a
-  line saying so.
+- What the public build writes into a video (`ICRD` in `INFO` as an ISO date, and no `IDIT`) comes from its
+  code, not from a video an actual camera recorded. None has been examined here. The C# importer's code and
+  tests expect `IDIT` in `hdrl` as asctime as well. The rewrite handles every form that code accepts and
+  leaves anything else untouched, so an unexpected layout gives an unchanged copy and a line saying so.
 - `--video transcode` passes the file's modification time to ffmpeg as a local time without a zone, like
   the camera's clock. ffmpeg converts it from the computer's local time to UTC and stores it with a `Z`
   suffix (`2026-08-07T09:45:12.000000Z` for a file recorded at 18:45:12 in Tokyo). Players then show the
-  correct instant in their own zone; the per-file line shows the local time that went in.
+  correct instant in their own zone. The per-file line shows the local time that went in.
 - Output names use the modification time, which on a Charmera is the capture time. For files copied off
-  the card by other means first, the EXIF date inside the photo may differ from the name.
+  the card some other way first, the EXIF date inside the photo may differ from the name.
 
 ---
 

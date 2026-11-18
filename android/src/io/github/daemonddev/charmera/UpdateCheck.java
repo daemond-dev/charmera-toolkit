@@ -212,13 +212,13 @@ public final class UpdateCheck {
     /** The same, plus the way to a working mod. */
     static final String INSTEAD = RESTORE_INSTEAD + " For a mod, make the file again with charmera pack on a computer.";
     /** What a build match does and does not prove. Every build line carries it. */
-    static final String NOT_THE_CAMERA = "A build match says which known build the file was made from, not whether it fits"
-            + " your camera: only a dump of your camera's own chip, read before it was ever flashed, shows that.";
+    static final String NOT_THE_CAMERA = "A build match only says which known build the file was made from. Whether it fits"
+            + " your camera shows only in a dump of your camera's own chip, read before it was ever flashed.";
     /** How the backup gets into the app; the button is named as MainActivity labels it. */
-    static final String BACKUP_STEP = "Choose that dump with \"Choose this camera's backup\" in step 0 and the app compares them.";
+    static final String BACKUP_STEP = "Choose that dump with \"Choose this camera's backup\" and the app compares them.";
     /** The verdict's first sentence for a file that passed its own checks but was compared with no backup. */
-    static final String NOT_COMPARED = "Not OK to put on the card yet: it has not been compared with a backup of this"
-            + " camera's own chip, and without one no file goes on the card.";
+    static final String NOT_COMPARED = "Not compared with a backup of this camera's own chip, so nothing here shows that"
+            + " the file fits this camera.";
 
     public static final class Line {
         public final Level level;
@@ -805,7 +805,7 @@ public final class UpdateCheck {
                 out.add(new Line(Level.INFO, "stamp-in-file", "Stamp in the file", "the stamp inside the file is not"
                         + " the one in its name, so a camera that runs this file flashes it again at every power-on"
                         + " while the file is on its card. Take the card out before the camera is switched on again,"
-                        + " and remove the file (step 5).",
+                        + " and remove the file from it.",
                         "inside the file " + marks.stamp + "; in the name " + stamp + "."));
             }
         }
@@ -823,14 +823,14 @@ public final class UpdateCheck {
                     + " film-mods files are. It holds the program, the pictures, the sounds and the menus only, nothing of"
                     + " another camera's settings or photos.", bytes(n) + ", 22 blocks of 64 KiB and part of the 23rd."));
             out.add(new Line(Level.WARN, "final-erase", "After the update", "the camera also erases its settings"
-                    + " block. At the next start it uses factory settings and an empty photo list: the photos in its"
+                    + " block. At the next start it uses factory settings and an empty photo list. The photos in its"
                     + " own memory stay there, but are no longer shown. Nothing above that block is touched.",
                     "block 0x170000, 64 KiB: the settings bank and the photo directory."));
         } else {
             String why;
             if (n == 0x200000) {
-                why = " It is the size of a full 2 MB dump. A dump must never go on the card as it is: the camera's"
-                        + " final erase then wraps around and bricks it. charmera pack on a computer makes the update"
+                why = " It is the size of a full 2 MB dump. A dump must never go on the card as it is, because the"
+                        + " camera's final erase then wraps around and bricks it. charmera pack on a computer makes the update"
                         + " file from it.";
             } else if (n == SOFTWARE_END) {
                 why = " It is the size of a software-only image: the program and its sounds, pictures and menus,"
@@ -1011,12 +1011,12 @@ public final class UpdateCheck {
                 } else if (refBuild != null) {
                     out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", codeSame
                             ? "the same as in the firmware in your backup. That firmware is " + refBuild.name()
-                            + ", unchanged: a public build, which a camera flashed with a file made from it holds too. So"
-                            + " this shows a fit only if the backup was read before the camera was ever flashed: a read"
-                            + " taken after a flash shows what the camera runs now, not what fits it."
-                            : otherProgram + " That firmware is " + refBuild.name() + ", unchanged: a public build,"
-                            + " which a camera flashed with a file made from it holds too, so it shows what fits this"
-                            + " camera only if the backup was read before the camera was ever flashed.",
+                            + ", unchanged. It's a public build, and a camera flashed with a file made from it holds it"
+                            + " too, so this shows a fit only if the backup was read before the camera was ever"
+                            + " flashed."
+                            : otherProgram + " That firmware is " + refBuild.name() + ", unchanged. It's a public"
+                            + " build, and a camera flashed with a file made from it holds it too, so it shows what fits"
+                            + " this camera only if the backup was read before the camera was ever flashed.",
                             both + " The backup's bytes 0 to 0x169000 hash to that build's, SHA-256 "
                                     + refBuild.officialSha256 + "."));
                 } else if (!codeSame) {
@@ -1025,14 +1025,14 @@ public final class UpdateCheck {
                     out.add(new Line(Level.PASS, "sensor-table", "Image sensor set-up", "the same as in the firmware in"
                             + " your backup, and so is the program around it: the file drives the image sensor the way"
                             + " that firmware does. That is your camera's own way only if the backup was read before any"
-                            + " flash: a read taken after one shows what the camera runs now, not what fits it.", both));
+                            + " flash.", both));
                 }
             } else if (knownTable) {
                 out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "the same program as the public"
                         + " build's: it drives one image sensor and never checks which one is fitted. Nothing in the"
                         + " file can tell whether your camera has that sensor. After this program was flashed, one"
-                        + " original-series camera could no longer take pictures; the likely cause is a sensor it does"
-                        + " not drive." + unreferenced + " " + BACKUP_STEP, fileTable + "."));
+                        + " original-series camera could no longer take pictures. The likely cause is a sensor it"
+                        + " doesn't drive." + unreferenced + " " + BACKUP_STEP, fileTable + "."));
             } else {
                 out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "not the public build's program:"
                         + " the file was made from another build's dump and drives the sensor differently. Nothing in"
@@ -1298,16 +1298,16 @@ public final class UpdateCheck {
      */
     public static String confirms(Result check, byte[] data) {
         if (check == null || data == null) {
-            return "no file has been checked yet; get the update file in step 1 first";
+            return "no file has been checked yet, so get the update file first";
         }
         if (!check.ok) {
-            return "the file did not pass its checks; see the lines marked FAIL in step 1";
+            return "the file did not pass its checks (its Details show the lines marked FAIL)";
         }
         if (check.cardName == null) {
-            return "the file's name is not an update file's name; see step 1";
+            return "the file's name is not an update file's name (see its Details)";
         }
         if (data.length != check.size || !sha256Hex(data, 0, data.length).equals(check.sha256)) {
-            return "the file changed after it was checked; get it again in step 1";
+            return "the file changed after it was checked, so get it again";
         }
         return null;
     }
@@ -1385,13 +1385,13 @@ public final class UpdateCheck {
      * backupProblem for a file chosen under name (null when the name is not known). A name that holds UNVERIFIED_READ,
      * in any case, is refused whatever the bytes are: the toolkit's backup and restore give it to reads that did not
      * agree and to a single read, and wrong bytes from a poor clip contact can look like a whole dump. Such a read is
-     * not a backup until two reads agree, and without a backup the app writes nothing.
+     * not a backup until two reads agree.
      */
     public static String backupProblem(String name, byte[] data, String[] publicSha256) {
         if (name != null && name.toLowerCase(Locale.ROOT).contains(UNVERIFIED_READ)) {
             return "its name is one the toolkit's backup and restore give to reads that did not agree and to a single"
                     + " read, and such a read is not a backup until two reads agree. A poor clip contact can leave"
-                    + " wrong bytes in it that no check of the file can see: read the chip again with the toolkit's"
+                    + " wrong bytes in it that no check of the file can see. Read the chip again with the toolkit's"
                     + " backup command until two reads agree, and choose the read it then keeps, whose name has no \""
                     + UNVERIFIED_READ + "\" in it";
         }
@@ -1409,14 +1409,14 @@ public final class UpdateCheck {
         if (known != null) {
             out.add("Its firmware is " + known.name() + ", unchanged: a public build, which a camera flashed with a file"
                     + " made from it holds too. So it shows what fits this camera only if it was read before the camera"
-                    + " was ever flashed; the image-sensor line in step 1 says so.");
+                    + " was ever flashed. The update file's Image sensor set-up line says so too.");
         }
         if (data.length > UPDATE_SIZE && !allFF(data, UPDATE_SIZE, data.length - UPDATE_SIZE)) {
             out.add("The last 128 KiB of the chip, past the end of every update file, are not blank, although they are"
                     + " in every known dump. No update file writes the first half of them, so on a camera they hold"
-                    + " whatever the original firmware left there; data there can also come from a read that went wrong."
-                    + " The app takes the backup: keep it, and if in doubt read the chip again with the toolkit's backup"
-                    + " command, which reads it twice and compares.");
+                    + " whatever the original firmware left there. Data there can also come from a read that went wrong."
+                    + " The app still takes the backup. Keep it, and if in doubt read the chip again with the toolkit's"
+                    + " backup command, which reads it twice and compares.");
         }
         return out;
     }

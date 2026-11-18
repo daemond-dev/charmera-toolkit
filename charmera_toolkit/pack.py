@@ -334,8 +334,7 @@ def handler(args) -> int:
         print(f"error: cannot write into {out_dir}: {exc}")
         return 2
     print(f"wrote {out}")
-    print("Before it touches a card: run `charmera verify` on it with --stock <a read of the chip of the camera it goes into>.")
-    print("No backup of that camera's own flash chip, no flash: a file that does not fit the camera cannot be undone without one.")
+    print("Next: run `charmera verify` on it with --stock <a backup of the camera it goes into>.")
     return 0
 
 

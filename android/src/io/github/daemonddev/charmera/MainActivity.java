@@ -63,10 +63,11 @@ import java.util.zip.ZipOutputStream;
  * picker (the Storage Access Framework), so no storage permission and no root are needed. The camera then
  * flashes itself from the card. Also removes update files from the card afterwards.
  *
- * No backup of the camera, no flash: the app writes to the card only while a dump of that camera's own flash chip is
- * on record, and only an update file that it has compared with that dump; WriteGate decides, from the check
- * and the backup on record now. A file identical to the public dump proves nothing about the camera it goes into; the
- * comparison with the firmware in a dump read before the camera was ever flashed is the one check that does.
+ * Warn, don't block: WriteGate decides, from the check and the backup on record now. A reviewed file, or any other
+ * file that passed its checks, may be written with no backup on record, with a warning when nothing confirms what the
+ * camera runs (an unknown file gets a loud one: UNKNOWN_FILE). With a backup on record, an unknown file is written only
+ * once it was compared with that backup: a file identical to the public dump proves nothing about the camera it goes
+ * into; the comparison with the firmware in a dump read before the camera was ever flashed is the one check that does.
  *
  * Every text on screen is for the owner reading it on a phone: what happened first (shown in bold), then what to do
  * next, with buttons named exactly as they are labelled; sums and Android's own error words come last, as "Detail:".
@@ -83,6 +84,10 @@ public class MainActivity extends Activity {
 
     // The buttons' labels. Instructions and messages quote them with q(), so they always match the screen.
     private static final String BACKUP = "Choose this camera's backup";
+
+    /** The loud warning for an unknown file written with no backup on record (WriteGate allows it). */
+    static final String UNKNOWN_FILE = "It isn't one of this project's reviewed builds, and with no backup chosen"
+            + " the app can't compare it with this camera's firmware. Only write it if you know it fits.";
     private static final String DOWNLOAD = "Download the stock restore file";
     private static final String MAKE_PROBE = "Make the sensor-ID probe";
     private static final String READ_RESULT = "Read the sensor result from the card";
@@ -98,7 +103,7 @@ public class MainActivity extends Activity {
     /** fetch's failure when GitHub answered, but not with the file; the download's message tells it apart. */
     private static final String GITHUB_REFUSED = "GitHub did not send the file";
     /** How a write that worked begins; write() offers the eject screen only after it. */
-    private static final String WRITTEN = "Done: the update file is on the card.";
+    private static final String WRITTEN = "The update file is on the card ✓";
     /** How a saved copy that worked begins, under its own name or another. */
     private static final String SAVED = "Saved";
     /** How a write begins when the card already holds the same file; it sends the owner on to the flash, as WRITTEN. */
@@ -223,6 +228,8 @@ public class MainActivity extends Activity {
     private String backupName;
     private Uri backupUri;
     private volatile boolean loadingBackup;
+    /** The screen was recreated and is reading the backup it had on record again (read on the UI thread only). */
+    private boolean rereadingBackup;
     /** The public stock dump once downloaded or picked and checked; kept so choosing again needs no new download. */
     private byte[] stockDump;
     /** The owner's factory dump once picked or read back from the phone and checked (Candidates.factoryDump). */
@@ -330,7 +337,7 @@ public class MainActivity extends Activity {
     /** DocumentsContract.ACTION_DOCUMENT_ROOT_SETTINGS (a system API, so spelled out): the drive's own storage page. */
     private static final String DOCUMENT_ROOT_SETTINGS = "android.provider.action.DOCUMENT_ROOT_SETTINGS";
     private static final String SYNCED = "Synced to the camera ✓";
-    private static final String EJECTED = "Ejected ✓ — unplug the cable.";
+    private static final String EJECTED = "Ejected ✓ Unplug the cable.";
     private static final String NO_FILE = "No update file yet.";
 
     /*
@@ -676,9 +683,10 @@ public class MainActivity extends Activity {
             pendingZipShots = state.getBoolean(STATE_PENDING_ZIP_SHOTS, false);
         }
         showFile(NO_FILE, null);
-        setStatus(backupStatus, "No backup on record. The app will not write the stock restore file without one.");
+        setStatus(backupStatus, "No backup chosen.");
         String savedBackup = state == null ? null : state.getString(STATE_BACKUP_URI);
         if (savedBackup != null) {
+            rereadingBackup = true;
             loadBackup(Uri.parse(savedBackup));     // the screen was recreated (dark mode, font size): read it again
         }
         // A write or removal another screen started may still run, or have ended with no screen open to show it.
@@ -1643,7 +1651,7 @@ public class MainActivity extends Activity {
             // safe order while the card may hold an update file).
             FlashFlow f = flow();
             setStatus(ejectStatus, ejectedThisMount ? "The drive was ejected, then unplugged."
-                    : "The drive is no longer connected; the app did not see it eject first. "
+                    : "The drive is no longer connected, and the app didn't see it eject first. "
                     + (f != null ? f.afterUnseenEject(live()) : FlashFlow.unpluggedHint(mayHoldUpdateFile(uuid), false)));
             updateButtons();      // placed by the steps as they are, and their folded lines take in the status
         } else if (unmounted(v)) {
@@ -1655,9 +1663,9 @@ public class MainActivity extends Activity {
             // which), so it claims neither. "Synced" only for a write this route's run made on this mount.
             FlashFlow f = flow();
             setStatus(ejectStatus, f != null && f.syncedClaim()
-                    ? "Written and synced; eject on the drive's page before unplugging. Tap " + q(EJECT) + " to open it"
+                    ? "Written and synced. Eject on the drive's page before you unplug. Tap " + q(EJECT) + " to open it"
                     + " again."
-                    : "The drive is connected. If you have not ejected it yet, tap " + q(EJECT) + " and use Eject (or"
+                    : "The drive is connected. If you haven't ejected it yet, tap " + q(EJECT) + " and use Eject (or"
                     + " Unmount) on the drive's page.");
         }
     }
@@ -1944,7 +1952,7 @@ public class MainActivity extends Activity {
                 versions.append(versions.length() == 0 ? "" : " and ").append(k.version);
             }
         }
-        return fromFactory + " This route does not use it: " + q(routeTitle(Route.REPAIR)) + " makes firmware "
+        return fromFactory + " This route doesn't use it. " + q(routeTitle(Route.REPAIR)) + " makes firmware "
                 + versions + " from it.";
     }
 
@@ -1956,7 +1964,7 @@ public class MainActivity extends Activity {
         }
         return "Firmware " + sel.name() + " is made from the factory build v012 of OV9732 cameras. "
                 + q(makeLabel(sel)) + " downloads its public cleaned copy, " + Candidates.CLEAN_FACTORY_NAME
-                + ", from GitHub. To use your own read of the chip instead (" + Candidates.FACTORY_DUMP_NAME + "), tap "
+                + ", from GitHub. To use your own backup of the chip instead (" + Candidates.FACTORY_DUMP_NAME + "), tap "
                 + q(USE_FILE) + " and choose it.";
     }
 
@@ -2001,9 +2009,9 @@ public class MainActivity extends Activity {
     }
 
     private static String baseText(String base) {
-        return Recipe.V012.equals(base) ? "v012 — factory build, OV9732 sensor"
-                : Recipe.V006.equals(base) ? "v006 — public build, SP140A sensor"
-                : "v008_test — later build, SP140A sensor";
+        return Recipe.V012.equals(base) ? "v012 (factory build, OV9732 sensor)"
+                : Recipe.V006.equals(base) ? "v006 (public build, SP140A sensor)"
+                : "v008_test (later build, SP140A sensor)";
     }
 
     private static int baseIndex(String base) {
@@ -2130,7 +2138,7 @@ public class MainActivity extends Activity {
             box.setOnCheckedChangeListener((v, on) -> chooseRepair(repairSel.with(mod, on), true));
             modBoxes.addView(box);
             TextView about = body(clash == null ? Recipe.description(mod)
-                    : "Cannot go with " + Recipe.title(clash) + ": untick it first. " + Recipe.description(mod));
+                    : "Can't go with " + Recipe.title(clash) + ". Untick it first. " + Recipe.description(mod));
             about.setTextColor(textSecondary);
             about.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             about.setPadding(dp(32), 0, 0, dp(6));
@@ -2145,13 +2153,13 @@ public class MainActivity extends Activity {
         // its mods alone is tested (the boxes keep their own labels).
         boolean untried = !experimental && Recipe.untriedCombination(repairSel);
         String problem = Recipe.problem(repairSel);
-        String warn = problem != null ? "The app will not make this: " + problem + "."
-                : repairSel.has(Recipe.PROBE_MOD) ? "The sensor-ID probe is a diagnostic: the app makes it here, and "
+        String warn = problem != null ? "The app won't make this: " + problem + "."
+                : repairSel.has(Recipe.PROBE_MOD) ? "The sensor-ID probe is a diagnostic. The app makes it here, and "
                 + q(routeTitle(Route.PROBE)) + " writes it."
-                : backupLine(repairSel) + (experimental ? (" Experimental: at least one ticked mod has not yet been tried"
-                + " on a camera. The file is still the reviewed one, checked byte for byte; keep the way back at hand.")
-                : untried ? " Experimental: each ticked mod has been tried on a camera, but this combination has not."
-                + " The file is still the reviewed one, checked byte for byte; keep the way back at hand." : "");
+                : backupLine(repairSel) + (experimental ? " Experimental: at least one ticked mod hasn't been tried"
+                + " on a camera yet." + REVIEWED_AND_WAY_BACK
+                : untried ? " Experimental: each ticked mod has been tried on a camera, but this combination hasn't."
+                + REVIEWED_AND_WAY_BACK : "");
         warn = warn.trim();
         customWarning.setText(warn);
         customWarning.setVisibility(repairCustom && !warn.isEmpty() ? View.VISIBLE : View.GONE);
@@ -2162,6 +2170,10 @@ public class MainActivity extends Activity {
         factoryFileButton.setVisibility(ask ? View.VISIBLE : View.GONE);
     }
 
+    /** The end of Custom's experimental line: the file is still checked, and the version on the camera now is the way back. */
+    private static final String REVIEWED_AND_WAY_BACK = " The file is still the reviewed one, checked byte for byte."
+            + " Before you flash, make sure you can write the version you're on now again (see Before you start).";
+
     /**
      * Custom's line for a pick whose firmware is not what the presets are: stock v012, stock v006 (the restore file,
      * also on its own route) or SP140A firmware. "" for a build with mods that drives the OV9732. No pick needs a
@@ -2169,18 +2181,18 @@ public class MainActivity extends Activity {
      */
     private static String backupLine(Recipe.Selection sel) {
         if (sel.stock() && Recipe.V012.equals(sel.base)) {
-            return "No mods ticked: this is build v012, the factory firmware of OV9732 cameras, unchanged.";
+            return "No mods ticked. This is build v012, the factory firmware of OV9732 cameras, unchanged.";
         }
         if (sel.stock() && Recipe.V006.equals(sel.base)) {
-            return "No mods ticked: this is build v006's stock firmware, unchanged: the stock restore file. Write it on "
-                    + q(routeTitle(Route.RESTORE)) + " (it compares the file with your backup) or, without one, on"
+            return "No mods ticked. This is the stock restore file (build v006, unchanged). Write it on "
+                    + q(routeTitle(Route.RESTORE)) + ", which compares it with your backup. Without a backup, use"
                     + " Advanced.";
         }
         if (Recipe.drivesOv9732(sel)) {
             return "";
         }
-        return sel.stock() ? "No mods ticked: this is build " + sel.base + "'s stock firmware, unchanged: SP140A"
-                + " firmware." : "This is SP140A firmware: without the OV9732 port it does not drive the OV9732.";
+        return sel.stock() ? "No mods ticked. This is build " + sel.base + "'s stock SP140A firmware, unchanged."
+                : "This is SP140A firmware. Without the OV9732 port it doesn't drive the OV9732.";
     }
 
     /** The views that move between routes are made once; render() puts them into the route's steps. */
@@ -2556,14 +2568,14 @@ public class MainActivity extends Activity {
     private void renderBackupPhotos() {
         header("Back up photos", "Save the camera's photos and videos as a zip.");
         Step drive = readDriveStep("1");
-        Step options = step("2", "Options", "The zip holds the photos and videos in DCIM and SPIDCIM; never the update"
-                + " file, SENSOR.TXT or other folders.");
+        Step options = step("2", "Options", "The zip holds the photos and videos in DCIM and SPIDCIM. It never includes"
+                + " the update file, SENSOR.TXT or other folders.");
         options.add(fixDatesBox);
         options.add(dateNamesBox);
         options.add(wipeBox);
-        options.more("The camera writes dates other programs cannot read; the copies get readable ones. The card's own"
-                        + " files are never changed.",
-                "Videos get the card's file time, read in the phone's time zone; on some phones it is off by the"
+        options.more("The camera writes dates other programs can't read, so the copies get readable ones. The files on"
+                        + " the card are never changed.",
+                "Videos get the card's file time, read in the phone's time zone. On some phones that's off by the"
                         + " time-zone difference.",
                 "Delete removes only the camera's own JPEG photos and AVI videos whose copy in the zip read back the"
                         + " same. Folders and other files stay.",
@@ -2571,12 +2583,12 @@ public class MainActivity extends Activity {
                         + " card, in originals/.",
                 "SPIDCIM holds the photos the camera copied from its own memory, which a flash replaces.");
         options.needs = new Step[]{drive};
-        final Step save = step("3", "Back up", "Choose a place for the zip; the app copies the files, then reads the"
-                + " zip back to check every file.");
+        final Step save = step("3", "Back up", "Choose a place for the zip. The app copies the files, then reads the"
+                + " zip back to check every one.");
         save.add(zipButton);
         save.result(zipStatus);
-        save.more("A big card takes minutes; the app keeps the screen on meanwhile. Keep the cable in until the result"
-                        + " shows.",
+        save.more("A big card takes minutes, and the app keeps the screen on while it works. Keep the cable in until"
+                        + " the result shows.",
                 "Choose a place on the phone, not the camera's card.",
                 "Android adds (1) to the name when a file of that name exists.");
         save.needs = new Step[]{drive};
@@ -2602,8 +2614,8 @@ public class MainActivity extends Activity {
     }
 
     private void renderRepair() {
-        header(routeTitle(Route.REPAIR), "Firmware for the OV9732 sensor fitted in place of the SP140A."
-                + " Experimental.");
+        header(routeTitle(Route.REPAIR), "Firmware for cameras with an OmniVision OV9732 sensor. Pick a"
+                + " preset, or Custom to choose a base and mods.");
         // Each step is numbered and shown as the route's flash run says (FlashFlow; refreshSteps).
         Step intro = flowStep(FlashFlow.Step.INTRO, "Before you start", "Flashing replaces the photos kept in the"
                 + " camera's own memory. Photos on the SD card stay.");
@@ -2615,18 +2627,17 @@ public class MainActivity extends Activity {
         intro.more("For an original 2025-series camera (matte body, yellow Kodak boot screen) whose sensor is an"
                         + " OmniVision OV9732. Not sure? Identify the image sensor first.",
                 Recipe.V006.equals(repairSel.base) && repairSel.mods.isEmpty()
-                        ? repairSel.name() + " is the stock restore file: write it on " + q(routeTitle(Route.RESTORE))
-                        + " (it compares the file with your backup) or on Advanced."
-                        : "No backup is needed: the app writes only a reviewed file, checked byte for byte. If nothing"
-                        + " confirms which firmware the camera runs (a backup, or Identify), the app says so before it"
-                        + " writes.",
+                        ? repairSel.name() + " is the stock restore file. Write it on " + q(routeTitle(Route.RESTORE))
+                        + ", which compares it with your backup, or on Advanced."
+                        : "You don't need a backup. The app writes only a reviewed file, checked byte for byte. If"
+                        + " nothing confirms which firmware the camera runs (a backup, or Identify), it says so before"
+                        + " it writes.",
                 wayBack(repairSel),
-                "It may give no clean picture on the first try.",
-                "Charge the battery fully: a flash cut short leaves a camera only a chip programmer can bring back.");
+                "Charge the battery fully. A flash cut short leaves a camera that only a chip programmer can bring back.");
         flashDriveStep();
         boolean factory = Recipe.V012.equals(repairSel.base);
         Step write = flowStep(FlashFlow.Step.WRITE, "Write firmware " + repairSel.name(), "Pick the version, then"
-                + " make it: the app builds the file from " + dumpWords(repairSel.base) + ", checks it, and copies it to"
+                + " make it. The app builds the file from " + dumpWords(repairSel.base) + ", checks it, and copies it to"
                 + " the card.");
         write.add(repairChoice);
         write.add(customPanel);
@@ -2639,7 +2650,7 @@ public class MainActivity extends Activity {
         write.add(fileDetail);
         write.add(writeButton);
         write.result(writeStatus);
-        write.more(factory ? "Your factory dump stays on this phone; the app keeps a copy after you pick it once."
+        write.more(factory ? "Your factory dump stays on this phone. The app keeps a copy after you pick it once."
                         : Recipe.V008.equals(repairSel.base)
                         ? "Making it downloads build v008_test's public file (1.4 MB) from GitHub once, at a fixed"
                         + " commit."
@@ -2657,12 +2668,12 @@ public class MainActivity extends Activity {
                 Recipe.expectedPhoto(repairSel) == PhotoId.Kind.FACTORY_EXIF ? "Firmware " + repairSel.name()
                         + " writes the factory header with its own EXIF block (Make Kodak, Model Charmera), so the"
                         + " check looks for that one."
-                        : factory ? "Firmware " + repairSel.name() + " is the factory build: its photos have the"
+                        : factory ? "Firmware " + repairSel.name() + " is the factory build. Its photos have the"
                         + " factory header (no EXIF block), not the public build's, so the check looks for that one."
                         : "The stock restore file, the probe and firmware " + repairSel.name() + " all write the"
-                        + " same header: a match shows the camera runs one of them, not which.",
-                "It cannot see the picture: a black or frozen photo passes too. Open the photo and look at it.",
-                "When the app did not list the card at the write (or was restarted since), it picks the photo by its"
+                        + " same header. A match shows the camera runs one of them, but not which one.",
+                "It can't see the picture, so a black or frozen photo passes too. Open the photo and look at it.",
+                "If the app didn't list the card at the write, or was restarted since, it picks the photo by its"
                         + " time, which comes from the camera's clock.");
     }
 
@@ -2671,23 +2682,23 @@ public class MainActivity extends Activity {
         String step = "step " + FlashFlow.number(FlashFlow.Route.REPAIR, FlashFlow.Step.WRITE);
         if (sel.mods.isEmpty()) {
             // a stock pick is itself what the camera's mods are undone with
-            return Recipe.V012.equals(sel.base) ? sel.name() + " is the factory firmware of OV9732 cameras, unchanged:"
-                    + " it is the way back from every v012 version."
+            return Recipe.V012.equals(sel.base) ? sel.name() + " is the factory firmware of OV9732 cameras, unchanged."
+                    + " It's the way back from every v012 version."
                     : Recipe.V006.equals(sel.base) ? sel.name() + " is the stock restore file itself."
-                    : sel.name() + " is build v008_test unchanged; to go back from it, write the firmware this camera"
-                    + " ran before, with this camera's backup.";
+                    : sel.name() + " is build v008_test unchanged. To go back from it, write the firmware this camera"
+                    + " ran before, using this camera's backup.";
         }
         if (Recipe.V012.equals(sel.base)) {
-            return "To go back, write the firmware the camera ran before: an older version, or stock v012 (the factory"
-                    + " firmware: " + q(CUSTOM_ROW) + ", base v012, no mods), in " + step + ".";
+            return "To go back, write the firmware the camera ran before in " + step + ": an older version, or stock"
+                    + " v012, the factory firmware (" + q(CUSTOM_ROW) + ", base v012, no mods).";
         }
         if (Recipe.V008.equals(sel.base)) {
-            return "To go back from " + sel.name() + ", write the firmware this camera ran before, with this"
-                    + " camera's backup: the stock restore file (" + q(routeTitle(Route.RESTORE)) + ") when the backup,"
-                    + " read before the camera was ever flashed, shows the public build.";
+            return "To go back from " + sel.name() + ", write the firmware this camera ran before, using this"
+                    + " camera's backup. That's the stock restore file (" + q(routeTitle(Route.RESTORE)) + ") if the"
+                    + " backup, read before the camera was ever flashed, shows the public build.";
         }
         if (sel.has(Recipe.OV9732_PORT) && sel.mods.size() > 1) {
-            return "To go back from " + sel.name() + ", write v0.23's file: the app makes it here too (" + q(CUSTOM_ROW)
+            return "To go back from " + sel.name() + ", write v0.23's file. The app makes it here too (" + q(CUSTOM_ROW)
                     + ", base v006, OV9732 port only).";
         }
         if (sel.has(Recipe.OV9732_PORT)) {
@@ -2698,7 +2709,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderProbe() {
-        header(routeTitle(Route.PROBE), "Diagnostic only: it does not repair the camera.");
+        header(routeTitle(Route.PROBE), "Diagnostic only. It doesn't repair the camera.");
         photosNote();
         flashDriveStep();
         Step write = flowStep(FlashFlow.Step.WRITE, "Write the sensor-ID probe", "The app makes the probe from the"
@@ -2711,8 +2722,8 @@ public class MainActivity extends Activity {
         write.result(writeStatus);
         write.more("When the camera next opens photo mode, the probe scans the sensor bus, writes SENSOR.TXT to the"
                         + " card, and stops as it does now.",
-                "No backup of the camera is needed: the app writes only the reviewed file, checked byte for byte.",
-                "It changes no boot or update code; the stock restore file reverses it.");
+                "You don't need a backup. The app writes only the reviewed file, checked byte for byte.",
+                "It changes no boot or update code, and the stock restore file reverses it.");
         foldWrite(write);
         flashStep();
         removeStep();
@@ -2726,13 +2737,13 @@ public class MainActivity extends Activity {
 
     private void renderRestore() {
         header(routeTitle(Route.RESTORE), null);
-        col.addView(caution("This route compares the restore file with this camera's backup. Original 2025 series only:"
+        col.addView(caution("This route compares the restore file with this camera's backup. Original 2025 series only,"
                 + " never a Millennium (blue boot screen) or CLOT edition."));
         photosNote();
         // Each step is numbered and shown as the route's flash run says (FlashFlow; refreshSteps). Before the write the
         // backup, the file and the drive steps follow what is on record now; once the file is on the card they are
         // behind the owner (a backup changed before the flash starts the run over: FlashFlow.backupChanged).
-        Step backupStep = flowStep(FlashFlow.Step.BACKUP, BACKUP, "The 2 MB dump read from this camera's flash chip"
+        Step backupStep = flowStep(FlashFlow.Step.BACKUP, BACKUP, "A 2 MB copy of this camera's flash chip, read"
                 + " with a clip and a 3.3 V programmer.");
         backupStep.add(backupButton);
         backupStep.result(backupStatus);
@@ -2740,18 +2751,18 @@ public class MainActivity extends Activity {
         backupStep.add(backupDetail);
         backupStep.more("The stock restore file is only for a camera whose backup, read before the camera was ever"
                         + " flashed, shows the public build.",
-                "Several owners report working cameras after flashing it; what their cameras ran before is not known.",
+                "Several owners report working cameras after flashing it, but what their cameras ran before isn't known.",
                 "The app refuses the public dumps and any read named unverified-read. A camera that stopped taking"
-                        + " pictures after a flash needs the donor route on a computer (docs/02-RECOVERY.md, D).",
-                "It cannot tell which camera a dump came from, and a dump read after a flash shows what was flashed:"
-                        + " use this camera's read from before.",
-                "Keep the backup file somewhere safe: it is the only way back to what the camera runs now.");
+                        + " pictures after a flash needs the donor route on a computer (docs/02-RECOVERY.md, section D).",
+                "The app can't tell which camera a backup came from, and a backup read after a flash only shows"
+                        + " what was flashed. Use one read before this camera was first flashed.",
+                "Keep the backup file somewhere safe. It's the only way back to what the camera runs now.");
         // Folded once the file is on the card, these two say what the run knows when the screen no longer has the
         // backup or the file it wrote (a restart, or another file loaded since).
         backupStep.summaryText = () -> {
             FlashFlow f = flow();
-            return backupSha256 == null && f != null && f.past() ? "No backup on record now; the update file was"
-                    + " checked against the one on record then." : backupStep.resultLine();
+            return backupSha256 == null && f != null && f.past() ? "No backup is chosen now. The update file was"
+                    + " checked against the one chosen at the time." : backupStep.resultLine();
         };
         Step file = flowStep(FlashFlow.Step.FILE, "Get the stock restore file", "The app downloads the public 2 MB"
                 + " dump, makes the restore file from it, and checks it against your backup.");
@@ -2762,7 +2773,7 @@ public class MainActivity extends Activity {
         file.add(fileDetail);
         file.add(downloadPageLink);
         file.more("Have the file already? Tap " + q(USE_FILE) + ".",
-                "Card in the phone's own slot on Android 11 or later: use Advanced, " + q(SAVE) + ".");
+                "Card in the phone's own slot on Android 11 or later? Use " + q(SAVE) + " on Advanced.");
         file.summaryText = () -> {
             FlashFlow f = flow();
             if (f == null || !f.past() || fileCheck != null && fileCheck.sha256.equals(f.sha())) {
@@ -2796,22 +2807,20 @@ public class MainActivity extends Activity {
         look.result(identifyStatus);
         look.add(identifyDetailToggle);
         look.add(identifyDetail);
-        look.more("Nothing is written: not to the card, not to the flash log, not to a flash run.",
+        look.more("Nothing is written to the card, the flash log or a flash run.",
                 "Only photos in DCIM are read, at most " + Identify.SCAN_CAP + ", and only up to the start of the"
                         + " picture. Videos are counted, not read.",
-                "Photos copied from another camera or edited on a computer may not be recognised; they are counted and"
+                "Photos copied from another camera or edited on a computer may not be recognised. They're counted and"
                         + " left out.",
-                "Open a photo and look at it too: a black or frozen picture has the same header.");
+                "Open a photo and look at it too. A black or frozen picture has the same header.");
         look.needs = new Step[]{drive};
-        Step ask = step("3", "Look at the camera", "Three things you can check on the camera itself.");
-        ask.body.addView(body("1. Setup menu: are there Volume and LED rows after FORMAT? Then one of our mods (v0.24"
-                + " or later) is installed. Without them it is a build without our menu rows: stock, or our v0.21 to"
-                + " v0.23.\n"
-                + "2. Does Photo or Video mode freeze after a flash? Then that firmware does not drive this camera's"
-                + " sensor: it is a build for the other sensor family.\n"
-                + "3. Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells nothing."));
-        ask.more("None of these needs the card or the app.",
-                "A freeze points at the firmware flashed last, not at the camera: photos from before that flash say"
+        Step ask = step("3", "Look at the camera", "No card or app needed.");
+        ask.body.addView(body("1. Setup page 2: are there Volume and LED rows after FORMAT? Then one of our mods"
+                + " (v0.24 or later) is installed. Without them it's stock, or our v0.21 to v0.23.\n"
+                + "2. Does photo or video mode freeze after a flash? Then that firmware is for the other sensor"
+                + " family and doesn't drive this camera's sensor."));
+        ask.more("Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells you nothing.",
+                "A freeze points at the firmware flashed last, not at the camera. Photos from before that flash show"
                         + " what fits.");
         showIdentify();
     }
@@ -2831,9 +2840,9 @@ public class MainActivity extends Activity {
         card.result(shotsStartStatus);
         card.more("Take 3 shots per light.", "Wait 5 seconds between shots.", "Cover the camera's flash.",
                 "Turn off auto-brightness and night light on the phone.",
-                "Tapping either button starts a new set: only photos taken after it are saved.");
+                "Tapping either button starts a new set. Only photos taken after that are saved.");
         card.done = () -> shotsSince != 0;
-        Step light = step("2", "Lighting", "The light the shots were taken in; it goes in the zip's name.");
+        Step light = step("2", "Lighting", "The light the shots were taken in. It goes in the zip's name.");
         light.add(lightingGroup);
         light.add(otherLighting);
         light.result(lightingStatus);
@@ -2852,9 +2861,9 @@ public class MainActivity extends Activity {
         save.add(shotsWipeBox);
         save.add(shotsButton);
         save.result(shotsStatus);
-        save.more("The zip is named Charmera-<firmware>-<lighting>-<date>.zip; the firmware comes from the flash log.",
+        save.more("The zip is named Charmera-<firmware>-<lighting>-<date>.zip. The firmware comes from the flash log.",
                 "No new photos found? Tap \"Choose how many\" and type how many of the newest photos to save.",
-                "The photos are saved exactly as the camera wrote them; their dates are not changed.",
+                "The photos are saved exactly as the camera wrote them. Their dates aren't changed.",
                 "Delete removes only photos whose copy in the zip read back the same.");
         save.needs = new Step[]{card, drive};
         save.ready = () -> unseen(shotsArchive);      // as on Back up photos: a pull mid-zip never hides the result
@@ -2901,7 +2910,7 @@ public class MainActivity extends Activity {
         }
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle("Clear the flash log?")
-                .setMessage("The app forgets every entry: what it wrote, and what you told it. This cannot be undone.")
+                .setMessage("The app forgets every entry, both what it wrote and what you told it. This can't be undone.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Clear", (di, w) -> {
                     flashLog = clearLog(this);
@@ -2922,9 +2931,11 @@ public class MainActivity extends Activity {
     }
 
     private void renderAdvanced() {
-        header("Advanced", "Every tool on one page, for any update file the app checks.");
-        Step backupStep = step("1", "This camera's backup", "Needed for any file except the reviewed probe and"
-                + " the reviewed OV9732 builds.");
+        header("Advanced", "All the tools on one page, for any update file, including ones the other routes don't"
+                + " make.");
+        Step backupStep = step("1", "This camera's backup", "Optional. If you choose one, the app compares the"
+                + " update file with it before writing (every file except the probe and the OV9732 builds), and warns"
+                + " if it drives the other sensor.");
         backupStep.add(backupButton);
         backupStep.result(backupStatus);
         backupStep.add(backupDetailToggle);
@@ -2938,8 +2949,9 @@ public class MainActivity extends Activity {
         file.add(saveButton);
         file.result(saveStatus);
         file.add(downloadPageLink);
-        file.more("Android 11 or later with the card in the phone's own slot: save a copy, copy it onto the card's top"
-                + " folder with the Files app, then tap " + q(USE_FILE) + " and choose the copy to have it checked.");
+        file.more("On Android 11 or later with the card in the phone's own slot, save a copy, copy it to the card's"
+                + " top folder with the Files app, then tap " + q(USE_FILE) + " and choose the copy so the app checks"
+                + " it.");
         Step advDrive = driveStep("3");
         Step write = step("4", "Write to the card", null);
         write.add(writeButton);
@@ -2971,19 +2983,19 @@ public class MainActivity extends Activity {
     /** The camera drive step: the warning about plugging in, the saved drive's state, and Choose. */
     private Step driveStep(String number) {
         Step s = step(number, "Camera drive", null);
-        s.body.addView(caution("Never plug the cable into a switched-off camera: it turns on and flashes any update"
+        s.body.addView(caution("Never plug the cable into a switched-off camera. It turns on and flashes any update"
                 + " file on the card."));
         s.add(driveHint);
         s.add(chooseButton);
         s.result(cardStatus);
         s.add(cardDetailToggle);
         s.add(cardDetail);
-        s.more("Connect in this order: camera off, card out; switch on with the power key and wait 10 seconds; card"
-                        + " in; then the USB-C data cable.",
+        s.more("Connect in this order: camera off and card out, switch on with the power button and wait 10 seconds,"
+                        + " put the card in, then plug in the USB-C data cable.",
                 "Choose the drive's top folder (\"Use this folder\"), not DCIM.",
                 "A USB card reader works the same way. The phone's own SD slot works only on Android 7 to 10.",
                 "Drive not showing? Some USB-C cables only charge. Android may offer to format a card the camera"
-                        + " has used: that erases it, so copy the photos off first (docs/05-CARDS.md).");
+                        + " has used. That erases it, so copy the photos off first (docs/05-CARDS.md).");
         s.done = () -> card != null && card.state.writable() && mounted(volume(treeUuid()));
         return s;
     }
@@ -3060,12 +3072,12 @@ public class MainActivity extends Activity {
         TextView how = body("1. Unplug the cable.\n"
                 + "2. Switch the camera on with the card in it.\n"
                 + "3. Wait for \"Upgrade 100%\" (15 to 20 seconds). Touch nothing until then.\n"
-                + "4. Hold the power key 1 second to switch it off.");
+                + "4. Hold the power button 1 second to switch it off.");
         s.body.addView(how);
         flashQuestion(s);
-        s.more("No \"Upgrade\" screen: the camera did not find the file. Camera off, card out; switch it on and wait 10"
-                        + " seconds; card in; then connect, and check the card holds it.",
-                "\"Program error\": the camera found the file damaged and ignored it; nothing was erased."
+        s.more("No \"Upgrade\" screen? The camera didn't find the file. With the camera off and the card out, switch"
+                        + " it on and wait 10 seconds, put the card in, then connect and check the card holds the file.",
+                "\"Program error\" means the camera found the file damaged and ignored it. Nothing was erased."
                         + " Remove the file and write it again.",
                 "At 100% the camera stays on that screen. It does not delete the update file.");
         s.summaryText = () -> {
@@ -3120,15 +3132,15 @@ public class MainActivity extends Activity {
     private Step removeStep() {
         final Step s = flowStep(FlashFlow.Step.REMOVE, "Remove the update file", "The camera re-flashes on every"
                 + " power-on while the file is on the card.");
-        s.body.addView(body("1. Card out; camera on with the power key; wait 10 seconds.\n"
-                + "2. Card in, then connect.\n"
+        s.body.addView(body("1. Take the card out, switch the camera on with the power button and wait 10 seconds.\n"
+                + "2. Put the card in, then connect.\n"
                 + "3. Tap " + q(REMOVE) + ", then eject the drive."));
         s.add(cleanButton);
         s.result(cleanStatus);
         // Eject again from here: the eject step above is done and folded away by now.
         s.add(removeEjectButton);
-        s.more("No phone needed: with the camera off, take the card out, switch the camera on, put the card in, then"
-                        + " format the card in the camera. That erases everything on the card, the update file too, so"
+        s.more("You can also do it without the phone. With the camera off, take the card out, switch the camera on,"
+                        + " put the card in, then format the card in the camera. That erases everything on the card, the update file too, so"
                         + " back up the photos first.",
                 "The next time the app reads the card and finds no update file, this step counts as done.");
         FlashFlow f = flow();
@@ -3251,7 +3263,7 @@ public class MainActivity extends Activity {
                 DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED},
                 null, null, null)) {
             if (q == null) {
-                throw new Plain("the drive did not answer; the cable or card may have come loose");
+                throw new Plain("the drive didn't answer. The cable or card may have come loose");
             }
             while (q.moveToNext()) {
                 rows.add(new Row(q.getString(0), q.getString(1), q.getString(2), q.isNull(3) ? -1 : q.getLong(3),
@@ -3459,7 +3471,7 @@ public class MainActivity extends Activity {
                 .setMessage("Once the zip is saved and read back, the app deletes from the camera each "
                         + (shots ? "photo" : "photo and video") + " whose copy in the zip matched. Files this camera"
                         + " did not make, folders, the update file and SENSOR.TXT stay.\n\nThe camera keeps no other"
-                        + " copy: the zip is then the only one.")
+                        + " copy, so the zip is then the only one.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Choose where to save", (di, w) -> pickZip(shots ? SAVE_SHOTS : SAVE_ZIP, name))
                 .create();
@@ -3495,7 +3507,7 @@ public class MainActivity extends Activity {
         final Card c = card;
         final TextView status = shots ? shotsStatus : zipStatus;
         String refusal = busy() || archiving() ? "a write, a removal or another zip is running"
-                : !readable(c) ? "the app has not listed the camera's drive; connect it and try again"
+                : !readable(c) ? "the app hasn't listed the camera's drive. Connect it and try again"
                 : onCameraCard(dest) ? "that place is on the camera's own card. Choose a place on the phone, not the"
                 + " camera's card" : null;
         if (refusal != null) {
@@ -3549,8 +3561,8 @@ public class MainActivity extends Activity {
                 outcome = runArchive(a, app, c.tree, dest, fix, dateNames, wipe, count, since, before, header);
             } finally {
                 forgetRunningZip(app);      // ended, one way or another: nothing is left unfinished for the next start
-                a.outcome = outcome != null ? outcome : "The zip stopped with an unexpected error. Do not rely on it;"
-                        + " nothing was deleted from the camera unless this says so.";
+                a.outcome = outcome != null ? outcome : "The zip stopped with an unexpected error. Don't rely on it."
+                        + " Nothing was deleted from the camera unless this says so.";
             }
             postArchive();
         });
@@ -3627,7 +3639,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 setStatus(shots ? shotsStatus : zipStatus, "A zip was not finished: the app was stopped while it saved "
-                        + found + ", before it was read back. Do not rely on it; delete it and save the zip again."
+                        + found + ", before it was read back. Don't rely on it. Delete it and save the zip again."
                         + " Nothing was deleted from the camera for it.");
             });
         });
@@ -3707,7 +3719,7 @@ public class MainActivity extends Activity {
         try {
             chosen = listMedia(t, !shots);
         } catch (IOException | RuntimeException e) {
-            return "Nothing was saved: the app could not list the camera's photos: " + sentence(cause(e, "the drive"
+            return "Nothing was saved. The app couldn't list the camera's photos: " + sentence(cause(e, "the drive"
                     + " did not answer")) + emptyZip(dest) + detail(detailOf(e));
         }
         if (shots) {
@@ -3718,7 +3730,7 @@ public class MainActivity extends Activity {
                     : before != null ? "no photo has appeared in the card's DCIM folder since step 1. To save photos"
                     + " that were there already, type how many of the newest to save, then try again."
                     : "no photo taken since step 1 is on the card. If you took some, the camera's clock may differ"
-                    + " from the phone's: type how many of the newest photos to save, then try again."
+                    + " from the phone's. Type how many of the newest photos to save, then try again."
                     : "the card's DCIM and SPIDCIM folders hold no photos or videos.") + emptyZip(dest);
         }
         TimeZone tz = TimeZone.getDefault();
@@ -3839,8 +3851,8 @@ public class MainActivity extends Activity {
         String what = shots ? photos + (photos == 1 ? " test shot" : " test shots") + " and manifest.txt"
                 : photos + (photos == 1 ? " photo, " : " photos, ") + videos + (videos == 1 ? " video" : " videos");
         if (verifyProblem != null) {
-            return "Do not rely on the zip " + name + ": " + sentence(verifyProblem) + " Nothing was deleted from the"
-                    + " camera. Delete the zip and try again; a different place to save it may help.";
+            return "Don't rely on the zip " + name + ": " + sentence(verifyProblem) + " Nothing was deleted from the"
+                    + " camera. Delete the zip and try again. Saving it somewhere else may help.";
         }
         // Read back and matched: nothing is left for a restart to call unfinished (the wipe below comes after this).
         forgetRunningZip(app);
@@ -3865,19 +3877,19 @@ public class MainActivity extends Activity {
         if (shortOriginals > 0) {
             out.append("\n").append(shortOriginals).append(shortOriginals == 1 ? " copy" : " copies").append(" in ")
                     .append(ORIGINALS).append(DIFFERENT_SIZE).append(" the file, so ")
-                    .append(shortOriginals == 1 ? "it is" : "they are").append(" not the file as the camera wrote it;")
-                    .append(" the card ").append(shortOriginals == 1 ? "file stays" : "files stay")
+                    .append(shortOriginals == 1 ? "it is" : "they are").append(" not the file as the camera wrote it.")
+                    .append(" The card ").append(shortOriginals == 1 ? "file stays" : "files stay")
                     .append(" on the camera.");
         }
         int shortSized = shortRead - unsized;
         if (shortSized > 0) {
             out.append("\n").append(shortSized).append(shortSized == 1 ? " file" : " files")
-                    .append(DIFFERENT_SIZE).append(shortSized == 1 ? " it; it stays" : " them; they stay")
+                    .append(DIFFERENT_SIZE).append(shortSized == 1 ? " it, so it stays" : " them, so they stay")
                     .append(" on the camera.");
         }
         if (unsized > 0) {
             out.append("\n").append(unsized).append(unsized == 1 ? " file has" : " files have")
-                    .append(NO_SIZE).append(", so the app cannot check that the copy is whole; ")
+                    .append(NO_SIZE).append(", so the app can't check that the copy is whole, and ")
                     .append(unsized == 1 ? "it stays" : "they stay").append(" on the camera.");
         }
         // What may go: a whole copy of the camera's own file that read back the same, and its original too when the
@@ -4116,7 +4128,7 @@ public class MainActivity extends Activity {
                 }
                 if (newest == null) {
                     text = fileOnCard ? "No new photo yet. The update file is still on the card, so the camera flashes"
-                            + " again instead of starting: tap " + q(REMOVE) + " first."
+                            + " again instead of starting. Tap " + q(REMOVE) + " first."
                             : "No photo taken since the write is on the card. Take one photo, switch the camera off,"
                             + " reconnect, then tap " + q(CHECK_PHOTO) + " again.";
                 } else {
@@ -4156,7 +4168,7 @@ public class MainActivity extends Activity {
                                 : r.reasons.isEmpty() ? "a header the app does not know"
                                 : android.text.TextUtils.join("; ", r.reasons);
                         text = "This photo has " + got + ", not firmware " + version + "'s EXIF header"
-                                + " ✗\n" + which + ". The flash did not take: write the file again and wait for"
+                                + " ✗\n" + which + ". The flash didn't take. Write the file again and wait for"
                                 + " \"Upgrade 100%\"." + how;
                         appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": " + got);
                     } else if (factory && r.kind == PhotoId.Kind.ORIGINAL_BARE) {
@@ -4166,12 +4178,12 @@ public class MainActivity extends Activity {
                         appendLog(app, FlashLog.Event.CHECK_OK, fw, sha, "factory header: " + newest.path);
                     } else if (factory && r.kind == PhotoId.Kind.PUBLIC_FAMILY) {
                         text = "This photo has the public build's header, not the factory firmware's \u2717\n" + which
-                                + ". The flash did not take: write the file again and wait for \"Upgrade 100%\"." + how;
+                                + ". The flash didn't take. Write the file again and wait for \"Upgrade 100%\"." + how;
                         appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": public-build header");
                     } else if (r.kind == PhotoId.Kind.FACTORY_EXIF) {
                         // The EXIF mod's header after a write of a firmware without it: it still runs v0.26 or later.
                         text = "This photo has the EXIF header of firmware " + Candidates.Kind.V026.version + " or later, not the"
-                                + " written firmware's ✗\n" + which + ". The flash did not take: write the file"
+                                + " written firmware's ✗\n" + which + ". The flash didn't take. Write the file"
                                 + " again and wait for \"Upgrade 100%\"." + how;
                         appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": factory EXIF header");
                     } else if (r.kind == PhotoId.Kind.PUBLIC_FAMILY) {
@@ -4182,8 +4194,8 @@ public class MainActivity extends Activity {
                         appendLog(app, FlashLog.Event.CHECK_OK, null, sha, "public-build family header: "
                                 + newest.path);
                     } else if (r.kind == PhotoId.Kind.ORIGINAL_BARE) {
-                        text = "This photo has the original firmware's header ✗\n" + which + ". The flash did not"
-                                + " take: write the file again and wait for \"Upgrade 100%\"." + how;
+                        text = "This photo has the original firmware's header ✗\n" + which + ". The flash didn't"
+                                + " take. Write the file again and wait for \"Upgrade 100%\"." + how;
                         appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": original header");
                     } else {
                         String why = r.reasons.isEmpty() ? "its header is not one the app knows"
@@ -4946,8 +4958,8 @@ public class MainActivity extends Activity {
                 }
                 checkingUpdate = false;
                 if (nr) {
-                    setStatus(updateStatus, "No app update has been published yet, so there is nothing to install. This"
-                            + " button will find one once a release is published.");
+                    setStatus(updateStatus, "No app update has been published yet, so there's nothing to install. Once"
+                            + " a release is published, this button finds it.");
                     return;
                 }
                 if (p != null) {
@@ -4970,8 +4982,8 @@ public class MainActivity extends Activity {
     private void confirmInstall(String remoteName) {
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle("Update available")
-                .setMessage("Version " + remoteName + " is available; you have " + appVersion() + ". The update is"
-                        + " downloaded. Tap Update to install it \u2014 Android will ask you to confirm.")
+                .setMessage("Version " + remoteName + " is available (you have " + appVersion() + ") and already"
+                        + " downloaded. Tap Update to install it. Android will ask you to confirm.")
                 .setNegativeButton("Not now", null)
                 .setPositiveButton("Update", (di, w) -> installUpdate())
                 .create();
@@ -4993,8 +5005,8 @@ public class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
             AlertDialog d = new AlertDialog.Builder(this)
                     .setTitle("Allow updates")
-                    .setMessage("To install updates, allow this app to install apps. Android will open its settings;"
-                            + " turn it on, come back, and tap Check for updates again.")
+                    .setMessage("To install updates, allow this app to install apps. Android opens its settings."
+                            + " Turn it on, come back, and tap Check for app updates again.")
                     .setNegativeButton("Cancel", null)
                     .setPositiveButton("Open settings", (di, w) -> {
                         try {
@@ -5002,7 +5014,7 @@ public class MainActivity extends Activity {
                                     Uri.parse("package:" + getPackageName())));
                         } catch (ActivityNotFoundException e) {
                             setStatus(updateStatus, "Could not open the setting. Turn on \"install unknown apps\" for"
-                                    + " this app in Android settings, then tap Check for updates again.");
+                                    + " this app in Android settings, then tap Check for app updates again.");
                         }
                     })
                     .create();
@@ -5223,7 +5235,7 @@ public class MainActivity extends Activity {
     /** What to do once the file step has a file that passed. A file the owner chose may already be on the card. */
     private static String nextAfterFile(boolean chosen) {
         return chosen ? "Next: connect the camera's drive and write it. If this copy is already on the card, tap "
-                + q(WRITE) + " all the same: the app finds it there, writes nothing, and moves on to Eject."
+                + q(WRITE) + " anyway. The app finds it there, writes nothing, and moves on to Eject."
                 : "Next: connect the camera's drive and write it.";
     }
 
@@ -5239,18 +5251,12 @@ public class MainActivity extends Activity {
         String again = isProbe(result) ? "or make the probe again on " + routeTitle(Route.PROBE)
                 : isRepair(result) ? "or make it again on " + routeTitle(Route.REPAIR)
                 : "or open " + routeTitle(Route.RESTORE) + " and choose it again with " + q(USE_FILE);
-        return routeTitle(route) + " does not write this file. To write this copy, open Advanced; " + again + ".";
+        return routeTitle(route) + " doesn't write this file. To write this copy, open Advanced, " + again + ".";
     }
 
     /** The withdrawn candidate (C, A or B) these bytes are, by SHA-256, or null. */
     private static Candidates.Kind withdrawnKind(String sha) {
-        for (Candidates.Kind k : Candidates.Kind.values()) {
-            // the stock restore file made from the cleaned copy has candidate C's bytes: it is the restore file
-            if (!k.offered && k.matches(sha) && !Candidates.Kind.RESTORE.matches(sha)) {
-                return k;
-            }
-        }
-        return null;
+        return Candidates.withdrawn(sha);
     }
 
     /** Whether a checked file is the sensor-ID probe, by its reviewed SHA-256: a file written without a backup. */
@@ -5301,6 +5307,15 @@ public class MainActivity extends Activity {
                 f == Identify.Base.V012 ? "v012" : f == Identify.Base.V006_FAMILY ? "v006-family" : null);
     }
 
+    /**
+     * Whether a checked file is an unknown file (not reviewed) that was checked with no backup and goes to the card
+     * with none on record: the file step and the confirmation then say so loudly (UNKNOWN_FILE).
+     */
+    private boolean unknownNoBackup(UpdateCheck.Result result) {
+        return result != null && !isReviewedPatch(result) && !result.compared && result.referenceSha256 == null
+                && backupSha256 == null;
+    }
+
     /** How many WARN lines a checked file produced, for the file step's one-line status. */
     private static int warnCount(UpdateCheck.Result result) {
         int n = 0;
@@ -5336,8 +5351,8 @@ public class MainActivity extends Activity {
         try {
             startActivityForResult(i, PICK_BACKUP);
         } catch (ActivityNotFoundException | SecurityException e) {
-            setStatus(backupStatus, "Android could not open its file picker, so the backup cannot be chosen. Without it"
-                    + " the app does not write to the card." + detail(why(e)));
+            setStatus(backupStatus, "Android couldn't open its file picker, so no backup can be chosen. Without one, the"
+                    + " app can't compare the update file with this camera's firmware." + detail(why(e)));
         }
     }
 
@@ -5366,7 +5381,7 @@ public class MainActivity extends Activity {
                     data = null;
                     sha = null;
                     text = "Not taken as a backup: " + sentence(problem) + (isPublic
-                            ? " If it is a read of this camera, keep it: it is the way back to what the camera runs now."
+                            ? " If it's a read of this camera, keep it. It's the way back to what the camera runs now."
                             : " The app needs the 2 MB file the toolkit's backup command read from this camera's flash"
                             + " chip. Tap " + q(BACKUP) + " to choose it.") + "\n"
                             + "File: " + name + ".";
@@ -5375,7 +5390,7 @@ public class MainActivity extends Activity {
                     for (String note : UpdateCheck.backupNotes(data, UpdateCheck.PUBLIC_BUILD)) {
                         notes.append('\n').append(note);
                     }
-                    text = "Backup on record: " + name + ", " + UpdateCheck.bytes(data.length) + "." + notes;
+                    text = "Backup chosen: " + name + ", " + UpdateCheck.bytes(data.length) + "." + notes;
                 }
             } catch (IOException | RuntimeException e) {
                 data = null;
@@ -5394,11 +5409,22 @@ public class MainActivity extends Activity {
                 }
                 String before = backupSha256;
                 loadingBackup = false;
+                boolean reread = rereadingBackup;
+                rereadingBackup = false;
+                if (d == null && before != null) {
+                    // A failed choice never drops the backup already on record: without it, an update file that
+                    // failed against this camera's own firmware would be checked again with nothing to compare.
+                    setStatus(backupStatus, t + "\nThe app still uses " + backupName + ".");
+                    updateButtons();
+                    return;
+                }
                 backup = d;
                 backupSha256 = h;
                 backupName = d == null ? null : n;
                 backupUri = d == null ? null : uri;
-                setStatus(backupStatus, t);
+                setStatus(backupStatus, d == null && reread ? "⚠ The backup you chose before couldn't be read"
+                        + " again, so no backup is chosen now and the update file isn't compared with one. Tap "
+                        + q(BACKUP) + " to choose it again.\n" + t : t);
                 backupDetail.setText(h == null ? "" : "SHA-256 " + h);
                 backupDetail.setVisibility(View.GONE);
                 backupDetailToggle.setText("\u25b8 Details");
@@ -5427,14 +5453,14 @@ public class MainActivity extends Activity {
         if (writtenWith != null && !writtenWith.equals(now)
                 && (written.startsWith(WRITTEN) || written.startsWith(NOTHING_TO_WRITE))) {
             setStatus(writeStatus, "The update file on the card was checked against the backup chosen before, "
-                    + writtenName + ", and the backup on record has changed since. Unless the file step says \"OK to put on"
+                    + writtenName + ", and the backup has changed since. Unless the file step says \"OK to put on"
                     + " the card\" again, tap " + q(REMOVE) + " before the card goes back into the camera.");
             writtenWith = null;
         }
         String saved = saveStatus.getText().toString();
         if (savedWith != null && !savedWith.equals(now) && saved.startsWith(SAVED)) {
             setStatus(saveStatus, "The copy saved to the phone was checked against the backup chosen before, "
-                    + savedName + ", and the backup on record has changed since. Do not put it on the card unless the file"
+                    + savedName + ", and the backup has changed since. Don't put it on the card unless the file"
                     + " step says \"OK to put on the card\" again.");
             savedWith = null;
         }
@@ -5470,7 +5496,7 @@ public class MainActivity extends Activity {
         final boolean chosen = fileChosen;
         checking = true;
         fileCheck = null;
-        showFile("Checking the update file again, against the backup now on record…", null);
+        showFile("Checking the update file again with the backup now chosen…", null);
         updateButtons();
         WORKER.execute(() -> {
             final UpdateCheck.Result result = Candidates.check(name, data, ref);
@@ -5554,7 +5580,7 @@ public class MainActivity extends Activity {
             color = badColor;
             next = "Tap Details to see what failed.";
         } else if (isProbe(result)) {
-            state = "\u2713 Sensor-ID probe ready \u2014 no backup needed.";
+            state = "\u2713 Sensor-ID probe ready. No backup needed.";
             color = okColor;
             next = "Next: connect the camera's drive and tap " + q(WRITE) + ".";
         } else if (isReviewedPatch(result)) {
@@ -5563,18 +5589,24 @@ public class MainActivity extends Activity {
             Recipe.Selection sel = Recipe.selectionOf(result.sha256);
             state = "\u2713 " + (isRepair(result) ? "Firmware " + repairOf(result).name() : sel != null ? sel.label()
                     : "Reviewed file") + " ready." + (warns == 0 ? "" : " " + warns + (warns == 1 ? " warning"
-                    : " warnings") + " \u2014 see Details.");
+                    : " warnings") + " (see Details).");
             color = unsure != null || warns > 0 ? warnAccent : okColor;
             next = (unsure == null ? "" : "\u26a0 " + unsure + "\n") + "Next: connect the camera's drive and tap "
                     + q(WRITE) + ".";
-        } else if (!result.compared) {
-            state = "\u26a0 Needs this camera's backup first.";
+        } else if (unknownNoBackup(result)) {
+            int warns = warnCount(result);
+            state = "\u26a0 Unknown file." + (warns == 0 ? ""
+                    : " " + warns + (warns == 1 ? " warning" : " warnings") + " (see Details).");
             color = warnAccent;
-            next = "Tap " + q(BACKUP) + " first; the app compares the file with it before it will write.";
+            next = UNKNOWN_FILE + "\n" + nextAfterFile(chosen);
+        } else if (!result.compared) {
+            state = "\u26a0 Not compared with the backup chosen now.";
+            color = warnAccent;
+            next = "The app compares it again before it will write it. Tap Details to see why.";
         } else {
             int warns = warnCount(result);
             state = "\u2713 OK to put on the card." + (warns == 0 ? ""
-                    : " " + warns + (warns == 1 ? " warning" : " warnings") + " \u2014 see Details.");
+                    : " " + warns + (warns == 1 ? " warning" : " warnings") + " (see Details).");
             color = okColor;
             next = nextAfterFile(chosen);
         }
@@ -5637,14 +5669,14 @@ public class MainActivity extends Activity {
                 : WriteGate.refusal(check, data, backupSha256, loadingBackup, false);
         if (refusal != null) {
             // The save screen has already made an empty file under the update file's name: it must not stay behind.
-            setStatus(saveStatus, "Not saving the copy; removing the empty file the save screen made…");
+            setStatus(saveStatus, "Not saving the copy. Removing the empty file the save screen made…");
             WORKER.execute(() -> {
                 String name = displayName(uri);
                 String failed = delete(uri);
                 final String tt = "No copy was saved: " + sentence(refusal) + (failed == null
                         ? " The empty file the save screen made was deleted."
-                        : " The save screen made an empty file, " + name + ", and the app could not delete it: delete"
-                        + " it yourself, so it never goes on a card.") + " Then tap " + q(SAVE) + " again."
+                        : " The save screen made an empty file, " + name + ", and the app couldn't delete it. Delete"
+                        + " it yourself so it never goes on a card.") + " Then tap " + q(SAVE) + " again."
                         + detail(failed);
                 ui.post(() -> {
                     if (gone()) {
@@ -5677,11 +5709,11 @@ public class MainActivity extends Activity {
                             + " tap " + q(SAVE) + " again." + detail("SHA-256 of the copy " + sha + "; of the update"
                             + " file " + check.sha256 + ".");
                 } else if (!check.cardName.equals(name)) {
-                    text = "Saved, but under another name: Android named the copy \"" + name + "\". The camera only"
+                    text = "Saved, but under another name. Android named the copy \"" + name + "\". The camera only"
                             + " uses the update file under its exact name. Rename the copy to " + check.cardName
                             + " before you copy it to the card.";
                 } else {
-                    text = "Saved " + name + " on the phone, and read it back: it is the same as the update file.\n"
+                    text = "Saved " + name + " on the phone and read it back. It matches the update file.\n"
                             + "Next: copy it to the card's top folder with the Files app, not into DCIM. Then tap "
                             + q(USE_FILE) + " and choose the copy on the card, so the app checks it there.";
                 }
@@ -5725,7 +5757,7 @@ public class MainActivity extends Activity {
             buildRestore(stockDump, request, "Used the stock dump the app already has.", sel, forRoute);
             return;
         }
-        showFile("Getting the stock dump (2 MB; the first time it downloads from GitHub)…", null);
+        showFile("Getting the stock dump (2 MB, downloaded from GitHub the first time)…", null);
         downloading = true;
         updateButtons();
         NET.execute(() -> {
@@ -5867,7 +5899,7 @@ public class MainActivity extends Activity {
      * with Use a file, is kept in its place and used first from then on.
      */
     private void downloadFactory(Recipe.Selection sel, Route forRoute, int request) {
-        showFile("Getting the factory dump (2 MB, the public cleaned copy of build v012; it downloads from GitHub once)…",
+        showFile("Getting the factory dump (2 MB, the public cleaned copy of build v012, downloaded from GitHub once)…",
                 null);
         downloading = true;
         updateButtons();
@@ -5878,8 +5910,8 @@ public class MainActivity extends Activity {
             boolean keeping = false;
             final String again = " Then tap " + q(makeLabel(sel)) + " again.";
             final String instead = " Or open " + Candidates.CLEAN_FACTORY_PAGE + " in the browser, download "
-                    + Candidates.CLEAN_FACTORY_NAME + " there, and tap " + q(USE_FILE) + "; or choose your own read of"
-                    + " the chip, " + Candidates.FACTORY_DUMP_NAME + ", the same way.";
+                    + Candidates.CLEAN_FACTORY_NAME + " there, and tap " + q(USE_FILE) + ". You can also choose your own read"
+                    + " of the chip, " + Candidates.FACTORY_DUMP_NAME + ", the same way.";
             final String wrong = "The download arrived, but it is not the factory dump, so the app will not use it.\nA"
                     + " Wi-Fi network that asks you to sign in can cause this, or a download that stopped part way."
                     + again + instead;
@@ -5984,7 +6016,7 @@ public class MainActivity extends Activity {
             buildRestore(v008Dump, request, "Used build v008_test's file the app already has.", sel, forRoute);
             return;
         }
-        showFile("Getting build v008_test's public file (1.4 MB; the first time it downloads from GitHub)…", null);
+        showFile("Getting build v008_test's public file (1.4 MB, downloaded from GitHub the first time)…", null);
         downloading = true;
         updateButtons();
         final String[] entry = Recipe.download(Recipe.V008);
@@ -6251,13 +6283,14 @@ public class MainActivity extends Activity {
                     if (problem == null) {
                         // Most likely the owner's own backup, picked in the wrong step.
                         summary = "\"" + name + "\" looks like a dump of a camera's flash chip, not an update file, and a"
-                                + " dump never goes on a card as it is. If it is this camera's backup, choose it with "
-                                + q(BACKUP) + ": the app then compares the update file with it. An update file"
+                                + " dump never goes on a card as it is. If it's this camera's backup, choose it with "
+                                + q(BACKUP) + " and the app compares the update file with it. An update file"
                                 + " is made from a dump with charmera pack on a computer.";
                     } else {
                         // Step 0 would refuse it too, so it is not pointed to: what is wrong with it is said instead.
-                        summary = "\"" + name + "\" is a 2 MB dump, but not the public stock dump, the one dump the app"
-                                + " makes an update file from. Nor is it one the app takes as a backup: "
+                        summary = "\"" + name + "\" is a 2 MB dump, but it isn't the public stock dump or a factory"
+                                + " dump, the dumps the app makes update files from. The app won't take it as a"
+                                + " backup either: "
                                 + sentence(problem) + "\nA dump never goes on a card as it is.";
                         technical = detailBlock("its SHA-256 is " + UpdateCheck.sha256Hex(data, 0, data.length)
                                 + "; the public stock dump's is " + Candidates.CLEAN_STOCK_SHA256 + " (the original's "
@@ -6270,20 +6303,19 @@ public class MainActivity extends Activity {
                     Candidates.Kind withdrawn = withdrawnKind(result.sha256);
                     if (withdrawn != null) {
                         // A candidate the app no longer offers, whatever its checks say.
-                        summary = "The app refuses this file: do not put it on the card. It is "
+                        summary = "The app refuses this file. Don't put it on the card. It is "
                                 + withdrawn.label.substring(0, 1).toLowerCase(java.util.Locale.ROOT)
-                                + withdrawn.label.substring(1) + " The only file the app makes itself is the stock"
-                                + " restore file, which is only for a camera whose backup, read before the camera was"
-                                + " ever flashed, shows the public build.\n"
+                                + withdrawn.label.substring(1) + " For stock firmware, use the stock restore file,"
+                                + " which is only for a camera whose backup, read before the camera was ever flashed,"
+                                + " shows the public build.\n"
                                 + "File: " + name + ".\n"
-                                + "If this file is on the card, remove it before the card goes back into the camera:"
-                                + " tap " + q(REMOVE) + ".";
+                                + "If this file is on the card, tap " + q(REMOVE) + " before the card goes back into"
+                                + " the camera.";
                     } else if (restore && UpdateCheck.nameIsTheOnlyProblem(result)) {
                         // The bytes are the stock restore file and only its name failed; anything else, a sensor
                         // table that differs from the backup's above all, is shown in full by showChecked below.
-                        summary = "Not OK to put on the card: the camera would not use it under this name. It is exactly"
-                                + " the stock restore file, under another name. Tap " + q(DOWNLOAD) + " to make it"
-                                + " with its right name.\n"
+                        summary = "Not OK to put on the card. It's exactly the stock restore file, but under a name the"
+                                + " camera won't use. Tap " + q(DOWNLOAD) + " to make it with the right name.\n"
                                 + "File: " + name + ".";
                     } else {
                         origin = "File: " + name + "."
@@ -6319,7 +6351,7 @@ public class MainActivity extends Activity {
             final byte[] s = stock;
             final byte[] fd = factory;
             final String fromFactory = "\"" + name + "\" is your factory dump." + (factoryKept
-                    ? " The app keeps it on this phone, so you need not pick it again." : "");
+                    ? " The app keeps it on this phone, so you don't need to pick it again." : "");
             final String from = "\"" + name + "\" is the public stock dump.";
             final String o = origin;
             final boolean c = chosen;
@@ -6430,13 +6462,14 @@ public class MainActivity extends Activity {
         try {
             startActivityForResult(i, PICK_CARD);
         } catch (ActivityNotFoundException | SecurityException e) {
-            setStatus(cardStatus, "Android could not open its folder picker, so the app cannot reach the card. Instead:"
-                    + " tap " + q(SAVE) + " on the Advanced page. Copy that file to the card's top folder with the Files app."
-                    + " Then tap " + q(USE_FILE) + " and choose the copy on the card, so the app checks it there."
+            setStatus(cardStatus, "Android couldn't open its folder picker, so the app can't reach the card. Instead,"
+                    + " tap " + q(SAVE) + " on the Advanced page and copy that file to the card's top folder with the"
+                    + " Files app. Then tap " + q(USE_FILE) + " and choose the copy on the card, so the app checks it"
+                    + " there."
                     + detail(why(e)));
             if (driveAway()) {
                 // The card's readout is hidden while the saved drive is away: say it where it is seen.
-                android.widget.Toast.makeText(this, "Android could not open its folder picker, so the app cannot"
+                android.widget.Toast.makeText(this, "Android couldn't open its folder picker, so the app can't"
                         + " reach the card.", android.widget.Toast.LENGTH_LONG).show();
             }
         }
@@ -6646,7 +6679,7 @@ public class MainActivity extends Activity {
         Uri t = c.tree;
         CardState s = c.state;
         if (!EXTERNAL_STORAGE.equals(t.getAuthority())) {
-            s.problem = "That folder is not on a card or USB drive: it belongs to another app. Tap " + q(CHOOSE)
+            s.problem = "That folder isn't on a card or USB drive. It belongs to another app. Tap " + q(CHOOSE)
                     + " again and pick the camera's drive in the picker's menu.";
             return;
         }
@@ -6660,7 +6693,7 @@ public class MainActivity extends Activity {
             s.problem = "That is the folder \"" + docId.substring(docId.indexOf(':') + 1) + "\" on the card, not its top"
                     + " folder. The camera looks for the update file only in the top folder. Tap " + q(CHOOSE)
                     + " again, open the camera's drive and tap \"Use this folder\" before you open any folder in it. On"
-                    + " Android 11 and later, the top folder of a card in the phone's own slot cannot be chosen: use"
+                    + " Android 11 and later, the top folder of a card in the phone's own slot can't be chosen, so use"
                     + " the camera's USB-C cable or a USB card reader.";
             return;
         }
@@ -6725,9 +6758,11 @@ public class MainActivity extends Activity {
         // Every reviewed file is written without a backup: the dialog says when nothing confirms what the camera runs.
         // Any reviewed build whose set is experimental says so, even when each of its mods alone is tested.
         final String unsure = unconfirmed(check);
+        final boolean unknown = unknownNoBackup(check);
         final Recipe.Selection made = Recipe.selectionOf(check.sha256);
         final String untried = made != null && "experimental".equals(made.status()) ? "Experimental: "
-                + made.label() + " has not yet been tried on a camera as a whole. Keep the way back at hand.\n" : "";
+                + made.label() + " hasn't been tried on a camera as a whole. Make sure you can write your current version"
+                + " again if it doesn't work.\n" : "";
         final String backupLine = backupSha256 == null ? null
                 : backupName + ", SHA-256 " + backupSha256.substring(0, 16) + "…";
         CardState.Item same = c.state.sameFile(check);
@@ -6745,27 +6780,28 @@ public class MainActivity extends Activity {
                         : bringup ? "Write firmware " + repair.name() + " to the card?"
                         : "Write the update file to the card?")
                 .setMessage("The app copies the update file to the card's top folder. Nothing changes on the camera"
-                        + " yet: it flashes the file the next time it switches on with this card in it.\n\n"
+                        + " yet. It flashes the file the next time it switches on with this card in it.\n\n"
                         + "Update file: " + name + "\n"
                         + (probe
-                            ? "This is the sensor-ID probe, written without a backup (one of the reviewed patches the"
-                            + " app allows that). It scans the sensor bus and writes a result to SENSOR.TXT; it does not"
-                            + " fix the camera.\n"
+                            ? "This is the sensor-ID probe, a reviewed file. It scans the sensor bus and writes a result"
+                            + " to SENSOR.TXT. It doesn't fix the camera.\n"
                             : factory
                             ? "This is firmware " + repair.name() + " (" + summaryOf(repair) + "), a reviewed file. The"
-                            + " way back is an older version's file: pick it in Flash custom firmware's version menu.\n"
+                            + " way back is an older version's file. Pick it in the version menu on Flash custom"
+                            + " firmware.\n"
                             : port
                             ? "This is the OV9732 bring-up, a reviewed file. It drives the fitted OV9732 in place of the"
-                            + " SP140A set-up; it changes no boot or update code. The stock restore file does not drive"
+                            + " SP140A set-up and changes no boot or update code. The stock restore file doesn't drive"
                             + " the OV9732.\n"
                             : bringup
-                            ? "This is " + repair.label() + ", a reviewed file: SP140A firmware.\n"
+                            ? "This is " + repair.label() + ", a reviewed SP140A firmware file.\n"
                             : backupLine != null && check.compared
                             ? "Compared with this camera's backup: " + backupLine + "\n"
                             : isReviewedPatch(check)
                             ? "A reviewed file, not compared with a backup.\n"
                             : "")
                         + (unsure == null ? "" : "\n\u26a0 " + unsure + "\n\n")
+                        + (unknown ? "\n\u26a0 Unknown file. " + UNKNOWN_FILE + "\n\n" : "")
                         + untried
                         + "Card: " + (c.state.label == null ? "the chosen card" : c.state.label) + "\n\n"
                         + (probe
@@ -6773,9 +6809,9 @@ public class MainActivity extends Activity {
                             + q(READ_RESULT) + ".\n\n"
                             : bringup
                             ? "After it flashes, power the camera on and try a photo, then take the card out and look at"
-                            + " the JPEGs. It may take no clean picture on the first try.\n\n"
+                            + " the JPEGs.\n\n"
                             : check.compared
-                            ? "The app cannot tell which camera a backup was read from: write only if that backup is a"
+                            ? "The app can't tell which camera a backup was read from. Write only if that backup is a"
                             + " read of the camera this card goes into.\n\n"
                             : "")
                         + "Detail: " + UpdateCheck.bytes(check.size) + ", SHA-256 " + check.sha256 + ".")
@@ -6870,7 +6906,7 @@ public class MainActivity extends Activity {
                 outcome = writeAndReport(c.tree, data, check);
             } finally {
                 String o = outcome != null ? outcome : "Writing stopped with an unexpected error. The Camera drive"
-                        + " step shows what the card holds now: do not switch the camera on with this card in it"
+                        + " step shows what the card holds now. Don't switch the camera on with this card in it"
                         + " while it lists an update file.";
                 finish(op, o, o.startsWith(WRITTEN));
             }
@@ -6946,8 +6982,8 @@ public class MainActivity extends Activity {
                     (isSha(sha) ? "SHA-256 read back " + sha + "; the update file's is " + check.sha256 : sha)
                     + (failed == null ? "" : "; delete: " + failed));
         }
-        return WRITTEN + "\nThe app wrote " + name + " to the card's top folder and read it back: it matches.\n"
-                + "Next: eject the drive before you unplug the cable or take the card out: tap " + q(EJECT) + "."
+        return WRITTEN + "\nThe app wrote " + name + " to the card's top folder and read it back, and it matches.\n"
+                + "Next: eject the drive before you unplug the cable or take the card out. Tap " + q(EJECT) + "."
                 + detail("SHA-256 " + sha + ".");
     }
 
@@ -7043,24 +7079,24 @@ public class MainActivity extends Activity {
                 long[] modified = {0};
                 byte[] b = readCardFile(t, "SENSOR.TXT", modified);
                 text = b == null && removed ? "No SENSOR.TXT on the card yet.\n\nPower the camera on and open photo"
-                        + " mode once: it stops there as before, but writes the file first. Then switch it off,"
+                        + " mode once. It stops there as before, but writes the file first. Then switch it off,"
                         + " reconnect, and tap " + q(READ_RESULT) + " again." : decodeSensor(b);
                 if (b != null && before != null && !before.isEmpty()
                         && before.equals(sensorIdentity(b, modified[0]))) {
                     // The very file the card held when the probe went on it: same date, size and contents.
-                    text = "This SENSOR.TXT is unchanged since the probe was " + (wrote ? "written to" : "found on")
-                            + " the card: same date, size and contents. So the probe may not have run yet; if it ran,"
-                            + " the file is exactly as it was before. With the update file removed, open photo mode once, switch"
+                    text = "This SENSOR.TXT has the same date, size and contents as when the probe was "
+                            + (wrote ? "written to" : "found on") + " the card. So either the probe hasn't run yet, or"
+                            + " it ran and left the file exactly as it was. With the update file removed, open photo mode once, switch"
                             + " the camera off, reconnect, then tap " + q(READ_RESULT) + " again.\n\nWhat the file"
                             + " says:\n" + text;
                 } else if (b != null && onRecord && before == null) {
-                    text = "The app cannot tell whether the probe wrote this file since the last flash: it could not"
-                            + " read the card's SENSOR.TXT when the probe went on it. If you have not opened photo mode"
+                    text = "The app can't tell whether the probe wrote this file since the last flash, because it"
+                            + " couldn't read the card's SENSOR.TXT when the probe went on it. If you haven't opened photo mode"
                             + " since removing the update file, do that first, switch the camera off, reconnect, then"
                             + " tap " + q(READ_RESULT) + " again.\n\nWhat the file says:\n" + text;
                 } else if (b != null && !onRecord) {
-                    text = "The app has no probe write on record for this card, so it cannot tell when this file was"
-                            + " written: it may be from an earlier probe.\n\nWhat the file says:\n" + text;
+                    text = "The app has no record of writing the probe to this card, so it can't tell when this file"
+                            + " was written. It may be from an earlier probe.\n\nWhat the file says:\n" + text;
                 } else {
                     fresh = b != null;      // a file the card did not hold when the probe went on it
                 }
@@ -7136,7 +7172,7 @@ public class MainActivity extends Activity {
     private String decodeSensor(byte[] b) {
         if (b == null) {
             return "No SENSOR.TXT on the card yet.\n\nFlash the sensor-ID probe and remove the update file, then open photo mode on"
-                    + " the camera: it stops there as before, but writes the file first. Then bring the card back and"
+                    + " the camera. It stops there as before, but writes the file first. Then bring the card back and"
                     + " tap " + q(READ_RESULT) + " again.";
         }
         // Current probe (16-bit ID read): 0xA7 0x01, a responder count, then per responder its 7-bit address and two
@@ -7169,7 +7205,8 @@ public class MainActivity extends Activity {
         if ((hi == 0x14 && lo == 0x0A) || (hi == 0x0A && lo == 0x14)) {
             return "Sensor ID " + id + ": the SP140A, the sensor the firmware already drives.";
         }
-        return "Sensor ID " + id + ": a different sensor from the one the firmware drives. Note this pair down.";
+        return "Sensor ID " + id + ": a different sensor from the one the firmware drives. Write down these two bytes, since they name"
+                + " the part.";
     }
 
     /** Decode the bus-scan SENSOR.TXT (see decodeSensor for the layout): which 7-bit addresses answered, and the
@@ -7184,8 +7221,8 @@ public class MainActivity extends Activity {
         final int SP140A = 0x3C;   // 7-bit; bus write address 0x78
         if (hits.isEmpty()) {
             return "The probe scanned every address on the sensor bus and nothing answered.\n\nThat points to a sensor"
-                    + " that is not responding at all \u2014 disconnected, unpowered, or dead \u2014 not a wrong-sensor"
-                    + " mismatch. Open the camera, reseat the sensor's ribbon, and scan again. If it still answers"
+                    + " that isn't responding at all (disconnected, unpowered or dead), not one at the wrong"
+                    + " address. Open the camera, reseat the sensor's ribbon, and scan again. If it still answers"
                     + " nowhere, the sensor or its wiring is a hardware fault no firmware can fix.";
         }
         StringBuilder list = new StringBuilder();
@@ -7203,13 +7240,13 @@ public class MainActivity extends Activity {
             sb.append("A sensor answered at 0x3C (bus 0x78), the address the firmware drives");
             if (idRead) {
                 sb.append(", and its ID reads ").append(idStr)
-                  .append(match ? " \u2014 the SP140A it expects." : ", not the SP140A's 14 0A.");
+                  .append(match ? ", the SP140A it expects." : ", not the SP140A's 14 0A.");
             } else {
                 sb.append(".");
             }
             sb.append("\n\n").append(match
-                    ? "So the sensor is present and is the exact part the firmware expects. The freeze is not a sensor"
-                      + " mismatch \u2014 the cause is elsewhere (power, clock, or a fault past the ID read)."
+                    ? "So the sensor is present and is the exact part the firmware expects. The freeze isn't a sensor"
+                      + " mismatch. The cause is elsewhere: power, the clock, or a fault past the ID read."
                     : "A sensor is present at the expected address, so this is not a missing or wrong-address sensor."
                       + " If the ID is not 14 0A, note it down.");
         } else {
@@ -7217,9 +7254,9 @@ public class MainActivity extends Activity {
             sb.append("A sensor answered at ")
               .append(String.format(java.util.Locale.ROOT, "0x%02X (bus 0x%02X)", a, a << 1))
               .append(", not the 0x3C (bus 0x78) the firmware drives.\n\n")
-              .append("The camera has a different sensor than the restored firmware targets \u2014 it is alive, just at"
-                      + " another address. That is the fixable case: a firmware built for this sensor could work. The"
-                      + " first responder's registers 0x02/0x03 read ").append(idStr).append(". Note the address and"
+              .append("The camera has a different sensor from the one this firmware drives. It answers, just at"
+                      + " another address, so firmware built for it can fix this. The first responder's registers"
+                      + " 0x02/0x03 read ").append(idStr).append(". Note the address and"
                       + " these bytes down.");
         }
         sb.append("\n\nAnswered at: ").append(list).append(".");
@@ -7241,8 +7278,8 @@ public class MainActivity extends Activity {
         final int SP140A = 0x3C;   // 7-bit; bus write address 0x78
         if (addrs.isEmpty()) {
             return "The probe scanned every address on the sensor bus and nothing answered.\n\nThat points to a sensor"
-                    + " that is not responding at all \u2014 disconnected, unpowered, or dead \u2014 not a wrong-sensor"
-                    + " mismatch. Reseat the sensor's ribbon and scan again; if it still answers nowhere, the sensor or"
+                    + " that isn't responding at all (disconnected, unpowered or dead), not one at the wrong"
+                    + " address. Reseat the sensor's ribbon and scan again. If it still answers nowhere, the sensor or"
                     + " its wiring is a hardware fault no firmware can fix.";
         }
         StringBuilder sb = new StringBuilder();
@@ -7253,18 +7290,18 @@ public class MainActivity extends Activity {
             boolean match = r2 == 0x14 && r3 == 0x0A;
             sb.append("A sensor answered at 0x3C (bus 0x78), the address the firmware drives, and its registers"
                     + " 0x02/0x03 read ").append(String.format(java.util.Locale.ROOT, "0x%02X 0x%02X", r2, r3))
-              .append(match ? " \u2014 the SP140A it expects.\n\n" : ", not the SP140A's 14 0A.\n\n")
+              .append(match ? ", the SP140A it expects.\n\n" : ", not the SP140A's 14 0A.\n\n")
               .append(match
-                    ? "So the sensor is present and is the exact part the firmware expects; a freeze is not a sensor"
-                      + " mismatch."
+                    ? "So the sensor is present and is the exact part the firmware expects, and a freeze isn't a"
+                      + " sensor mismatch."
                     : "Something answers at the SP140A address but reports a different ID.");
         } else {
             int a = addrs.get(0);
             sb.append("A sensor answered at ")
               .append(String.format(java.util.Locale.ROOT, "0x%02X (bus 0x%02X)", a, a << 1))
               .append(", not the 0x3C (bus 0x78) the firmware drives.\n\n")
-              .append("The camera has a different sensor than the restored firmware targets \u2014 it is alive, just at"
-                      + " another address. That is the fixable case: a firmware built for this sensor could work.");
+              .append("The camera has a different sensor from the one this firmware drives. It answers, just at"
+                      + " another address, so firmware built for it can fix this.");
         }
         sb.append("\n\nRegister fingerprint (send SENSOR.TXT so the exact part can be named):");
         for (int i = 0; i < count; i++) {
@@ -7292,8 +7329,8 @@ public class MainActivity extends Activity {
         }
         if (addrs.isEmpty()) {
             return "The probe scanned every address on the sensor bus and nothing answered.\n\nThat points to a sensor"
-                    + " that is not responding at all — disconnected, unpowered, or dead. Reseat the sensor's ribbon"
-                    + " and try again; if it still answers nowhere, it is a hardware fault no firmware can fix.";
+                    + " that isn't responding at all (disconnected, unpowered or dead). Reseat the sensor's ribbon"
+                    + " and try again. If it still answers nowhere, it's a hardware fault no firmware can fix.";
         }
         final int SP140A = 0x3C;   // 7-bit; bus write address 0x78
         StringBuilder sb = new StringBuilder();
@@ -7301,7 +7338,7 @@ public class MainActivity extends Activity {
             sb.append("A sensor answered at 0x3C (bus 0x78), the address the firmware drives.\n\n");
         } else {
             sb.append("A sensor answered at ").append(hexAddr(addrs.get(0)))
-              .append(", not the 0x3C (bus 0x78) the firmware drives — alive, just at another address.\n\n");
+              .append(", not the 0x3C (bus 0x78) the firmware drives. It answers, just at another address.\n\n");
         }
         for (int i = 0; i < count; i++) {
             int off = 3 + i * REC;
@@ -7349,18 +7386,18 @@ public class MainActivity extends Activity {
             if (v != first) allSame = false;
         }
         if (allFF) {
-            return "no 16-bit register answered (all FF) — the part likely uses 8-bit register addresses; the probe"
-                    + " can be switched to an 8-bit ID read of 0x00..0x1F and 0xF0..0xFF.";
+            return "no 16-bit register answered (all FF). The part likely uses 8-bit register addresses, and the"
+                    + " probe can be switched to an 8-bit ID read of 0x00..0x1F and 0xF0..0xFF.";
         }
         if (all00) {
-            return "answered, but the 16-bit ID registers all read 00 — the sensor's core may be held unclocked, or"
+            return "answered, but the 16-bit ID registers all read 00. The sensor's core may be held unclocked, or"
                     + " its ID is at a register other than 0x300A/0x3107.";
         }
         if (allSame) {
-            return String.format(java.util.Locale.ROOT, "all registers read %02X — likely the wrong sub-address"
+            return String.format(java.util.Locale.ROOT, "all registers read %02X, likely the wrong sub-address"
                     + " width for this part.", first);
         }
-        return "ID not recognized at 0x300A/0x300B (OmniVision) or 0x3107/0x3108 (SmartSens) — send the file.";
+        return "ID not recognized at 0x300A/0x300B (OmniVision) or 0x3107/0x3108 (SmartSens). Send the file.";
     }
 
     /** Known OmniVision chip IDs (0x300A/0x300B, or 0x300B/0x300C when 0x300A reads 0), small point-and-shoot parts. */
@@ -7461,11 +7498,11 @@ public class MainActivity extends Activity {
                     }
                 }
                 String headline = !all ? "Not everything was removed."
-                        : files.size() == 1 ? "Done: the update file is removed." : "Done: the update files are removed.";
+                        : files.size() == 1 ? "The update file is removed ✓" : "The update files are removed ✓";
                 outcome = headline + "\n" + sb + "\n" + readCard(t).state.afterwards(true) + detail(reasons.toString());
             } finally {
                 finish(op, outcome != null ? outcome : "Removing stopped with an unexpected error. The Camera drive"
-                        + " step shows what the card holds now: do not switch the camera on with this card in it"
+                        + " step shows what the card holds now. Don't switch the camera on with this card in it"
                         + " while it lists an update file.", outcome != null && all);
             }
         });

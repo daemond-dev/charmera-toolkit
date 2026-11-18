@@ -133,7 +133,7 @@ final class CardState {
                     + (problem == null ? "" : "\n" + (NOT_FOUND.equals(problem) ? NOT_FOUND_CAUSE : problem))
                     + "\nThe card may hold an update file. Do not switch the camera on while this card is in it.\n"
                     + "To check the card:\n"
-                    + "• If the camera is off: take the card out, switch the camera on with its power key, wait 10"
+                    + "• If the camera is off: take the card out, switch the camera on with its power button, wait 10"
                     + " seconds, and put the card back in.\n"
                     + "• Connect the camera to the phone.\n"
                     + "• Tap \"" + CHOOSE_BUTTON + "\" and pick the camera's drive again. The Camera drive step then"
@@ -143,10 +143,10 @@ final class CardState {
                     + " card's top folder.";
         }
         if (updateFiles.isEmpty()) {
-            return "The app looked at the card again: its top folder holds no update file.";
+            return "The app looked at the card again. Its top folder holds no update file.";
         }
         boolean one = updateFiles.size() == 1;
-        return "The app looked at the card again: its top folder " + (removing ? "still holds " : "holds ") + names()
+        return "The app looked at the card again. Its top folder " + (removing ? "still holds " : "holds ") + names()
                 + ". " + (removing ? "Tap \"" + REMOVE_BUTTON + "\" again. If it fails again, delete "
                 + (one ? "the file" : "the files") + " with the Files app or on a computer."
                 : "Tap \"" + REMOVE_BUTTON + "\".")

@@ -273,7 +273,7 @@ public final class FlashFlowTest {
         f.driveLeft();
         expect("not seen, pulled: follow More info in the open step 4, the safe order before any reconnect",
                 f.afterUnseenEject(unplugged(ready()))
-                        .equals("Follow More info in step 4: it gives the safe order to reconnect the camera."));
+                        .equals("Open More info in step 4 for the safe order to reconnect the camera."));
     }
 
     /** Round 5 #0: the drive step is done once the file is written, and its line while unplugged follows the stage. */
@@ -339,7 +339,7 @@ public final class FlashFlowTest {
         f.listing();
         see("found, removed without an answer: the check opens", f, l, "done done done done done NOW");
         expect("found and removed unanswered: the folded flash line says so", f.flashSummary(l)
-                .equals("Flash question not answered; the update file is removed."));
+                .equals("Flash question not answered. The update file is removed."));
         // found after an earlier answer in the same run: that answer does not carry over (round 1 #10)
         FlashFlow g = cycleTo(Route.REPAIR, Stage.WRITTEN);
         g.answered(false);
@@ -564,7 +564,7 @@ public final class FlashFlowTest {
         expect("removed on another route: this run's removal is pending a listing", f.stage() == Stage.REMOVING);
         f.listing();
         expect("then listed: the flash step is behind, unanswered", f.stage() == Stage.REMOVED
-                && f.flashSummary(ready()).equals("Flash question not answered; the update file is removed."));
+                && f.flashSummary(ready()).equals("Flash question not answered. The update file is removed."));
         FlashFlow g = cycleTo(Route.PROBE, Stage.ANSWERED);
         g.removalWorked(null);
         g.listing();
@@ -582,7 +582,7 @@ public final class FlashFlowTest {
                 w.stage() == Stage.WRITTEN && w.view(ready()).currentStep() == Step.WRITE
                         && w.view(ready()).locked(Step.FLASH));
         expect("before the answer a card without the file: the write step says the file is gone",
-                w.goneLine().equals("The card no longer lists " + BRINGUP_NAME + ": write it again in step 3."));
+                w.goneLine().equals("The card no longer lists " + BRINGUP_NAME + ". Write it again in step 3."));
         expect("the file gone, unplugged: the next step is the write, never 'flash now'",
                 w.afterUnseenEject(unplugged(ready())).equals(w.goneLine()));
         expect("the file gone, unplugged: still the safe order (the app only knows the last listing)",
@@ -754,7 +754,7 @@ public final class FlashFlowTest {
     /** The flash-stage sentence: the flash is step 4 on Repair, 3 on Probe, 5 on Restore (counted by hand). */
     private static String flashNow(Route r) {
         int n = r == Route.REPAIR ? 4 : r == Route.PROBE ? 3 : 5;
-        return FlashFlow.FLASH_NOW_PREFIX + n + "; its More info gives the safe order to reconnect it.";
+        return FlashFlow.FLASH_NOW_PREFIX + n + ". More info there gives the safe order to reconnect it.";
     }
 
     /** A seeded walk of random events and screens on each route: every state reached keeps the invariants. */

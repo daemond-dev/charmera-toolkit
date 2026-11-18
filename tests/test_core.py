@@ -875,7 +875,7 @@ def test_verify_names_the_build_and_says_what_a_match_proves(tmp_path, synthetic
     p = _named(tmp_path, payload)
     by = {c.name: c for c in verify.verify_update(p, payload, allow_modified=True)}
     assert by["series"].ok and "identifies neither" in by["series"].detail
-    assert by["build"].ok and "the public dump's build" in by["build"].detail and "not whether it fits the camera" in by["build"].detail
+    assert by["build"].ok and "the public dump's build" in by["build"].detail and "says whether it fits" in by["build"].detail
     assert by["stamp-in-file"].severity == "info" and "flashes it again at every power-on" in by["stamp-in-file"].detail
     # a file whose marks sit elsewhere is Charmera firmware of an unknown build: a warning, never a stamp-based pass
     moved = bytearray(payload)
@@ -1348,7 +1348,7 @@ def test_without_stock_a_warning_says_nothing_compares_the_file_with_the_camera(
     p = _named(tmp_path, payload)
     by = _checks(p, payload, allow_modified=True)
     assert by["backup"].severity == "warn" and "nothing here compares the file with the camera's own firmware" in by["backup"].detail
-    assert "cannot be undone" in by["backup"].detail and "no flash" in by["backup"].detail
+    assert "cannot be undone" in by["backup"].detail and "A backup is the only way back" in by["backup"].detail
     # the known table without --stock is a WARN, as in the app, never INFO
     assert by["sensor-table"].severity == "warn"
     backup = tmp_path / "backup.bin"

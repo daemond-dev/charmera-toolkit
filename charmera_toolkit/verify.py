@@ -217,12 +217,13 @@ WITHDRAWN = {
 
 # --- The sentences the reference lines carry -----------------------------------------------------------------------
 
-NOT_THE_CAMERA = ("a build match says which public image the file was made from, not whether it fits the camera it goes "
-                  "into; only a dump of that camera's own chip read before it was ever flashed does")
+NOT_THE_CAMERA = ("a build match says which public image the file was made from. Only a backup of the camera's own chip, "
+                  "read before it was ever flashed, says whether it fits")
 
 NO_BACKUP = ("no backup of this camera was given (--stock), so nothing here compares the file with the camera's own "
-             "firmware, and a file that does not fit the camera cannot be undone. No backup of your own camera, no flash: "
-             "read its chip first (docs/01-FIRST-FLASH.md, step 1) and give that read as --stock")
+             "firmware. Know what this camera runs before you flash it: read its chip (docs/01-FIRST-FLASH.md, step 1) "
+             "and give that read as --stock, or run `charmera identify` on its card's photos. A backup is the only way "
+             "back: without one, a file that does not fit the camera cannot be undone")
 
 VECTOR_BROKEN = ("a camera whose reset vector is broken does not start, so the card updater can never run on it again, and "
                  "only a chip programmer brings it back (refusing; no flag accepts it)")
@@ -895,7 +896,8 @@ def handler(args) -> int:
     elif stock is None:
         print("        No --stock was given, so nothing above compares the file with that camera's own firmware.")
     if donor is None:
-        print("        No backup of that camera's own flash chip, no flash: without one, a file that does not fit cannot be undone.")
+        print("        Know what that camera runs before you flash it (a backup of its chip, or `charmera identify`). A backup")
+        print("        is the only way back: without one, a file that does not fit cannot be undone.")
     return 0
 
 

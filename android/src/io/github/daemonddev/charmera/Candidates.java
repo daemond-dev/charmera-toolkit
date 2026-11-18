@@ -387,69 +387,67 @@ public final class Candidates {
      * repairVersions().
      */
     public enum Kind {
-        RESTORE(true, Base.STOCK, null, "The stock restore file: the first part of the public dump (build v006), under its published"
-                + " name. Made from the cleaned copy the app downloads, it has the factory settings and no stored photos;"
-                + " made from the original dump, it is a copy of one working camera's memory, with that camera's settings"
-                + " and its two stored photos. Several owners report working cameras after flashing it; what their cameras ran before is"
-                + " not known. After it was flashed, one original-series camera could no longer take pictures; the"
-                + " likely cause is a sensor it does not drive.",
+        RESTORE(true, Base.STOCK, null, "The stock restore file is the first part of the public dump (build v006), under its published"
+                + " name. Made from the cleaned copy the app downloads, it has the factory settings and no stored photos."
+                + " Made from the original dump, it's a copy of one working camera's memory, with that camera's settings"
+                + " and its two stored photos. Several owners report working cameras after flashing it, but what their"
+                + " cameras ran before isn't known. After it was flashed, one original-series camera could no longer take"
+                + " pictures. The likely cause is a sensor it doesn't drive.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906",
                 // from the cleaned copy: the same bytes as candidate C (stock software, factory settings, no photos)
                 "JH_5408202610261427_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
-        PROBE(true, Base.STOCK, null, "The sensor-ID probe: the stock restore file with a small reviewed patch. When the camera enters"
-                + " photo mode it walks the sensor bus, and for each address that answers it reads the 16-bit chip-ID"
+        PROBE(true, Base.STOCK, null, "The sensor-ID probe is the stock restore file with a small reviewed patch. When the camera enters"
+                + " photo mode, it walks the sensor bus. For each address that answers, it reads the 16-bit chip-ID"
                 + " registers (0x3000..0x301F and 0x3100..0x310F) and writes them to SENSOR.TXT at the root of the"
-                + " card, then stops as the camera does now. It"
-                + " does not fix the camera: it reports which image sensor is on the bus and at which address, so a"
-                + " wrong-sensor mismatch can be told apart and the exact part named. Its boot"
-                + " code, update code and image-sensor table are the stock restore file's byte for byte; only a dead"
-                + " debug routine and the one call that writes the sensor set-up are changed. The stock restore file"
-                + " (above) puts the camera back.",
+                + " card, then stops as the camera does now. It doesn't fix the camera. It reports which image sensor"
+                + " is on the bus and at which address, so you can tell a wrong sensor from a dead one and name the"
+                + " exact part. Its boot code, update code and image-sensor table are the stock restore file's byte for"
+                + " byte. Only a dead debug routine and the one call that writes the sensor set-up are changed. The"
+                + " stock restore file (above) puts the camera back.",
                 "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b",
                 "JH_5408202611082300_0FB74B1C.bin", "02e2729cffa4dd835f2b138b4ff4df9be89baecfb96f473665dc4b3411e7d2d5"),
-        BRINGUP(true, Base.STOCK, "public build + OV9732 port", "The OV9732 bring-up (experimental): drives the OmniVision OV9732 fitted in place of the SP140A"
-                + " the firmware was built for, with a 180° flip, a blue white-balance lift, and scene-adaptive"
-                + " exposure — the stock firmware's own per-frame auto-exposure, redirected to the OV9732's exposure"
-                + " and gain registers so the picture tracks the light instead of staying fixed and dark, and a black"
-                + " level matched to the camera's image processor so shadows are not crushed, plus colour and"
-                + " bright-light exposure tuned against the stock camera on a colour card, and two new setup-menu rows"
-                + " after FORMAT: Volume (system sounds, 0 to 8; it also sets playback volume) and LED (the automatic"
-                + " flash light: On as before, or Off). Boot and update code are"
-                + " the stock restore file's, byte for byte. The stock restore file does not drive the OV9732: with it,"
-                + " photo and video stop working on this camera. The way back from this version is the previous"
-                + " version's file (v0.23, JH_5408202611110023_0F061F28.bin), which this app does not make: keep a"
-                + " copy of the file that works (Advanced, Save a copy to the phone) before you update the app or"
-                + " flash a newer version. Like any update, the flash itself must not be interrupted.",
+        BRINGUP(true, Base.STOCK, "public build + OV9732 port", "The OV9732 port makes the public build, made for the SP140A, drive an OmniVision"
+                + " OV9732 sensor. It flips the picture 180°, lifts blue in the white balance, and"
+                + " redirects the stock firmware's own per-frame auto-exposure to the OV9732's exposure and gain"
+                + " registers, so the picture follows the light instead of staying fixed and dark. Black level is"
+                + " matched to the image processor so shadows aren't crushed, and colour and bright-light exposure are"
+                + " tuned against a stock camera on a colour card. It adds two setup-menu rows after FORMAT: Volume"
+                + " (system sounds, 0 to 8, which also sets playback volume) and LED (the automatic flash light, On as"
+                + " before or Off). Boot and update code are the stock restore file's, byte for byte. The stock restore"
+                + " file doesn't drive the OV9732, so it stops photo and video working on this camera. The way back is"
+                + " v0.23's file (JH_5408202611110023_….bin), which the app makes under Custom: pick base and mods"
+                + " (base v006, OV9732 port only). Like any update, the flash itself must not be interrupted.",
                 "JH_5408202611120024_0F0613AC.bin", "0919c5d857f855b11424407211a132ac61f4c91852e01af583bd6b76c85b1c69",
                 "JH_5408202611120024_0FB7027B.bin", "8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b"),
-        V025(true, Base.FACTORY, "factory firmware + Volume/LED", "Firmware v0.25: this camera's own factory firmware"
+        V025(true, Base.FACTORY, "factory firmware + Volume/LED", "Firmware v0.25 is this camera's own factory firmware"
                 + " (build v012, read off its chip), which drives the OV9732 itself, with v0.24's two setup-menu rows"
-                + " after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light: On or Off). The app"
+                + " after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off). The app"
                 + " makes it on the phone from your factory dump, which never leaves the phone. The camera starts with"
                 + " Volume 5 and LED On. Photos carry no EXIF date. The way back is v0.24's file"
                 + " (JH_5408202611120024_….bin), which this app makes. Like any update, the flash itself must not"
                 + " be interrupted.",
                 "JH_5408202611130025_0FA3BF37.bin", "a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0",
                 "JH_5408202611130025_0FB76FE9.bin", "bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a"),
-        V026(true, Base.FACTORY, "factory firmware + Volume/LED + EXIF", "Firmware v0.26: v0.25 (this camera's own"
+        V026(true, Base.FACTORY, "factory firmware + Volume/LED + EXIF", "Firmware v0.26 is v0.25 (this camera's own"
                 + " factory firmware, build v012, with the Volume and LED rows after FORMAT) plus EXIF in every photo:"
                 + " Make Kodak, Model Charmera, and the date and time from the camera's clock. Set the date in the"
-                + " camera's setup menu first: an unset clock gives 2025:01:01. The app makes it on the phone from your"
+                + " camera's setup menu first, because an unset clock gives 2025:01:01. The app makes it on the phone from your"
                 + " factory dump, which never leaves the phone. The camera starts with Volume 5 and LED On. The way back"
                 + " is v0.25's or v0.24's file, both in the version menu. Like any update, the flash itself must not be"
                 + " interrupted.",
                 "JH_5408202611130026_0FA38C7C.bin", "617770c3f3c9d880f93f06043090d3d07909c845633ca08e9c183deb44fa06d2",
                 "JH_5408202611130026_0FB73D2E.bin", "be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738"),
-        V027(true, Base.FACTORY, "v0.26 + boot to last mode + capture flash", "Firmware v0.27: v0.26 (this camera's"
+        V027(true, Base.FACTORY, "v0.26 + boot to last mode + capture flash", "Firmware v0.27 is v0.26 (this camera's"
                 + " own factory firmware, build v012, with the Volume and LED rows and EXIF dates) plus two changes."
-                + " Power-on goes straight into the camera mode last used, Picture or Video (Picture the first time);"
-                + " a short press of the power button still opens the mode menu. And when a photo is taken the screen"
-                + " flashes black under the icons for a moment, so a shot shows even at Volume 0. Both are new and"
-                + " tested only in an emulator, not yet on a camera. The way back is v0.26's file, in the version menu."
+                + " Power-on goes straight into the mode you last used, photo or video (photo the first time), instead"
+                + " of the SELECT MODE screen. A short press of the power button still opens it. And when you take a photo, the"
+                + " screen flashes black under the icons for a moment, so you can see the shot even at Volume 0. Both"
+                + " were tested in an emulator, then on a camera. The way back is v0.26's"
+                + " file, in the version menu."
                 + " Like any update, the flash itself must not be interrupted.",
                 "JH_5408202611170027_0FA38996.bin", "108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968",
                 "JH_5408202611170027_0FB73A48.bin", "89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639"),
-        C(false, Base.STOCK, null, "Candidate C (withdrawn: the same software as the stock restore file with factory settings; a camera"
+        C(false, Base.STOCK, null, "Candidate C (withdrawn: the same software as the stock restore file with factory settings. A camera"
                 + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
         A(false, Base.STOCK, null, "Candidate A (withdrawn: the same software as C with camera sounds off).",
@@ -515,9 +513,9 @@ public final class Candidates {
             return summary != null;
         }
 
-        /** Its row in the Repair route's version menu: "v0.25 \u2014 factory firmware + Volume/LED". */
+        /** Its row in the Repair route's version menu: "v0.25: factory firmware + Volume/LED". */
         public String menuText() {
-            return version + " \u2014 " + summary;
+            return version + ": " + summary;
         }
 
         /** The kinds the app offers, in order. */
@@ -744,6 +742,22 @@ public final class Candidates {
     }
 
     /**
+     * The withdrawn candidate (C, A or B) these bytes are, by SHA-256, or null. Never the stock restore file: the one
+     * made from the cleaned copy has candidate C's bytes, and it is the restore file. WriteGate refuses these.
+     */
+    public static Kind withdrawn(String sha256) {
+        if (sha256 == null || Kind.RESTORE.matches(sha256)) {
+            return null;
+        }
+        for (Kind k : Kind.values()) {
+            if (!k.offered && k.matches(sha256)) {
+                return k;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Whether a file is one the Repair route writes, by SHA-256: a Repair version or any reviewed build of the recipe
      * table, whatever sensor it drives. Not the sensor-ID probe (the Probe route's) and not the stock restore file
      * (stock v006, the Restore route's).
@@ -796,7 +810,7 @@ public final class Candidates {
                 lines.add(new UpdateCheck.Line(UpdateCheck.Level.WARN, l.name, "Wrong sensor?", "the firmware in your"
                         + " backup drives the image sensor differently from " + s.label() + ", which drives the "
                         + Recipe.sensorOf(s) + ". If the backup is this camera's, the camera boots with this file but"
-                        + " cannot take pictures, until you flash firmware that fits. It is a reviewed file, so the app"
+                        + " can't take pictures until you flash firmware that fits. It's a reviewed file, so the app"
                         + " writes it if you go ahead.", l.text + (l.detail.isEmpty() ? "" : " " + l.detail)));
             } else {
                 lines.add(l);
@@ -814,9 +828,9 @@ public final class Candidates {
      * (name, sum, size, start of the file, final erase, built-in parts...) stands as UpdateCheck gave it.
      */
     static UpdateCheck.Result asFactory(UpdateCheck.Result r, Kind k) {
-        return softened(r, r, "the app cannot check this part. The file is firmware " + k.version + ", made from the"
-                + " camera's own factory firmware: a build the app does not know, which drives the OV9732 without an"
-                + " SP140A-style sensor table. It is the reviewed file, identified by its SHA-256.");
+        return softened(r, r, "the app can't check this part. The file is firmware " + k.version + ", made from the"
+                + " camera's own factory firmware. That's a build the app doesn't know, and it drives the OV9732 without"
+                + " an SP140A-style sensor table. It's the reviewed file, identified by its SHA-256.");
     }
 
     /**
@@ -824,10 +838,10 @@ public final class Candidates {
      * asFactory's) or v008_test, a later SP140A build whose marks the app does not know either.
      */
     static UpdateCheck.Result asOtherBuild(UpdateCheck.Result r, Recipe.Selection s, UpdateCheck.Result alone) {
-        String what = Recipe.V012.equals(s.base) ? "made from the camera's own factory firmware: a build the app does"
-                + " not know, which drives the OV9732 without an SP140A-style sensor table"
-                : "made from build " + s.base + ", a later SP140A build the app does not know";
-        return softened(r, alone, "the app cannot check this part. The file is " + s.label() + ", " + what + ". It is the"
+        String what = Recipe.V012.equals(s.base) ? "made from the camera's own factory firmware. That's a build the app"
+                + " doesn't know, and it drives the OV9732 without an SP140A-style sensor table"
+                : "made from build " + s.base + ", a later SP140A build the app doesn't know";
+        return softened(r, alone, "the app can't check this part. The file is " + s.label() + ", " + what + ". It's the"
                 + " reviewed file, identified by its SHA-256.");
     }
 

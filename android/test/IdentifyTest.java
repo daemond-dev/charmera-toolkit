@@ -41,7 +41,7 @@ public final class IdentifyTest {
                 && r.caveats.contains(Identify.CAVEAT_AFTER_FLASH));
         expect("the v008 caveat says both are stock SP140A builds and either base works",
                 Identify.CAVEAT_V008.contains("stock builds for SP140A")
-                        && Identify.CAVEAT_V008.contains("either base works the same"));
+                        && Identify.CAVEAT_V008.contains("suggests base v006 for either"));
         expect("the flash caveat says photos show the firmware that took them",
                 Identify.CAVEAT_AFTER_FLASH.startsWith("Photos show the firmware that took them")
                         && Identify.CAVEAT_AFTER_FLASH.contains("freezes in Photo mode")
@@ -156,9 +156,9 @@ public final class IdentifyTest {
                 && r.family == Identify.Base.V006_FAMILY && r.confidence == Identify.Confidence.LOW
                 && r.oldestKind == PhotoId.Kind.PUBLIC_FAMILY && r.newestKind == PhotoId.Kind.FACTORY_EXIF);
         expect("two families say so, with both dates", r.notStock.size() == 2 && r.notStock.get(0).equals(
-                "This camera does not look stock: photos from two firmware families: the v006 family up to "
-                        + Identify.date(card.get(3), UTC) + ", the v012 family from " + Identify.date(card.get(4), UTC)
-                        + ": the camera was flashed in between, or the card holds photos from two cameras."));
+                "This camera does not look stock: photos from two firmware families, the v006 family up to "
+                        + Identify.date(card.get(3), UTC) + " and the v012 family from " + Identify.date(card.get(4), UTC)
+                        + ". Either the camera was flashed in between, or the card holds photos from two cameras."));
         expect("and the EXIF mod as well, without weakening the base", r.notStock.get(1).contains("our EXIF mod")
                 && r.conclusion.contains("Base to build on: v006 (from the oldest photos")
                 && !r.conclusion.contains("Base to build on: v012"));
@@ -187,7 +187,7 @@ public final class IdentifyTest {
                         + " v012 family " + Identify.date(card.get(0), UTC) + " to " + Identify.date(card.get(0), UTC)
                         + "; the v006 family " + Identify.date(card.get(1), UTC) + " to " + Identify.date(card.get(1), UTC)
                         + "; the v012 family " + Identify.date(card.get(2), UTC) + " to " + Identify.date(card.get(2), UTC)
-                        + "): the camera was flashed more than once, or the card holds photos from more than one"
+                        + "). Either the camera was flashed more than once, or the card holds photos from more than one"
                         + " camera."));
 
         // photos with no file time are left out of the dating: never read, counted and named
@@ -221,7 +221,7 @@ public final class IdentifyTest {
         }));
         r = Identify.identify(card, UTC);
         expect("a card of videos has no base", r.videos == 1 && r.photos == 0 && r.base == Identify.Base.UNKNOWN
-                && r.conclusion.contains("Videos do not carry"));
+                && r.conclusion.contains("Videos don't carry"));
         card.add(photo("DCIM/PICT0001.jpg", T0 - DAY, bare));
         card.add(new Identify.Entry("DCIM/MOVI0002.avi", T0 + DAY, true, () -> pub));
         r = Identify.identify(card, UTC);
@@ -290,12 +290,12 @@ public final class IdentifyTest {
                 Identify.sample(40, 10, 8, 39).toString().equals("[0, 4, 8, 9, 13, 17, 22, 26, 30, 35, 39]")
                         && r.scanned == 11 && r.capped && r.recognised == 9);
         expect("the headers read are the end searches' and the sample's", reads == 17 && r.headersRead == 17
-                && r.other == 8 && any(r.evidence, "read: 17 (11 of them for the families)"));
+                && r.other == 8 && any(r.evidence, "read 17 (11 of them for the families)"));
         expect("the change-over falls between the same photos as identify.py's", r.changes.size() == 1
                 && "DCIM/PICT0027.jpg".equals(r.changes.get(0).before.path)
                 && "DCIM/PICT0031.jpg".equals(r.changes.get(0).after.path)
                 && r.notStock.get(0).contains("the v012 family up to " + Identify.date(card.get(26), UTC)
-                + ", the v006 family from " + Identify.date(card.get(30), UTC)));
+                + " and the v006 family from " + Identify.date(card.get(30), UTC)));
         expect("a capped change says its dates are approximate", r.confidence == Identify.Confidence.LOW
                 && r.confidenceWhy.endsWith("; read 11 of 40 dated photo headers, so the change-over dates are"
                 + " approximate"));

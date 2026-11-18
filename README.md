@@ -1,18 +1,20 @@
 # Charmera toolkit
 
 Tools for backing up, inspecting, verifying, recovering and modding the Kodak Charmera keychain camera
-(original 2025 series, Generalplus GPCV2247F, 2 MiB Puya PY25D16HB SPI flash). Windows and Linux, Python 3.9+,
-standard library only.
+(original 2025 series, Generalplus GPCV2247F, 2 MiB Puya PY25D16HB SPI flash). It runs on Windows, macOS and Linux with
+Python 3.9+ and needs nothing outside the standard library.
 
-Status: every command is tested on synthetic images, and on real firmware when the public files are given
-([Tests](#tests) says which). One camera has been flashed with files from the public dump, and it did not fit: the
-camera boots but cannot take pictures ([what happened](docs/FIRST-FLASH-INCIDENT.md)). The rule that follows: **no
-backup of your own camera, no flash.** The app holds to it from version 0.5, except for the reviewed files (below);
-on a computer `stage` warns and leaves the stop to you (the [ground rules](#commands) below say exactly what each
-command does). [Flash candidates](docs/03-FLASH-CANDIDATES.md) records the withdrawn files and what the flashes showed.
+Every command is tested on synthetic images, and on real firmware when you point the tests at the public files
+([Tests](#tests) says which). One camera has been flashed with files from the public dump, and they didn't fit it:
+the camera boots but can't take pictures ([what happened](docs/FIRST-FLASH-INCIDENT.md)). So **know what your camera
+runs before you flash**, from a backup of its chip or from the Identify route (`charmera identify`). Without a backup,
+`stage` warns (it doesn't use Identify), and the app warns unless Identify confirms the sensor family for a reviewed
+build. Neither refuses. A backup is still the only way back if a flash goes wrong. The
+[ground rules](#commands) below say what each command does about this, and
+[Flash candidates](docs/03-FLASH-CANDIDATES.md) lists the withdrawn files and what the flashes showed.
 
-**Start with [The first flash](docs/01-FIRST-FLASH.md).** It walks through backup, choosing a file, verifying,
-putting it on the card, flashing and undoing, and links to every other document at the step where you need it.
+Start with [The first flash](docs/01-FIRST-FLASH.md). It goes through the backup, choosing a file, verifying it,
+putting it on the card, flashing and undoing, and links to each of the other documents at the step where you need it.
 
 ```
 pip install -e .
@@ -21,58 +23,68 @@ charmera --help
 
 ## Commands
 
-Examples for every command are in the [Command reference](docs/07-USAGE.md).
+The [Command reference](docs/07-USAGE.md) has examples for every command.
 
 | Command | Writes to | What it does |
 |---|---|---|
 | `inspect` | nothing | Identify a dump or update file: build, hashes, sounds, settings, stored photos. |
-| `verify` | nothing | Gate an update file before it goes on a card: name checksum, stamp, size and erase rule, build, diff against stock. |
-| `diff` | nothing | Compare two images region by region; explains settings and resource changes. |
+| `verify` | nothing | Check an update file before it goes on a card: name checksum, stamp, size and erase rule, build, diff against stock. |
+| `diff` | nothing | Compare two images region by region, and explain settings and resource changes. |
 | `sounds` | a file | List, extract, mute or replace the five UI sounds. |
-| `settings` | a file | Show the record the camera will load, or write one with new auto-off, standby, volume values. |
+| `settings` | a file | Show the record the camera will load, or write one with new auto-off, standby and volume values. |
 | `tweak` | a file | Experimental start-up and power-off byte patches, each checked against the stock bytes. |
 | `frames` | a file | List, extract, preview or replace the four photo frames (PNG in and out, budgets checked). |
-| `resources` | nothing / a file | List or extract every resource entry; replace a JPEG resource such as the boot logo. |
+| `resources` | nothing / a file | List or extract every resource entry, or replace a JPEG resource such as the boot logo. |
 | `pack` | a file | Turn an image into a correctly named update file (0x1E0000 bytes, or 0x169000 like the film-mods files), optionally with settings and photos blanked. |
-| `stage` | the card | Re-verify an update file against your backup, copy it to the card root and read it back. |
-| `card-check` / `card-fix` | nothing / the card | Diagnose and fix the exFAT dirty-bit problem that stops phones reading the card. |
+| `stage` | the card | Verify an update file against your backup again, copy it to the card root and read it back. |
+| `card-check` / `card-fix` | nothing / the card | Find and fix the exFAT dirty-bit problem that stops phones reading the card. |
 | `exif-fix` | copies of photos | Repair the camera's broken EXIF dates and AVI dates on copies, never on the card. |
-| `photo-id` | nothing | Say what a photo's header shows about the firmware that wrote it, from the header alone; a photo another program saved again says nothing. |
+| `photo-id` | nothing | Say what a photo's header shows about the firmware that wrote it, from the header alone. A photo another program saved again says nothing. |
 | `identify` | nothing | Read a card's photo headers and say which stock firmware the camera runs, and so which base to build on. |
 | `sensor-read` | nothing | Say what the sensor-ID probe's SENSOR.TXT means. |
-| `build` | a file | Make a firmware file from a base (v006, v008_test, v012) and chosen mods: the same recipes as the app, written only when the result is the reviewed file. |
+| `build` | a file | Make a firmware file from a base (v006, v008_test, v012) and the mods you pick, with the same recipes as the app. It writes only when the result is the reviewed file. |
 | `probe` / `backup` / `restore` | nothing / files / the chip | CH341A full-flash backup and restore through flashrom. |
 
-On a phone, the [Charmera Card app](android/README.md) does the card part with no computer: it makes the published
+On a phone, the [Charmera Card app](android/README.md) does the card part without a computer. It makes the published
 stock restore file from the public stock dump, compares it with a dump of your own camera's chip, and puts it on the
-camera's card over the USB-C cable. Every reviewed file (the sensor-ID probe, the
-restore file, v0.23 to v0.27 and every Custom combination of a base and its mods) is written without that dump; the
-app warns when nothing confirms which firmware the camera runs, and leaves the call to you. A file it does not know
-needs the dump
-([Using an Android phone](docs/06-ANDROID.md#the-app)). The current version, 0.27, opens on a Home screen with one button per route: Back
-up photos, Flash custom firmware, Identify the image sensor, Restore stock firmware and Test shots; Restore stock
-firmware begins with "Choose this camera's backup"
+camera's card over the USB-C cable. It writes every reviewed file (the sensor-ID probe, the restore file, v0.23 to
+v0.27 and every Custom combination of a base and its mods) without that dump, and warns when nothing confirms which
+firmware the camera runs. It writes a file it doesn't know without the dump too, with a loud warning that this
+project didn't review it and nothing compared it with this camera's own firmware
+([Using an Android phone](docs/06-ANDROID.md#the-app)).
+
+The current version, 0.30, opens on a Home screen with one button per route: Back up photos, Identify this camera's
+firmware, Flash custom firmware, Identify the image sensor, Restore stock firmware and Test shots. Restore stock
+firmware starts with "Choose this camera's backup"
 ([download the APK](https://github.com/daemond-dev/charmera-toolkit/releases/download/android-app/charmera-card.apk);
-versions and status in [the app's README](android/README.md)).
-Version 0.4, published before 0.5, had no backup step and did not refuse the withdrawn candidates C, A and B; it was
-taken down on 2026-11-06, and if you still have it installed, do not flash with it. The app cannot tell whose chip a
-dump came from: it refuses the public dumps (the two public stock dumps, the stock dump's cleaned copy and the cleaned copy of the factory build v012) and any read named as unverified (`.unverified-read<n>.bin`),
-so give it only a dump read from this camera with a clip, from two reads that agreed.
+versions and status are in [the app's README](android/README.md)).
+
+Version 0.4, published before 0.5, had no backup step and didn't refuse the withdrawn candidates C, A and B. It was
+taken down on 2026-11-06. If you still have it installed, don't flash with it.
+
+The app can't tell whose chip a dump came from. It refuses the public dumps (the two public stock dumps, the stock
+dump's cleaned copy and the cleaned copy of the factory build v012) and any read named as unverified
+(`.unverified-read<n>.bin`), so only give it a dump read from this camera with a clip, from two reads that agreed.
 
 Ground rules, and what each command does about them:
 
-- No backup of your own camera, no flash. Whether a firmware fits a camera cannot be told from the file, the version
-  stamp or the body. A dump of the camera's own chip read before it was ever flashed is the one file known to fit it;
-  any read of the chip is the way back to what it held when it was read, but a read taken after a flash shows what the
-  camera runs now, not what fits it. `verify --stock <that dump>` is the one check that compares a file with your
-  camera, and `--stock` must be a complete read of a chip (exactly 2 MiB, starting with `SPII`, with the build string
-  and the stamp). The app writes the reviewed files above without a backup on record, with a warning when nothing
-  confirms what the camera runs; a file it does not know needs one. `stage`
-  does not refuse: without `--stock` it shows a WARN line saying that no backup of this camera was given, so nothing
-  compares the file with its own firmware and a file that does not fit cannot be undone, says the same in its plan,
-  and still writes a file that passes (the owner's decision of 2026-11-06). Give it `--stock` every time.
-- Read-only by default. Nothing is written to a card, a chip or a camera without a typed confirmation: `stage`, the
-  one command that puts a file on a card, and `card-fix` ask you to type the target back, and `restore` waits for the
+- Know what your camera runs before you flash: a backup of its chip, or the Identify route (see above). Make a
+  backup, since it's the only way back.
+
+  You can't tell from the file, the version stamp or the body whether a firmware fits a camera. The one file known to
+  fit it is a dump of its own chip read before it was ever flashed. Any read of the chip gets you back to what it held
+  when it was read, but a read taken after a flash shows what the camera runs now and says nothing about what fits it.
+  `verify --stock <that dump>` is the one check that compares a file with your camera, and `--stock` must be a
+  complete read of a chip (exactly 2 MiB, starting with `SPII`, with the build string and the stamp).
+
+  The app writes the reviewed files above without a backup, with a warning when nothing confirms what the camera
+  runs. It writes a file it doesn't know with a loud warning that this project didn't review it and it wasn't compared
+  with this camera's firmware. If you've chosen a backup, that file is checked against it.
+
+  Without `--stock`, `stage` shows a WARN line but still writes a file that passes
+  ([details](docs/04-STAGE.md#what-it-does-in-order)). Give it `--stock` every time.
+- Read-only by default. Nothing is written to a card, a chip or a camera without a typed confirmation. `stage` (the
+  one command that puts a file on a card) and `card-fix` ask you to type the target back, and `restore` waits for the
   word RESTORE. `restore` also reads the chip twice before it writes, keeps that read in its `--out` folder as a
   backup, and has flashrom write a private copy of the bytes it checked. `pack` refuses an `--out` that is a drive
   root, a mount point or on removable media, or that holds a DCIM folder or another `JH_*.bin`. The mod commands
@@ -80,27 +92,28 @@ Ground rules, and what each command does about them:
   (`JH_*.bin`, in any letter case, also with trailing dots or spaces) and an `--out` in a folder that holds a DCIM
   folder or a `JH_*.bin`.
 - Anything that produces a flashable or modified image needs an explicit flag and prints its plan first.
-- `pack` refuses an input without the Charmera build marks. `verify` names a build by a fingerprint over its bytes
-  (never by the version stamp, which two different builds share) and says what a match does and does not prove. It
-  accepts only the two update sizes in use, 0x1E0000 and 0x169000 bytes: any other size is a FAIL unless
-  `--allow-odd-size` is given, and `stage` never gives it. It names the block the updater's final erase hits.
-- No Kodak or Reto firmware is distributed here. The tools work on your own backup; upstream files are referenced
-  by URL and hash in the [Research report](docs/13-PHASE1-REPORT.md).
+- `pack` refuses an input without the Charmera build marks. `verify` names a build by a fingerprint over its bytes,
+  never by the version stamp (two different builds share one), and says what a match does and doesn't prove. It
+  accepts only the two update sizes in use, 0x1E0000 and 0x169000 bytes. Any other size is a FAIL unless
+  `--allow-odd-size` is given, and `stage` never gives it. It also names the block the updater's final erase hits.
+- No Kodak or Reto (the Charmera's maker, under licence from Kodak) firmware is distributed here. The tools work on
+  your own backup, and upstream files are referenced by URL and hash in the
+  [Research report](docs/13-PHASE1-REPORT.md).
 
 ## Documentation
 
-In reading order; the [docs index](docs/README.md) has the same list. Each document links to the previous and
-next one, and to the others where it mentions them.
+In reading order. The [docs index](docs/README.md) has the same list. Each document links to the one before and
+after it, and to the others where it mentions them.
 
 Before and during a flash:
 
-1. [The first flash](docs/01-FIRST-FLASH.md): start here; the whole path, with the point of no return marked.
-2. [Recovery](docs/02-RECOVERY.md): read before you flash; the SD updater and CH341A routes back, firmware that does
-   not fit the camera, and the donor route.
+1. [The first flash](docs/01-FIRST-FLASH.md): start here. The whole path, with the point of no return marked.
+2. [Recovery](docs/02-RECOVERY.md): read it before you flash. The SD updater and CH341A routes back, firmware that
+   doesn't fit the camera, and the donor route.
 3. [Flash candidates](docs/03-FLASH-CANDIDATES.md): the three withdrawn files, their hashes, what each changed and what
    the flashes on one camera showed.
 4. [Putting the file on the card](docs/04-STAGE.md): the `stage` command and what each refusal means.
-5. [SD card problems](docs/05-CARDS.md): why phones reject a card the camera has used, and the fix.
+5. [SD card problems](docs/05-CARDS.md): why Android phones reject a card the camera has used, and the fix.
 6. [Using an Android phone](docs/06-ANDROID.md): what a phone can do and what needs a computer.
 
 Commands and mods:
@@ -118,7 +131,7 @@ Reference and background:
 
 Repairing a camera flashed with firmware for the other sensor:
 
-14. [OV9732 repair scope](docs/14-OV9732-REPAIR-SCOPE.md): why the public firmware cannot drive an OV9732 camera.
+14. [OV9732 repair scope](docs/14-OV9732-REPAIR-SCOPE.md): why the public firmware can't drive an OV9732 camera.
 15. [OV9732 exposure, colour and white balance](docs/15-OV9732-AE-WB-FLASH-PORT.md): each bring-up version and what it measured.
 
 ## Tests
@@ -129,31 +142,31 @@ python -m pytest -q
 CHARMERA_STOCK_IMAGE=/path/to/charmera-v006-2025-10-14-clean.bin python -m pytest -q   # also runs the tests on real firmware
 ```
 
-Without the variables the tests use synthetic images only, and every test on real firmware is skipped. The public
-firmware files are kept, unchanged or cleaned of their owners' settings and photos, in three repositories:
+Without the variables, the tests use synthetic images only and skip every test on real firmware. The public
+firmware files are kept in three repositories, either unchanged or cleaned of their owners' settings and photos:
 [v006](https://github.com/the-dumping-grounds/charmera-firmware-v006),
 [v008_test](https://github.com/the-dumping-grounds/charmera-firmware-v008_test) and
 [v012](https://github.com/the-dumping-grounds/charmera-firmware-v012). CI downloads them from there at fixed commits
-and checks their SHA-256:
+and checks their SHA-256.
 
 - `CHARMERA_STOCK_IMAGE`: the public stock dump. CI uses its cleaned copy, `charmera-v006-2025-10-14-clean.bin`
-  (SHA-256 `75b911e9…`); the original, `dumps/charmera_stock_latest.bin` from benbadio/keychain-camera-plus at commit
-  209c25a (SHA-256 `cc3b4b2f…`), works too, and only it runs the few tests on that camera's own settings history and
-  two stored photos (they skip with the cleaned copy). The image tests in `test_core`, `test_stage`, `test_frames`,
-  `test_resources`, `test_exif`, `test_photo_id` and `test_android` run on it and expect what that dump holds (the
-  public build's fingerprints, its frames, resources, photo header templates and stored photos), and all of
+  (SHA-256 `75b911e9…`). The original, `dumps/charmera_stock_latest.bin` from benbadio/keychain-camera-plus at commit
+  209c25a (SHA-256 `cc3b4b2f…`), works too, and only the original runs the few tests on that camera's own settings
+  history and its two stored photos (they skip with the cleaned copy). The image tests in `test_core`, `test_stage`,
+  `test_frames`, `test_resources`, `test_exif`, `test_photo_id` and `test_android` run on it and expect what that dump
+  holds (the public build's fingerprints, its frames, resources, photo header templates and stored photos). All of
   `test_preflight` rebuilds the candidates and the stock restore file from it, compares them with the hashes in
   [Flash candidates](docs/03-FLASH-CANDIDATES.md), and checks that padded, cut-off or damaged files are refused before
-  a card. Point it at that dump, not at your own backup: a backup of another build fails them, which is no fault of the
-  toolkit, and a backup read after the camera was flashed with the public restore file passes them, which says only
-  that the camera now runs the public build, not that it fits.
+  they reach a card. Point it at that dump, not at your own backup. A backup of another build fails these tests, which
+  is no fault of the toolkit. A backup read after a flash with the public restore file passes them too
+  ([why that proves nothing](docs/01-FIRST-FLASH.md#after-a-flash)).
 - `CHARMERA_FILM_MODS_RESTORE`: the film-mods project's public restore file (release Charmera_Restore,
   `JH_5408202505201029_0852C329.bin`, SHA-256 `5b352e46…`; the same file is `charmera-v008_test-2025-11-19.bin` in the
   v008_test repository), for the tests that name that build (`test_core`, `test_photo_id`, `test_android` and the
-  app's `UpdateCheckTest` and `CandidatesTest`). CI goes on without it, with a warning, when it cannot be fetched.
-- `CHARMERA_FACTORY_DUMP` (the app's tests only): the factory build v012 for OV9732 cameras, its cleaned copy
+  app's `UpdateCheckTest` and `CandidatesTest`). If CI can't fetch it, it carries on with a warning.
+- `CHARMERA_FACTORY_DUMP` (the app's tests only): the factory build v012 for OV9732 cameras, either its cleaned copy
   `charmera-v012-2026-01-12-clean.bin` (SHA-256 `63e39684…`) or the owner's original read (`08a7d993…`), for the tests
   that make firmware v0.25 and v0.26 from it. The Android workflow downloads the cleaned copy.
 
-No test uses the second public dump (Project-Sirius). The app's tests run on the JVM and read `CHARMERA_UPDATE_FILES`
-as well, which CI does not set ([the app's Build section](android/README.md#build)).
+No test uses the second public dump (Project-Sirius). The app's tests run on the JVM and also read
+`CHARMERA_UPDATE_FILES`, which CI doesn't set ([the app's Build section](android/README.md#build)).

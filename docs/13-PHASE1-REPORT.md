@@ -2,35 +2,48 @@
 
 Reading order: 13 of 15 · previous: [Boot and power notes](12-NOTES-boot-and-power.md) · next: [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md) · [all docs](README.md)
 
-Status: complete for Phase 1. Everything here is static analysis and public sources; when it was written, nothing had been flashed.
-Date: 2026-11-04. Scope: original 2025 series (matte body, yellow Kodak boot screen). No hardware was touched; every finding below comes from public files, public issue threads, and static analysis of two public flash dumps.
+Phase 1 (research, before any tool was written) is complete. This was written on 2026-11-04, before anything had been flashed, and no hardware was touched.
+Every finding comes from public files, public issue threads and static analysis of two public flash dumps. It covers
+the original 2025 series (matte body, yellow Kodak boot screen).
 
-**Where the dumps are now (2026-11-16).** The two public dumps this report analyses keep their SHA-256 below, which
-is what identifies them. A cleaned copy of the first (same bytes up to 0x170000, factory settings record only, no
-stored photos) is in [the-dumping-grounds/charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006),
-and the toolkit and the app take it as the public dump; the film-mods build is in
+**Where the dumps are now (2026-11-16).** The two public dumps this report analyses are still identified by their
+SHA-256 below. A cleaned copy of the first (same bytes up to 0x170000, factory settings record only, no stored photos)
+is in [the-dumping-grounds/charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006), and
+the toolkit and the app take it as the public dump. The film-mods build is in
 [charmera-firmware-v008_test](https://github.com/the-dumping-grounds/charmera-firmware-v008_test) and the OV9732
 factory build in [charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012).
 
-**Update, 2026-11-06.** The first flash happened and went wrong; [the incident notes](FIRST-FLASH-INCIDENT.md) have the
-timeline and the corrections. What this report got wrong or left open, in short: an original-series camera (1987
-blind-box design, bought in Japan in November 2026) boots with the public dump but freezes in photo and video mode,
-so the public build does not fit every original-series camera and "original series" is not an identity. A second
-build with the same stamp `202505201029` but different bytes exists (the charmera-film-mods author's camera; its
-fingerprint over 0..0x169000 is SHA-1 `91499bd3…`, byte sum `0852C329`, against `d1f21227…`, `0852B369` here), so the
-stamp identifies no build; the toolkit now finds the build marks and the sensor table by content and names builds by
-fingerprint ([Image layout](11-FORMAT.md#build-identity)). Both known builds carry the same 61-write sensor table. The
-sensor is set up at boot, before the card mounts; more exactly than section 9 says, after 10 failed attempts at one
-register the firmware abandons the rest of the table and its caller ignores the error. The 2 MiB file's final erase
-is no longer unknown: it wraps to block 1 and bricks the camera (film-mods author, on hardware). The toolkit now also
-builds 0x169000-byte update files (`pack --official-size`), the size of the film-mods files, which that project's
-author reads as where an official update would end (no official update file has been published or examined here);
-that author reports flashing such a file on their camera, and this project has flashed none. Its final erase lands
-on the settings block (section 4, step 5). Where a statement below no longer holds, it is marked "Superseded
-2026-11-06" or corrected in place, and the original wording is kept. And the rule that follows from all of it: no
-backup of your own camera, no flash.
+**Update, 2026-11-06.** The first flash happened and went wrong. [The incident notes](FIRST-FLASH-INCIDENT.md) have the
+timeline and the corrections. In short, this is what the report got wrong or left open:
 
-Labels used throughout: **VERIFIED** = reproduced here from the binaries or files; **REPORTED** = stated by a community source and cited, not reproduced here; **INFERRED** = reasoned from the evidence, with the reasoning given; **UNKNOWN** = nobody has shown it.
+- An original-series camera (1987 blind-box design, bought in Japan in November 2026) boots with the public dump but
+  freezes in photo and video mode. So the public build doesn't fit every original-series camera, and "original
+  series" is not an identity.
+- A second build with the same stamp `202505201029` but different bytes exists, on the charmera-film-mods author's
+  camera. Its fingerprint over 0..0x169000 is SHA-1 `91499bd3…`, byte sum `0852C329`, against `d1f21227…`,
+  `0852B369` here, so the stamp identifies no build. The toolkit now finds the build marks and the sensor table by
+  content and names builds by fingerprint ([Image layout](11-FORMAT.md#build-identity)). Both known builds carry the
+  same 61-write sensor table.
+- The sensor is set up at boot, before the card mounts. To be more exact than section 9: after 10 failed attempts at
+  one register the firmware abandons the rest of the table, and its caller ignores the error.
+- The 2 MiB file's final erase is no longer unknown. It wraps to block 1 and bricks the camera (film-mods author, on
+  hardware).
+- The toolkit now also builds 0x169000-byte update files (`pack --official-size`), the size of the film-mods files.
+  That project's author reads this size as where an official update would end (no official update file has been
+  published or examined here) and reports flashing such a file on their camera. This project has flashed none. Its
+  final erase lands on the settings block (section 4, step 5).
+
+Where a statement below no longer holds, it's marked "Superseded 2026-11-06" or corrected in place, and the original
+wording is kept. The rule that followed from all of it was to never flash without a backup of your own camera.
+(Superseded 2026-11-18: know what your camera runs before you flash, from a backup or `identify`. Without either the
+tools warn; they don't refuse. The backup is still the only way back.)
+
+Each finding carries one of four labels:
+
+- VERIFIED: reproduced here from the binaries or files.
+- REPORTED: stated by a community source and cited, not reproduced here.
+- INFERRED: reasoned from the evidence, with the reasoning given.
+- UNKNOWN: nobody has shown it.
 
 ## 0. Sources and how each was checked
 
@@ -45,7 +58,7 @@ Labels used throughout: **VERIFIED** = reproduced here from the binaries or file
 | mombotro/Godox-C100-GHDK | commit 88749db (2026-10-06) | Same Generalplus SDK: FIRMWARE_MAP.md, sound-slot tool, muted-firmware test on a real C100; issue #1 | Cloned; read map and tool; issue fetched in full |
 | sparkyfen/charmera | commit b0a5819 (2026-03-17) | exFAT dirty bit, MBR type 0x07 vs 0x0C, FAT32 fix | Cloned; read scripts |
 
-Repositories hold no other issues or PRs of relevance: keychain-camera-plus, chromacrank and sparkyfen have zero issues; RAIT-09 has one (volume naming / USB IDs).
+None of these repositories has other relevant issues or PRs. keychain-camera-plus, chromacrank and sparkyfen have no issues at all, and RAIT-09 has one (volume naming / USB IDs).
 
 ### Binaries examined (SHA-256)
 
@@ -61,37 +74,63 @@ Repositories hold no other issues or PRs of relevance: keychain-camera-plus, chr
 | chromacrank V3.1 `JH_5408202611021513_0EFA893C.bin` (not downloaded; from release notes) | 1,966,080 | ca8ac1a01b513998cfdd7f2f8aa9f79d6f3bc38ef9efdaf63c48395feedf5b06 |
 | Hyperlite-Media/charmera-film-mods release Charmera_Restore `JH_5408202505201029_0852C329.bin` (added 2026-11-06: the film-mods build's code and resources) | 1,478,656 | 5b352e46f1f52175cb4da2278be8db32ecc36be4943424d58cfd8e2cc9c4386f |
 
-None of these files will be redistributed by the toolkit; it will reference them by URL and hash.
+The toolkit won't redistribute any of these files. It references them by URL and hash.
 
 ## 1. Hardware identity
 
-**SoC: Generalplus GPCV2247F. VERIFIED.** Three independent lines agree. The teardown read the marking (REPORTED). The firmware's own source paths are `G:\code\2247\5408\v006\host\...` (VERIFIED, dozens of occurrences, e.g. file offset 0x46608). The "GPCV1235F" label in keychain-camera-plus comes from a different string that is also in the image: the Wi-Fi driver was compiled from `F:\gp15\GPCV1235F_WIFI_SingleCam_SDK_20191212\wifi\ssv6158\...` (VERIFIED, 18 occurrences from 0xF8BFC), an SDK for another chip whose Wi-Fi stack was linked in. The camera has no Wi-Fi radio; the stack is dead code apart from two helper functions that live code calls (REPORTED by arjunbazinga). Generalplus's product page (REPORTED): ARM7TDMI up to 144 MHz, 16 KB unified cache, 64 Mbit (8 MB) DDR in the package, hardware MJPEG up to 720p30, SPI flash controller with execute-in-place, two SD interfaces, USB 2.0 device and host, 3.3 V supply with internal 1.2 V core and 2.8 V/1.8 V sensor regulators, 200 mA Li charger, QFN64, embedded JTAG/SWD. The datasheet is behind a download gate; no SDK is public for this generation.
+**SoC: Generalplus GPCV2247F. VERIFIED.** Three independent sources agree. The teardown read the marking (REPORTED). The firmware's own source paths are `G:\code\2247\5408\v006\host\...` (VERIFIED, dozens of occurrences, e.g. file offset 0x46608). The "GPCV1235F" label in keychain-camera-plus comes from a different string that is also in the image.
 
-**Flash: Puya PY25D16HB, 16 Mbit (2 MiB), SOP8.** Chip identity REPORTED by the teardown. An in-circuit read and write is documented by charmera-film-mods (Trinket M0, wires on the chip, battery off; see [Recovery](02-RECOVERY.md)). Voltage: the "H" in Puya's part coding means 2.3 to 3.6 V (VERIFIED against the published P25D16H and PY25Q16HB datasheets, which both decode "H = 2.3V~3.6V"; the PY25D16HB datasheet itself is not public). So a 3.3 V programmer is correct and a 1.8 V adapter would be wrong. Sibling parts use 256-byte pages, 4 KiB sectors, 32/64 KiB blocks, and support SFDP; the JEDEC ID is probably 85 60 15 (INFERRED). flashrom has no entry for it by name; the community read it with the generic "SFDP-capable chip" selection (REPORTED).
+The Wi-Fi driver was compiled from `F:\gp15\GPCV1235F_WIFI_SingleCam_SDK_20191212\wifi\ssv6158\...` (VERIFIED, 18 occurrences from 0xF8BFC), an SDK for another chip whose Wi-Fi stack was linked in. The camera has no Wi-Fi radio, and the stack is dead code apart from two helper functions that live code calls (REPORTED by arjunbazinga).
+
+Generalplus's product page (REPORTED) lists ARM7TDMI up to 144 MHz, 16 KB unified cache, 64 Mbit (8 MB) DDR in the package, hardware MJPEG up to 720p30, SPI flash controller with execute-in-place, two SD interfaces, USB 2.0 device and host, 3.3 V supply with internal 1.2 V core and 2.8 V/1.8 V sensor regulators, 200 mA Li charger, QFN64, embedded JTAG/SWD. The datasheet is behind a download gate, and no SDK is public for this generation.
+
+**Flash: Puya PY25D16HB, 16 Mbit (2 MiB), SOP8.** Chip identity REPORTED by the teardown. An in-circuit read and write is documented by charmera-film-mods (Trinket M0, wires on the chip, battery off, see [Recovery](02-RECOVERY.md)).
+
+The "H" in Puya's part coding means 2.3 to 3.6 V (VERIFIED against the published P25D16H and PY25Q16HB datasheets, which both decode "H = 2.3V~3.6V". The PY25D16HB datasheet itself is not public.) So a 3.3 V programmer is correct and a 1.8 V adapter would be wrong.
+
+Sibling parts use 256-byte pages, 4 KiB sectors and 32/64 KiB blocks, and support SFDP. The JEDEC ID is probably 85 60 15 (INFERRED). flashrom has no entry for it by name. The community read it with the generic "SFDP-capable chip" selection (REPORTED).
 
 **USB identity: VID 1B3F PID 8301, "GENPLUS USB-MSDC DISK A".** VERIFIED: the descriptor bytes `3f 1b 01 83` sit at 0xFFE54 and the strings at 0xF3CE4 and 0xF3D10.
 
-**Image sensor: SP140A family (SuperPix), module flex printed KE28-V1.** No sensor name exists in the image. arjunbazinga recovered a 61-write register program by emulating the bit-banged SCCB bus and matched it to open-source SP140A drivers; its first six writes are identical to OpenIPC's SP140A 1-lane MIPI 1280x720 table (REPORTED, checked by the 2026-11-06 research pass). Public SP140A drivers give the same bus address 0x78 (7-bit 0x3C), page register 0xFD, and a chip ID of 0x14/0x0A at page-0 registers 0x02/0x03, which this firmware never reads. Corrected 2026-11-06: this report first said "module marked KC28" and "SmartSens/SuperPix". The only public board photo (byjp's teardown, 2026-08-20) shows "KE28-V1" printed on the camera module's flex; "KC28" traces to a page whose board details came from an AI chat's reading of that teardown. SmartSens parts use another address and 16-bit registers, so SuperPix is the family. The lens is glued to the sensor, so the flex code, not the die, is what an owner can read.
+**Image sensor: SP140A family (SuperPix), module flex printed KE28-V1.** No sensor name exists in the image. arjunbazinga recovered a 61-write register program by emulating the bit-banged SCCB bus and matched it to open-source SP140A drivers; its first six writes are identical to OpenIPC's SP140A 1-lane MIPI 1280x720 table (REPORTED, checked by the 2026-11-06 research pass). Public SP140A drivers give the same bus address 0x78 (7-bit 0x3C), page register 0xFD, and a chip ID of 0x14/0x0A at page-0 registers 0x02/0x03, which this firmware never reads.
 
-**Board.** The camera flex has 10 contacts (the "1" and "10" printed at its board end belong to the camera connector, which sits at the top edge of the board's back under a cream tape or glue patch); 10 contacts are too few for a parallel sensor bus, so the link is probably 1-lane MIPI (INFERRED). Single test pads "3V" and "ISP" lie below that connector, and pads "RX_A6", "TX_A7" and "G" near the LED on the front, probably a 3.3 V UART (INFERRED; corrected 2026-11-06 from "a 10-pin ISP header footprint"). The main board silkscreen reads "DC28 5408A". The battery is a 200 mAh cell soldered to B+/B- pads, with no plug, and taped to the board; the speaker hangs on two thin soldered wires (VERIFIED from byjp's photos).
+Corrected 2026-11-06: this report first said "module marked KC28" and "SmartSens/SuperPix". The only public board photo (byjp's teardown, 2026-08-20) shows "KE28-V1" printed on the camera module's flex. "KC28" traces to a page whose board details came from an AI chat's reading of that teardown. SmartSens parts use another address and 16-bit registers, so SuperPix is the family. The lens is glued to the sensor, so an owner can read the flex code but not the die.
+
+**Board.** The camera flex has 10 contacts (the "1" and "10" printed at its board end belong to the camera connector, which sits at the top edge of the board's back under a cream tape or glue patch). 10 contacts are too few for a parallel sensor bus, so the link is probably 1-lane MIPI (INFERRED).
+
+Single test pads "3V" and "ISP" sit below that connector, and pads "RX_A6", "TX_A7" and "G" near the LED on the front are probably a 3.3 V UART (INFERRED, corrected 2026-11-06 from "a 10-pin ISP header footprint"). The main board silkscreen reads "DC28 5408A". The battery is a 200 mAh cell soldered to B+/B- pads, with no plug, and taped to the board. The speaker hangs on two thin soldered wires (VERIFIED from byjp's photos).
 
 **Editions.** Original 2025 series (yellow boot screen, this build); Millennium Edition, June 2026 (blue boot screen; press says same hardware); CLOT x Kodak edition, September 2026. Two owners report that the original-series image boots on the other editions but live view freezes or capture fails (REPORTED, Project-Sirius issues 1 and 2). No Millennium or CLOT dump is public. The only ways to tell editions apart without a dump are the body, the boot screen colour and the filter/frame names in the menu (REPORTED). (Superseded 2026-11-06: these tell an edition, not the firmware a camera needs; an original-series camera with the yellow boot screen did not fit the public build. See the note at the top.) The firmware's own JPEGs identify the chip, not the edition: EXIF Make "Generalplus", Model "CBB3" (VERIFIED inside the two stored photos at 0x18032C and 0x1A5B2C).
 
-**Relation to the Godox C100.** Same Generalplus card-DVR SDK lineage and the same USB ID, which is why its sound-slot work transfers. But its community identifies the C100 SoC as a GP22B (ARM926, FreeRTOS) with a different boot-header family ("PGpssiipps", app at file 0x10200) (REPORTED), so "same platform" is only true at the SDK level. The C100's sound slots live at 0x170000; the Charmera's live at 0x120000.
+**Relation to the Godox C100.** The C100 comes from the same Generalplus card-DVR SDK lineage and has the same USB ID, which is why its sound-slot work transfers. Its community identifies the C100 SoC as a GP22B (ARM926, FreeRTOS) with a different boot-header family ("PGpssiipps", app at file 0x10200) (REPORTED), though, so "same platform" is only true at the SDK level. The C100's sound slots live at 0x170000; the Charmera's live at 0x120000.
 
 ## 2. Firmware container format
 
-A note on method: the boot header has no public specification for this chip, so its fields are described from the bytes, the Generalplus tool documentation and what the rest of the firmware does with them; the updater flow in section 4 was recovered from the firmware itself and cross-checked against the SDK source and the hardware reports.
+The boot header has no public specification for this chip, so its fields are described from the bytes, the Generalplus tool documentation and what the rest of the firmware does with them. The updater flow in section 4 was recovered from the firmware itself and cross-checked against the SDK source and the hardware reports.
 
-**Boot header, 0x000 to 0x200.** Magic `SPII` at 0. Words at 0x04 0x30000200, 0x08 0x20000000, 0x10 0x001B0000, 0x14 ASCII `SRIy`, 0x18 0x01000510, 0x1C 0x00010001, 0x20 0xD0667802, 0x24 0x00000005, then four (register, value) pairs: 0xD0000088=0xA12B, 0xD000008C=0x2495, 0xD0000028=0x8005, 0xD00000AC=0x104; zero to 0x200. VERIFIED: the first two pairs are the PLL/power unlock keys the firmware itself writes before every write to 0xD0000028 (the PMU register used at power-off), so the list is a register-setup list executed before the code runs; the firmware never reads its own header, and nothing in it is checked by the running code. UNKNOWN: the meaning of 0x1B0000 (it equals the start of the 0xFF tail in both dumps, which may be coincidence), the 0x3000/0x0200 halves, `SRIy`, and whether the ROM verifies anything. The `SPII` family is Generalplus's SPI boot-header format for this chip generation (their CodePacker tool names `HEADER_TAG=SPII` for GPL329xx/GPEL31xx and the GPCV21xx boot loaders); the published field map for GPL329xx does not fit these bytes, so the GPCV2247F variant is undocumented.
+**Boot header, 0x000 to 0x200.** Magic `SPII` at 0. Words at 0x04 0x30000200, 0x08 0x20000000, 0x10 0x001B0000, 0x14 ASCII `SRIy`, 0x18 0x01000510, 0x1C 0x00010001, 0x20 0xD0667802, 0x24 0x00000005, then four (register, value) pairs: 0xD0000088=0xA12B, 0xD000008C=0x2495, 0xD0000028=0x8005, 0xD00000AC=0x104, then zero to 0x200.
 
-**Code image.** The ARM vector table starts at 0x200 and the image is loaded to RAM address 0, so file offset = runtime address + 0x200 (VERIFIED three ways: reset vector literal, literal pools, PC-relative string references). Regions (VERIFIED from the reset handler's constants): code and read-only data 0x200 to 0xFFA70; initialised data 0xFFA70 to 0x10B130 (RAM 0xFF870, 0xB6C0 bytes, copied in place); BSS at RAM 0x10AF30 for 0xA3820 bytes; stacks up to about RAM 0x1B0AB0. The file bytes 0x10B130 to 0x120000 are zero padding that no SPI read targets; in RAM that range is BSS and heap, which is why "free space for code" there is a trap. µC/OS-II with a 100 Hz tick; uncompressed; no checksum over the code anywhere in the image.
+VERIFIED: the first two pairs are the PLL/power unlock keys the firmware itself writes before every write to 0xD0000028 (the PMU register used at power-off), so the list is a register-setup list executed before the code runs. The firmware never reads its own header, and the running code checks nothing in it.
 
-**Resource pack, 0x120000 to 0x168E9A.** Magic `GP+\0`, then two u16 words (both 3; meaning unknown), then 24-byte entries from 0x18, 43 in the stock build (19 name bytes copied, u32 start sector of 512 bytes from 0x120000). The mount code checks only the two magic bytes; there is no checksum over the pack or its files; open-by-name strips the dot; reads are clamped to the slot (next entry's start minus own start). Contents: UI art in `GPZP` files (`GPZP` tag, raw DEFLATE, then an 8-byte trailer of CRC-32 and inflated length whose checking is UNKNOWN; RGB565 inside per the community decode), four frames as twelve 240,000-byte strips, four 112x80 frame thumbnails, the 160x80 power-on logo JPEG, a background JPEG, the menu text pack GPRS.PAK (0x141400, 14 languages), two small `GPZ` files for the USB modes, and the five sounds (section 7).
+UNKNOWN: the meaning of 0x1B0000 (it equals the start of the 0xFF tail in both dumps, which may be coincidence), the 0x3000/0x0200 halves, `SRIy`, and whether the ROM verifies anything. The `SPII` family is Generalplus's SPI boot-header format for this chip generation (their CodePacker tool names `HEADER_TAG=SPII` for GPL329xx/GPEL31xx and the GPCV21xx boot loaders). The published field map for GPL329xx does not fit these bytes, so the GPCV2247F variant is undocumented.
+
+**Code image.** The ARM vector table starts at 0x200 and the image is loaded to RAM address 0, so file offset = runtime address + 0x200 (VERIFIED three ways: reset vector literal, literal pools, PC-relative string references).
+
+Regions (VERIFIED from the reset handler's constants): code and read-only data 0x200 to 0xFFA70, initialised data 0xFFA70 to 0x10B130 (RAM 0xFF870, 0xB6C0 bytes, copied in place), BSS at RAM 0x10AF30 for 0xA3820 bytes, and stacks up to about RAM 0x1B0AB0. The file bytes 0x10B130 to 0x120000 are zero padding that no SPI read targets. In RAM that range is BSS and heap, which is why "free space for code" there is a trap.
+
+The OS is µC/OS-II with a 100 Hz tick, the image is uncompressed, and there's no checksum over the code anywhere in it.
+
+**Resource pack, 0x120000 to 0x168E9A.** Magic `GP+\0`, then two u16 words (both 3, meaning unknown), then 24-byte entries from 0x18, 43 in the stock build (19 name bytes copied, u32 start sector of 512 bytes from 0x120000). The mount code checks only the two magic bytes, and there's no checksum over the pack or its files.
+
+Open-by-name strips the dot, and reads are clamped to the slot (next entry's start minus own start). The pack holds UI art in `GPZP` files (`GPZP` tag, raw DEFLATE, then an 8-byte trailer of CRC-32 and inflated length whose checking is UNKNOWN, RGB565 inside per the community decode), four frames as twelve 240,000-byte strips, four 112x80 frame thumbnails, the 160x80 power-on logo JPEG, a background JPEG, the menu text pack GPRS.PAK (0x141400, 14 languages), two small `GPZ` files for the USB modes, and the five sounds (section 7).
 
 **Factory self-test sector 0x16E000.** A `JHCM` write/read-back test sector used at the factory; 0xFF in both dumps (VERIFIED).
 
-**Settings store, 0x170000 to 0x17FFFF.** Base computed at run time as 0x120000 plus the last resource's start sector rounded up to 64 KiB (VERIFIED), which lands on 0x170000 for this pack. Records are 512-byte sectors: 252 bytes of settings, CRC-32 (zlib polynomial) little-endian at 0xFC, second 256-byte page zero. The current record is the sector before the first erased sector; a save appends; when the first erased sector is number 127 the block is erased and writing restarts, so a bank holds 127 records (VERIFIED). An all-0xFF bank makes the loader apply built-in defaults and write a zeroed photo directory (VERIFIED statically, not yet on hardware). Latent stock bug (INFERRED from the verified algorithm, untested): the photo directory sector 0x17F000 is sector 120 of this bank, so after 120 saves the next boot reads the directory as the newest settings record, fails the CRC, resets to defaults and blanks the directory. The keychain dump's zeroed directory with photos still in place looks exactly like that. (Superseded by [Image layout](11-FORMAT.md) (static analysis 2026-11-11: 128 sectors, sector 120 stepped over, wrap erases the block; not observed on a camera).)
+**Settings store, 0x170000 to 0x17FFFF.** Base computed at run time as 0x120000 plus the last resource's start sector rounded up to 64 KiB (VERIFIED), which lands on 0x170000 for this pack. Records are 512-byte sectors: 252 bytes of settings, CRC-32 (zlib polynomial) little-endian at 0xFC, and a zero second 256-byte page.
+
+The current record is the sector before the first erased sector, and a save appends. When the first erased sector is number 127 the block is erased and writing restarts, so a bank holds 127 records (VERIFIED). An all-0xFF bank makes the loader apply built-in defaults and write a zeroed photo directory (VERIFIED statically, not yet on hardware).
+
+Latent stock bug (INFERRED from the verified algorithm, untested): the photo directory sector 0x17F000 is sector 120 of this bank, so after 120 saves the next boot reads the directory as the newest settings record, fails the CRC, resets to defaults and blanks the directory. The keychain dump's zeroed directory with photos still in place looks exactly like that. (Superseded by [Image layout](11-FORMAT.md), from static analysis on 2026-11-11: 128 sectors, sector 120 is stepped over, and the wrap erases the block. Not observed on a camera.)
 
 **Internal photo storage, 0x17F000 to 0x1CB000.** Not a filesystem. A 16-byte directory at 0x17F000 with two entries (u16 number, u16 used, u32 length including a 0x590-byte JPEG header template), two slots at 0x180000 and 0x1A5800 (erased 0x25000 and 0x24800 bytes respectively on save), written only when no card is mounted (INFERRED from the guard), with no size check in the save path. "Delete all" only zeroes the directory. The `SPIDCIM` name in the strings is this store; the card-side `SPIDCIM` folder is where the camera copies from it.
 
@@ -101,7 +140,7 @@ A note on method: the boot header has no public specification for this chip, so 
 
 ## 3. The update filename checksum (VERIFIED)
 
-The name is `JH_5408<YYYYMMDDhhmm>_<8 hex>.bin`. The eight hex digits are the unsigned 32-bit sum of every byte of the file. Not a CRC, not over a sub-range, no secret.
+The name is `JH_5408<YYYYMMDDhhmm>_<8 hex>.bin`. The eight hex digits are the unsigned 32-bit sum of every byte of the file. It isn't a CRC, it covers the whole file, and there's no secret in it.
 
 | Published file | Size | Byte sum of file | Name says | CRC32 (for contrast) |
 |---|---|---|---|---|
@@ -109,29 +148,29 @@ The name is `JH_5408<YYYYMMDDhhmm>_<8 hex>.bin`. The eight hex digits are the un
 | JH_5408202610261351_0F065EB9.bin (webcam) | 1,966,080 | 0F065EB9 | 0F065EB9 | 1BBCA7D8 |
 | JH_5408202610211859_0F069EA4.bin (super) | 1,966,080 | 0F069EA4 | 0F069EA4 | 64ED8D3C |
 
-Where it comes from: the updater is Generalplus's `ap_state_firmware_upgrade.c` as forked by the ODM JoyHonest. The 2014 fork for an earlier chip is public (lionyhw/JHDH-8412_1247) and does exactly this: builds `C:\JH_<PRODUCT_NUM>*.bin`, calls `_findfirst`, copies 8 hex characters out of the filename, sums every byte of the file in 256-byte reads, compares, and returns before touching flash on mismatch. "JH" is the ODM's prefix and 5408 the product number; the Charmera build adds the 12-digit stamp and the on-screen strings. Generalplus's own Android OTA code for this family (GoPlusCam_SDK) sends the same byte sum alongside the file, so the convention is the vendor's, not Reto's.
+The updater is Generalplus's `ap_state_firmware_upgrade.c` as forked by the ODM JoyHonest. The 2014 fork for an earlier chip is public (lionyhw/JHDH-8412_1247) and does exactly this: builds `C:\JH_<PRODUCT_NUM>*.bin`, calls `_findfirst`, copies 8 hex characters out of the filename, sums every byte of the file in 256-byte reads, compares, and returns before touching flash on mismatch. "JH" is the ODM's prefix and 5408 the product number; the Charmera build adds the 12-digit stamp and the on-screen strings. Generalplus's own Android OTA code for this family (GoPlusCam_SDK) sends the same byte sum alongside the file, so the convention is Generalplus's and not something Reto (the Charmera's maker, under licence from Kodak) added.
 
-What the stamp does (VERIFIED in the binary by the updater analysis, hardware-confirmed by isaackwok): characters 7 to 18 are compared with the stamp compiled into the running firmware (`202505201029`, file offset 0x218C4). Any difference starts an update; equality is ignored. There is no "newer than" rule, so a file with an older stamp also flashes.
+Characters 7 to 18 of the name are compared with the stamp compiled into the running firmware (`202505201029`, file offset 0x218C4; VERIFIED in the binary by the updater analysis, hardware-confirmed by isaackwok). Any difference starts an update, and an equal stamp is ignored. There's no "newer than" rule, so a file with an older stamp flashes too.
 
-What is not checked: header magic, size, signature, model or edition, CRC. The filename sum is the only gate. Renaming a file therefore breaks it, and a deliberately wrong sum is a safe way to prove the mechanism on a camera: it shows "Program error" and erases nothing (hardware-confirmed, REPORTED).
+Nothing else is checked: not the header magic, size, signature, model or edition, and no CRC. The filename sum is the only gate. Renaming a file therefore breaks it, and a deliberately wrong sum is a safe way to prove the mechanism on a camera: it shows "Program error" and erases nothing (hardware-confirmed, REPORTED).
 
 ## 4. The SD updater flow
 
-VERIFIED by disassembly (file offsets) and consistent with the SDK source and the hardware reports, unless marked.
+Unless marked otherwise, each step is VERIFIED by disassembly (file offsets) and consistent with the SDK source and the hardware reports.
 
-1. **Trigger.** The AP task's SD-detect path calls the check at 0x21818, but only while the OS tick is at or below 500 (the first 5 seconds after power-on), so the card must be in the slot before the camera is switched on. It finds the first `C:\JH_5408*.bin` and compares name[7..18] with the embedded stamp `202505201029` (memcmp at 0x21880); any inequality (older or newer) posts message 0x5025, the startup state enters state 0x108, which is the updater (0x21370). benbadio's "timestamp check at 0x0213B0" is actually the checksum-string copy; the stamp compare is here.
+1. **Trigger.** The AP task's SD-detect path calls the check at 0x21818, but only while the OS tick is at or below 500 (the first 5 seconds after power-on), so the card must be in the slot before the camera is switched on. It finds the first `C:\JH_5408*.bin` and compares name[7..18] with the embedded stamp `202505201029` (memcmp at 0x21880). Any difference (older or newer) posts message 0x5025, and the startup state enters state 0x108, which is the updater (0x21370). benbadio's "timestamp check at 0x0213B0" is actually the checksum-string copy; the stamp compare is here.
 2. **Checksum.** The eight characters name[20..27] are parsed case-insensitively (0x211FC; other characters count as zero). The whole file is byte-summed in 64 KiB chunks and compared (0x2144C) before any flash operation. On mismatch a flag is set, "Program error" and "check file" are shown, and a 2-second loop clears the power-hold bit so the camera turns itself off. Nothing is erased (matches isaackwok's hardware test).
 3. **Preparation.** On a good sum it deletes the SD, USB, key/battery/auto-off, root and display tasks, then runs from RAM with interrupts masked, exactly as the SDK source does.
-4. **Programming.** From flash offset 0: for each 64 KiB block, erase (opcode D8), program 256-byte pages up to the file size, read back and verify; a page that verifies wrong is rewritten up to 5 times after checking it is blank; a block that still fails is retried up to 20 times in total. "Upgrade NN%" advances per block. The file is programmed byte for byte, so a file whose length is not a multiple of 256 bytes gets stale buffer bytes in its last page; the rest of the last block stays erased. Whole 64 KiB multiples avoid the question entirely.
+4. **Programming.** From flash offset 0, for each 64 KiB block it erases (opcode D8), programs 256-byte pages up to the file size, reads back and verifies. A page that verifies wrong is rewritten up to 5 times after checking it is blank, and a block that still fails is retried up to 20 times in total. "Upgrade NN%" advances per block. The file is programmed byte for byte, so a file whose length is not a multiple of 256 bytes gets stale buffer bytes in its last page. The rest of the last block stays erased. Whole 64 KiB multiples avoid the question.
 5. **Final erase.** After the last block, one more 64 KiB block is erased at (file length rounded up to 256) + 0x10000, masked to the block (0x217B4; benbadio's observation is correct). Consequences by file size: 0x1E0000 → 0x1F0000, an empty block, harmless (hardware-proven by several owners). 0x169000 (code plus resources only) → 0x170000, which wipes the settings bank, after which the firmware recreates defaults and a blank photo directory: a factory reset, probably the SDK's intent (INFERRED; the film-mods author reads it as the reset after an official file ending there, REPORTED). 0x170000 → 0x180000, which erases the first 64 KiB of photo slot 0 while the directory still lists it. 0x200000 → 0x210000, beyond the chip; what the Puya part does with address bit 21 is UNKNOWN, and one owner reports a brick after an SD update (cause unconfirmed). (Superseded 2026-11-06: the address wraps to block 1, which is left erased, and the camera no longer boots; the film-mods author reports this from their own camera.) Never send a 2 MiB file.
-6. **End.** The updater does not delete or rename the file (only open/stat/read/lseek/close exist in it), so a camera re-flashes on every boot while that card is in. It then loops forever; holding the power key about a second (20 polls of the PMU key bit at 50 ms) clears the power-hold bit and the camera switches off. There is no chime, no card-detect read and no soft reset; benbadio's "card-removal debounce at 0x0217DC" is this power-key hold. Removing the card first is still the right order, so the next boot does not flash again.
+6. **End.** The updater does not delete or rename the file (only open/stat/read/lseek/close exist in it), so a camera re-flashes on every boot while that card is in. It then loops forever. Holding the power key about a second (20 polls of the PMU key bit at 50 ms) clears the power-hold bit and the camera switches off. There is no chime, no card-detect read and no soft reset; benbadio's "card-removal debounce at 0x0217DC" is this power-key hold. Removing the card first is still the right order, so the next boot does not flash again.
 7. **What is never checked:** header magic, size, a size limit, version, series, battery level or DC-in, CRC or signature. The firmware also never reads the flash chip's JEDEC ID and never issues a chip erase; it uses only the classic command set (06, 05, 03, 02, 20, D8, 01, 04), so a replacement chip with that command set would work (INFERRED).
 
-Open: nothing above has been timed on hardware except the community's 15 to 20 seconds; whether the updater runs on USB power without a battery is UNKNOWN.
+Still open: nothing above has been timed on hardware except the community's 15 to 20 seconds, and whether the updater runs on USB power without a battery is UNKNOWN.
 
 ## 5. The two public stock dumps compared (VERIFIED)
 
-Both are the same firmware build. They are byte-identical from 0x000000 to 0x16FFFF (header, code, tables, the whole resource pack) and from 0x1B0000 to the end (all 0xFF). SHA-256 of bytes 0 to 0x170000 in both: `fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8`. That hash is the toolkit's software hash for the public dump's build. (Corrected 2026-11-06: this report first called it the "original 2025 series, unmodified software" fingerprint. The series names no build, and the toolkit names the public build by SHA-256, SHA-1 and byte sum over 0..0x169000; see the note at the top.)
+Both are the same firmware build, byte-identical from 0x000000 to 0x16FFFF (header, code, tables, the whole resource pack) and from 0x1B0000 to the end (all 0xFF). SHA-256 of bytes 0 to 0x170000 in both: `fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8`. That hash is the toolkit's software hash for the public dump's build. (Corrected 2026-11-06: this report first called it the "original 2025 series, unmodified software" fingerprint. The series names no build, and the toolkit names the public build by SHA-256, SHA-1 and byte sum over 0..0x169000; see the note at the top.)
 
 They differ only in the camera's own state, which is why their whole-file hashes differ:
 
@@ -147,42 +186,55 @@ Consequences:
 
 - Either dump is a valid reference for the code and resources; chromacrank builds on Project-Sirius, keychain-camera-plus on its own dump, and both are right to.
 - The published stock-restore update file is the first 0x1E0000 bytes of the keychain dump (VERIFIED, byte for byte). Flashing it writes benbadio's settings records and their two photos into the recipient camera. Harmless, but not "factory" either. (Superseded 2026-11-06: harmless only on a camera the public build fits; see the note at the top.) The photo index in that file is zero, so the camera will not show the photos.
-- Your own backup is the only restore image that is truly yours. The toolkit's `pack` can blank the settings store and the photo area when building an update file from a public dump; the firmware's behaviour on a blank store (recreate defaults) is INFERRED from arjunbazinga's emulation and not yet hardware-tested, so this report treats "flash a public dump as published" as the proven path and "blanked" as the cleaner but less proven one. (Superseded 2026-11-06: owners report working cameras after flashing it, but what those cameras ran before is not known. Flashed as published, the public build left an original-series camera unable to take pictures; no file made from a public dump is known to fit a camera whose own chip has not been read.)
+- Your own backup is the only restore image that's really yours. The toolkit's `pack` can blank the settings store and the photo area when building an update file from a public dump. The firmware's behaviour on a blank store (recreate defaults) is INFERRED from arjunbazinga's emulation and not yet hardware-tested, so this report treats "flash a public dump as published" as the proven path and "blanked" as the cleaner but less proven one. (Superseded 2026-11-06: owners report working cameras after flashing it, but what those cameras ran before is not known. Flashed as published, the public build left an original-series camera unable to take pictures; no file made from a public dump is known to fit a camera whose own chip has not been read.)
 
 ## 6. Recovery paths, in order of preference
 
-**Before anything else: a verified full-flash backup of your own camera.** Every path below is only as good as the image you restore. The public dumps are the same build but carry another owner's settings and photos, and they are useless for a Millennium or CLOT body. (Superseded 2026-11-06: they are no safe choice for an original-series body either; one did not fit. See the note at the top and [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).)
+Every path below is only as good as the image you restore, so the first thing to have is a verified full-flash backup of your own camera. The public dumps are the same build but carry another owner's settings and photos, and they're useless for a Millennium or CLOT body. (Superseded 2026-11-06: they are no safe choice for an original-series body either; one did not fit. See the note at the top and [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).)
 
 ### 6.1 SD-card updater with a known-good image (preferred when the camera boots)
 
-Works whenever the camera gets far enough to mount the card, which the reports so far say it does even when capture is broken (the two cross-edition owners both still had a working updater). Procedure (VERIFIED mechanics, REPORTED procedure):
+This works whenever the camera gets far enough to mount the card. The reports so far say it does even when capture is broken: both cross-edition owners still had a working updater. The mechanics are VERIFIED and the procedure REPORTED:
 
 1. Build the update file from your own backup with `pack` (0x1E0000 bytes, fresh stamp, byte-sum name) and run `verify` on it. (Superseded 2026-11-06: `pack --official-size` builds a 0x169000-byte file as well, and `verify` takes your backup as `--stock`.)
 2. FAT32 card (the camera's exFAT formatting also works for reading the update, but FAT32 avoids the Android problem), only that one `JH_5408*.bin` in the root.
 3. Camera off, card in, power on. Screen shows "Upgrade 0%" to "100%" in roughly 15 to 20 seconds, then stays on that screen (section 4 step 6). Remove the card, then hold the power key about a second to switch off; power on.
-4. Delete the file from the card; the camera would flash again on every boot with that card.
+4. Delete the file from the card, or the camera flashes again on every boot with that card.
 
-Failure modes: wrong checksum in the name → "Program error", nothing erased, camera turns itself off (safe). Power loss during the 15 seconds → the chip is partly erased and the camera will not boot; only path 6.2 remains. A file whose length is not a multiple of 256 bytes gets stale bytes in its last page; a file shorter than 0x1E0000 moves the final erase into the settings bank or the photo area (section 4); keep to 0x1E0000. A full 2 MiB file → the final erase targets 0x210000, beyond the chip; what the Puya part does with that address is UNKNOWN and one owner reports a brick after an SD update, cause unconfirmed. Never send a 2 MiB file. (Superseded 2026-11-06: a 0x169000-byte file is the other size in use, and its final erase on the settings bank is the factory reset of section 4, step 5; `verify` and `stage` take 0x1E0000 and 0x169000 bytes, and `verify` takes another size only as a WARN with `--allow-odd-size`, which `stage` never gives. The 2 MiB file's erase wraps to block 1 and bricks the camera, as the film-mods author reports.) The card must be inserted before power-on (the updater only arms in the first 5 seconds), and the file is never deleted by the camera.
+Failure modes:
+
+- Wrong checksum in the name → "Program error", nothing erased, and the camera turns itself off (safe).
+- Power loss during the 15 seconds → the chip is partly erased and the camera won't boot. Only path 6.2 remains.
+- A file whose length is not a multiple of 256 bytes gets stale bytes in its last page. A file shorter than 0x1E0000
+  moves the final erase into the settings bank or the photo area (section 4), so keep to 0x1E0000.
+- A full 2 MiB file → the final erase targets 0x210000, beyond the chip. What the Puya part does with that address is
+  UNKNOWN, and one owner reports a brick after an SD update, cause unconfirmed. Never send a 2 MiB file. (Superseded
+  2026-11-06: a 0x169000-byte file is the other size in use, and its final erase on the settings bank is the factory
+  reset of section 4, step 5. `verify` and `stage` take 0x1E0000 and 0x169000 bytes, and `verify` takes another size
+  only as a WARN with `--allow-odd-size`, which `stage` never gives. The 2 MiB file's erase wraps to block 1 and
+  bricks the camera, as the film-mods author reports.)
+- The card must be in before power-on, because the updater only arms in the first 5 seconds. The camera never
+  deletes the file.
 
 ### 6.2 In-circuit SPI read and write with a 3.3 V programmer (the only path for a camera that will not boot)
 
-What is known: SOP8 package with legs, so a SOIC-8 clip fits (REPORTED by the teardown's photos; an in-circuit read with wires on the chip and the battery off is documented by charmera-film-mods). 2.3 to 3.6 V part (VERIFIED from Puya's coding), so program at 3.3 V; a 1.8 V adapter is wrong. The usual CH341A warnings apply with full force: unmodified black boards drive 5 V on the data lines (flashrom's documentation says so), which exceeds the flash's and the SoC's absolute maximum; use a blue board set to 3.3 V, a V1.7 board switched to 3.3 V, a modified black board, a Raspberry Pi Pico with pico-serprog, or a CH347. The SoC shares the 3.3 V rail, so the clip back-powers it through the flash's VCC pin; disconnect the battery, and if the chip is not detected or reads differ between passes, that is the first suspect (flashrom's in-system-programming notes; libreboot; REPORTED). Read twice, compare, hash, keep both copies before writing anything.
+The chip is an SOP8 package with legs, so a SOIC-8 clip fits (REPORTED by the teardown's photos; an in-circuit read with wires on the chip and the battery off is documented by charmera-film-mods). It's a 2.3 to 3.6 V part (VERIFIED from Puya's coding), so program at 3.3 V. A 1.8 V adapter is wrong. The usual CH341A warnings apply in full. Unmodified black boards drive 5 V on the data lines (flashrom's documentation says so), which exceeds the flash's and the SoC's absolute maximum. Use a blue board set to 3.3 V, a V1.7 board switched to 3.3 V, a modified black board, a Raspberry Pi Pico with pico-serprog, or a CH347. The SoC shares the 3.3 V rail, so the clip back-powers it through the flash's VCC pin. Disconnect the battery. If the chip is not detected or reads differ between passes, back-powering is the first suspect (flashrom's in-system-programming notes; libreboot; REPORTED). Read twice, compare, hash, keep both copies before writing anything.
 
-flashrom: no chip entry by name; `-c "SFDP-capable chip"` worked for the community (REPORTED). Linux needs udev access to USB 1a86:5512 or root; Windows needs the libusb driver via Zadig and a Windows flashrom build. Elnec and XGecu programmers list PY25D16HB explicitly (REPORTED, vendor lists) if a dedicated programmer is preferred.
+flashrom has no chip entry for it by name, and `-c "SFDP-capable chip"` worked for the community (REPORTED). Linux needs udev access to USB 1a86:5512 or root; Windows needs the libusb driver via Zadig and a Windows flashrom build. Elnec and XGecu programmers list PY25D16HB explicitly (REPORTED, vendor lists) if a dedicated programmer is preferred.
 
 Restore source order: your own backup; then the published stock update's full-image equivalent (the keychain dump, or Project-Sirius) only for an original-series body, accepting that it carries someone else's settings and two photos (or let `pack --blank-settings --blank-photos` clear them, INFERRED-safe). (Superseded 2026-11-06: an original-series body is no reason to trust a public dump; one did not fit. A public dump is a last resort for a camera with no backup, after [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).)
 
 ### 6.3 Boot-ROM level: nothing usable is known
 
-Generalplus's older GPL32 family has a mask-ROM "USB service mode" entered by pulling a strap pin high at reset, which their mass-production tool uses to load an ISP stub into RAM and program the SPI NOR (VERIFIED from Generalplus's own CodePacker guide and a tool log for the GP15B platform). Whether the GPCV2247F ROM has the same mode, which pin selects it, and what tool speaks to it are UNKNOWN; nobody in the community has demonstrated it, the Godox owner found no ROM recovery, and the datasheet is gated. The board's single "ISP" test pad may be that strap (the chip also has JTAG/SWD; the Godox firmware does not disable JTAG, REPORTED), but what it does is unknown; the "10-pin footprint" this report first named is the camera connector. Treat this as a research lead, not a plan.
+Generalplus's older GPL32 family has a mask-ROM "USB service mode" entered by pulling a strap pin high at reset, which their mass-production tool uses to load an ISP stub into RAM and program the SPI NOR (VERIFIED from Generalplus's own CodePacker guide and a tool log for the GP15B platform). Whether the GPCV2247F ROM has the same mode, which pin selects it, and what tool speaks to it are UNKNOWN. Nobody in the community has demonstrated it, the Godox owner found no ROM recovery, and the datasheet is gated. The board's single "ISP" test pad may be that strap (the chip also has JTAG/SWD; the Godox firmware does not disable JTAG, REPORTED), but what it does is unknown. The "10-pin footprint" this report first named is the camera connector. For now this is only a research lead.
 
 ### 6.4 USB vendor commands: not a recovery path
 
-The mass-storage firmware answers Generalplus vendor commands and has memory-read commands (FD28/FF28), but they sit behind an authorisation level the stock handshake never reaches (REPORTED, three independent analyses). Opening them needs a one-byte firmware patch, which needs a working updater or a clip, so this cannot bootstrap recovery. It could serve later as a USB backup path for cameras already running a patched firmware.
+The mass-storage firmware answers Generalplus vendor commands and has memory-read commands (FD28/FF28), but they sit behind an authorisation level the stock handshake never reaches (REPORTED, three independent analyses). Opening them needs a one-byte firmware patch, which needs a working updater or a clip, so this can't bootstrap recovery. Later it could be a USB backup path for cameras already running a patched firmware.
 
 ## 7. Where the sounds live and what a mute patch requires
 
-**Storage (VERIFIED).** The five UI sounds are plain PCM WAV files inside the "GP+" resource pack at 0x120000. The pack is a directory of 43 entries (20-byte name without the dot, then a 32-bit sector number; data at 0x120000 + sector x 512), followed by the data. Each entry's slot runs to the next entry's sector, so a replacement must fit the slot.
+**Storage (VERIFIED).** The five UI sounds are plain PCM WAV files inside the "GP+" resource pack at 0x120000. The pack is a directory of 43 entries (20-byte name without the dot, then a 32-bit sector number; data at 0x120000 + sector x 512), followed by the data. Each entry's slot runs to the next entry's sector, so a replacement has to fit the slot.
 
 | File | Use (VERIFIED from the event-player's id table) | Offset | Format | Duration | PCM bytes | Slot |
 |---|---|---|---|---|---|---|
@@ -192,58 +244,63 @@ The mass-storage firmware answers Generalplus vendor commands and has memory-rea
 | POWEROFF_AUDIO.WAV | power off (id 3) | 0x162400 | 8,000 Hz, 8-bit mono | 1,052 ms | 8,421 | 8,704 |
 | POWERON_AUDIO.WAV | power on (id 2) | 0x164600 | 8,000 Hz, 8-bit mono | 762 ms | 6,097 | 6,144 |
 
-**Playback path (VERIFIED by disassembly).** At boot a function at VA 0x1E234 looks each name up in the pack and stores the five 16-bit handles in a table at RAM 0x110284. The event player at VA 0x1E844 takes a sound id, and before doing anything reads settings byte +0x19 through its getter (VA 0x1F560); if it is zero it returns without playing. Otherwise it passes that byte to the volume routine at VA 0x1E18C (levels 0 to 8, gain = level x 8 − 1), picks the handle, opens the resource and posts it to the audio task. Boot plays id 2 (power on) and the power-off path plays id 3; the shutter, keys and menu go through the same function. A separate GPIO 95 switch (VA 0x284A8) turns the speaker amplifier on around playback.
+**Playback path (VERIFIED by disassembly).** At boot a function at VA 0x1E234 looks each name up in the pack and stores the five 16-bit handles in a table at RAM 0x110284. The event player at VA 0x1E844 takes a sound id, and before doing anything reads settings byte +0x19 through its getter (VA 0x1F560). If it's zero, it returns without playing. Otherwise it passes that byte to the volume routine at VA 0x1E18C (levels 0 to 8, gain = level x 8 − 1), picks the handle, opens the resource and posts it to the audio task. Boot plays id 2 (power on) and the power-off path plays id 3; the shutter, keys and menu go through the same function. A separate GPIO 95 switch (VA 0x284A8) turns the speaker amplifier on around playback.
 
-**The key-tone byte (VERIFIED).** Settings byte +0x19 is the UI-sound volume with 0 meaning off; factory default 5; both dumps hold 5 in every record. The two code sites that write it are generic SDK menu handlers, and the quick-start guide lists no sound setting, so the stock Charmera menu never changes it (REPORTED). A second byte, +0x05, is the general playback volume (also 0 to 8, default 5).
+**The key-tone byte (VERIFIED).** Settings byte +0x19 is the UI-sound volume, with 0 meaning off. The factory default is 5, and both dumps hold 5 in every record. The two code sites that write it are generic SDK menu handlers, and the quick-start guide lists no sound setting, so the stock Charmera menu never changes it (REPORTED). A second byte, +0x05, is the general playback volume (also 0 to 8, default 5).
 
-**Settings record format (VERIFIED).** 512-byte sectors from 0x170000: 252 bytes of settings, CRC32 over them in the next four bytes, and a zero second page; appended whenever a value changes; the current record is the one before the first erased sector. The record layout was recovered from the firmware's defaults routine (VA 0x1F69C) and its setters. One more rule for a settings-only mute image (VERIFIED): the photo directory sector at 0x17F000 must be zeroed, never 0xFF, when a valid settings record is present, because the directory loader treats 0xFF as two used entries of length 0xFFFFFFFF; a blank settings bank is fine because the defaults path rewrites the directory.
+**Settings record format (VERIFIED).** 512-byte sectors from 0x170000: 252 bytes of settings, CRC32 over them in the next four bytes, and a zero second page. A record is appended whenever a value changes, and the current record is the one before the first erased sector. The record layout was recovered from the firmware's defaults routine (VA 0x1F69C) and its setters. One more rule for a settings-only mute image (VERIFIED): the photo directory sector at 0x17F000 must be zeroed, never 0xFF, when a valid settings record is present, because the directory loader treats 0xFF as two used entries of length 0xFFFFFFFF. A blank settings bank is fine, because the defaults path rewrites the directory.
 
 **Three ways to mute, cheapest first.**
 
-1. Settings only: make the current settings record carry +0x19 = 0. No code, no resources. The toolkit rewrites the store so that record is the only one (sector 0, zero second page, 0xFF after it), which is exactly what the loader's "sector before the first erased sector" rule selects (VERIFIED). A stored level of 0 survives normal saves because the camera copies the RAM record forward and has no UI that sets this byte; it is lost only when the camera falls back to defaults (CRC failure, the 120-save collision in section 2, or a flashed image carrying a level-5 record). BEEP.WAV is never requested by this firmware (no caller asks for id 5), so the audible sounds are click, shutter, power on and power off.
-2. Data only: overwrite the PCM of all five WAVs with silence (0x80 for 8-bit, 0x00 for 16-bit), keeping every header byte. Same change the Godox C100 kit shipped and tested on a camera. Survives any settings reset.
-3. Code: make the event player return early or never enable the amplifier. Not needed and riskier.
+1. Settings only: make the current settings record carry +0x19 = 0. No code, no resources. The toolkit rewrites the store so that record is the only one (sector 0, zero second page, 0xFF after it), which is exactly what the loader's "sector before the first erased sector" rule selects (VERIFIED). A stored level of 0 survives normal saves, because the camera copies the RAM record forward and has no UI that sets this byte. It's lost only when the camera falls back to defaults (CRC failure, the 120-save collision in section 2, or a flashed image carrying a level-5 record). BEEP.WAV is never requested by this firmware (no caller asks for id 5), so the audible sounds are click, shutter, power on and power off.
+2. Data only: overwrite the PCM of all five WAVs with silence (0x80 for 8-bit, 0x00 for 16-bit), keeping every header byte. It's the same change the Godox C100 kit shipped and tested on a camera, and it survives any settings reset.
+3. Code: make the event player return early or never enable the amplifier. It isn't needed and it's riskier.
 
-Both data-only methods change only blocks 0x120000 to 0x16FFFF (method 2) or block 0x170000 (method 1); `verify` shows exactly that. Replacing a sound instead of silencing it must keep the slot's rate, bit depth and PCM length (pad or truncate) so no header or directory changes; the toolkit's `sounds replace` does the conversion. Whether the player honours a different rate or bit depth in a slot is UNKNOWN, so the toolkit does not try.
+Both data-only methods change only blocks 0x120000 to 0x16FFFF (method 2) or block 0x170000 (method 1), and `verify` shows exactly that. Replacing a sound instead of silencing it must keep the slot's rate, bit depth and PCM length (pad or truncate) so no header or directory changes; the toolkit's `sounds replace` does the conversion. Whether the player honours a different rate or bit depth in a slot is UNKNOWN, so the toolkit does not try.
 
-Nothing here has been flashed yet. The first mute test on a camera waits for your verified full-flash backup.
+When this was written nothing here had been flashed, and the first mute test on a camera was waiting for a verified full-flash backup.
 
 ## 8. Risks
 
-1. **No boot-ROM fallback is known.** A failed SD update, or a bad image, means a clip write or a dead camera. Mitigation: verified backup first; only block-aligned 0x1E0000 files; full battery; never a 2 MiB file. (Superseded 2026-11-06: 0x169000-byte files too, the other size `verify` and `stage` take; `verify` takes any other only as a WARN with `--allow-odd-size`, and `stage` never.)
-2. **Firmware that does not fit the camera.** The original-series image boots on a Millennium or CLOT body but capture fails, and on 2026-11-06 it did the same on an original-series body. The image carries no marker the tool can read from the camera, and the body, the boot screen and the stamp prove nothing. Mitigation, since then: no backup of the owner's own camera, no flash; `verify --stock <that backup>` compares the sensor table, which shows what fits only for a backup read before the camera was ever flashed; and the mods are built from the owner's own backup, never a public dump.
-3. **Programmer voltage.** A black CH341A at 5 V can damage the flash and the SoC. Mitigation: documented, and the backup tool prints the warning before every run. (Corrected 2026-11-06: until then it did not. `probe` and `backup` now print a checklist before they run: a 3.3 V programmer, never an unmodified black CH341A, the battery lead lifted, pin 1 on the dot.)
+1. **No boot-ROM fallback is known.** A failed SD update, or a bad image, means a clip write or a dead camera. Mitigation: a verified backup first, only block-aligned 0x1E0000 files, a full battery, and never a 2 MiB file. (Superseded 2026-11-06: 0x169000-byte files too, the other size `verify` and `stage` take. `verify` takes any other size only as a WARN with `--allow-odd-size`, and `stage` never does.)
+2. **Firmware that does not fit the camera.** The original-series image boots on a Millennium or CLOT body but capture fails, and on 2026-11-06 it did the same on an original-series body. The image carries no marker the tool can read from the camera, and the body, the boot screen and the stamp prove nothing. Mitigation, since then: never flash without a backup of the owner's own camera. (Superseded 2026-11-18: know what your camera runs before you flash, from a backup or `identify`. Without either the tools warn; they don't refuse. The backup is still the only way back.) `verify --stock <that backup>` compares the sensor table, which shows what fits only for a backup read before the camera was ever flashed. The mods are built from the owner's own backup, never a public dump.
+3. **Programmer voltage.** A black CH341A at 5 V can damage the flash and the SoC. Mitigation: it's documented, and the backup tool prints the warning before every run. (Corrected 2026-11-06: until then it did not. `probe` and `backup` now print a checklist before they run: a 3.3 V programmer, never an unmodified black CH341A, the battery lead lifted, pin 1 on the dot.)
 4. **Back-powering the SoC through the flash VCC pin.** Causes unstable reads and could stress the board. Mitigation: battery disconnected, double read with compare, stop if the chip is not detected cleanly.
-5. **A public restore image is not a factory image.** It carries another owner's settings records and two photos; a blanked variant is cleaner but its behaviour on a blank settings store is only emulation-verified.
+5. **A public restore image is not a factory image.** It carries another owner's settings records and two photos. A blanked variant is cleaner, but its behaviour on a blank settings store is only emulation-verified.
 6. **Resource edits that change sizes.** Any sound or frame replacement that outgrows its slot shifts nothing by itself (sectors are fixed), but anything beyond the slot overwrites the next resource. Mitigation: `sounds replace` keeps the stock PCM length; frame work (later) must respect the slot budgets from the directory.
-7. **Code patches.** keychain-camera-plus hit a watchdog reboot loop with a one-word patch at 0x006D10 and had to revert; the zero block at 0x110000 that looks like free space is the heap; two helper functions live inside the "dead" Wi-Fi stack. Mitigation: Phase 3 starts with data-only mods; code patches only after the backup path is proven on your camera.
-8. **The "final erase" of the updater.** VERIFIED: one extra 64 KiB block at (file length rounded to 256) + 0x10000. 0x1F0000 for a 0x1E0000 file (empty, harmless); 0x170000 for a resource-sized package (settings reset); 0x180000 for a 0x170000 file (corrupts internal photo 0); beyond the chip for 2 MiB. When this was written the toolkit built only 0x1E0000 files (corrected 2026-11-06: `pack --official-size` also builds 0x169000 files, whose final erase is the settings reset above); `verify` prints where the extra erase lands.
-9. **Stock settings-bank bug.** After about 120 saves the photo-directory sector is misread as a settings record and the camera resets to defaults and blanks the directory (INFERRED from the verified algorithm). Not caused by the toolkit, but a settings-only mute would be undone by it; the data-only PCM mute would not. (Superseded by [Image layout](11-FORMAT.md) (static analysis 2026-11-11: 128 sectors, sector 120 stepped over, wrap erases the block; not observed on a camera).)
+7. **Code patches.** keychain-camera-plus hit a watchdog reboot loop with a one-word patch at 0x006D10 and had to revert. The zero block at 0x110000 that looks like free space is the heap, and two helper functions live inside the "dead" Wi-Fi stack. Mitigation: the mods start with data-only changes, and code patches come only after the backup path is proven on your camera.
+8. **The "final erase" of the updater.** VERIFIED: one extra 64 KiB block at (file length rounded to 256) + 0x10000. That's 0x1F0000 for a 0x1E0000 file (empty, harmless), 0x170000 for a resource-sized package (settings reset), 0x180000 for a 0x170000 file (corrupts internal photo 0), and beyond the chip for 2 MiB. When this was written the toolkit built only 0x1E0000 files (corrected 2026-11-06: `pack --official-size` also builds 0x169000 files, whose final erase is the settings reset above); `verify` prints where the extra erase lands.
+9. **Stock settings-bank bug.** After about 120 saves the photo-directory sector is misread as a settings record and the camera resets to defaults and blanks the directory (INFERRED from the verified algorithm). The toolkit doesn't cause it, but it would undo a settings-only mute. The data-only PCM mute would survive it. (Superseded by [Image layout](11-FORMAT.md), from static analysis on 2026-11-11: 128 sectors, sector 120 is stepped over, and the wrap erases the block. Not observed on a camera.)
 
 ## 9. Open questions
 
-- The SPII header fields beyond the magic and the register list: the 0x1B0000 word, the 0x3000/0x0200 halves, `SRIy`, whether the ROM checks anything. Needs the ROM or a load experiment; nothing in the firmware image reads these fields, so static analysis cannot settle them.
+- The SPII header fields beyond the magic and the register list: the 0x1B0000 word, the 0x3000/0x0200 halves, `SRIy`, whether the ROM checks anything. Settling them needs the ROM or a load experiment. Nothing in the firmware image reads these fields, so static analysis can't.
 - Settled: the settings loader takes the sector before the first erased one, so a single-record store is honoured (section 2).
 - Settled: the updater programs to the file length in 256-byte pages and erases one extra block at length + 64 KiB (section 4).
-- Sensor: this build drives one hard-coded driver through a bit-banged two-wire bus (GPIO 0x11 clock, GPIO 0x12 data, write address 0x78), 61 register writes with SuperPix-style page selects, never reads a chip ID and ignores write failures, which is consistent with (not proof of) the cross-edition reports. The SP140A name remains community inference. The toolkit fingerprints the 61-entry table (SHA-256 aea3976b...) and the code region (297506be...) so a future Millennium or CLOT dump can be told apart.
+- Sensor: this build drives one hard-coded driver through a bit-banged two-wire bus (GPIO 0x11 clock, GPIO 0x12 data, write address 0x78), 61 register writes with SuperPix-style page selects. It never reads a chip ID and ignores write failures, which is consistent with the cross-edition reports but doesn't prove them. The SP140A name remains community inference. The toolkit fingerprints the 61-entry table (SHA-256 aea3976b...) and the code region (297506be...) so a future Millennium or CLOT dump can be told apart.
 - Boot time and power: [section 11](#11-quick-start-and-power-saving).
 - Whether the 20 ms sleep between the two sensor tables and the single 1280x720 mode leave room for a faster preview start: not measurable statically.
-- Whether the mask ROM of the GPCV2247F has a USB service mode and what the "ISP" test pad does. Needs the datasheet or a probe on hardware; no safe way to test it here.
+- Whether the mask ROM of the GPCV2247F has a USB service mode and what the "ISP" test pad does. This needs the datasheet or a probe on hardware, and there's no safe way to test it here.
 - The CLOT edition's existence beyond one issue comment; the Millennium's actual sensor.
 - Whether the event player honours a WAV whose rate or bit depth differs from the stock slot (replacement sounds are converted to the stock format to avoid finding out the hard way).
 
-## 10. What this means for the Phase 2 tools
+## 10. What this means for the tools
 
-Already built in `charmera-toolkit` (read-only unless a gate flag is given): `inspect`, `verify`, `pack`, `sounds list/extract/mute/replace`; `card-check`/`card-fix`, `exif-fix` and `backup`/`restore` are being finished. Design decisions that follow from this report:
+When this was written, `charmera-toolkit` already had `inspect`, `verify`, `pack` and `sounds list/extract/mute/replace` (read-only unless a gate flag is given), and `card-check`/`card-fix`, `exif-fix` and `backup`/`restore` were being finished. These design decisions follow from the report:
 
 - Build detection was by build stamps plus the software-region hash. Since 2026-11-06 it is by fingerprint over the
-  bytes, with the marks found by content, because the stamp is shared by two builds; a known build is named, an unknown
-  one is said to be unknown, and neither is taken as proof that a file fits a camera. When another dump appears, it
-  gets its own fingerprint entry.
-- Update files are always 0x1E0000 bytes, never 2 MiB, never odd-sized; the stamp must differ from 202505201029; the name is derived from the byte sum, never typed. (Superseded 2026-11-06: 0x1E0000 or 0x169000 bytes, the two sizes `verify` and `stage` take, `verify` another only as a WARN with `--allow-odd-size` and `stage` never; with `--stock` the stamp must also differ from the one found in the owner's backup.)
-- Mods are data-only and are verified by diffing 64 KiB blocks against the owner's stock backup, so `verify` can state exactly which blocks a mod touches.
-- Nothing produces a flashable file without an explicit flag, and every such file comes with a manifest and a SHA-256.
-- No firmware is distributed; the toolkit works on the owner's backup and references the public dumps by hash only.
+  bytes, with the marks found by content, because the stamp is shared by two builds. A known build is named, an
+  unknown one is said to be unknown, and neither is taken as proof that a file fits a camera. When another dump
+  appears, it gets its own fingerprint entry.
+- Update files are always 0x1E0000 bytes, never 2 MiB or an odd size. The stamp must differ from 202505201029, and
+  the name comes from the byte sum, never typed. (Superseded 2026-11-06: 0x1E0000 or 0x169000 bytes, the two sizes
+  `verify` and `stage` take. `verify` takes another only as a WARN with `--allow-odd-size`, and `stage` never does.
+  With `--stock` the stamp must also differ from the one found in the owner's backup.)
+- Mods are data-only and are verified by diffing 64 KiB blocks against the owner's stock backup, so `verify` can
+  state exactly which blocks a mod touches.
+- Nothing produces a flashable file without an explicit flag, and every such file comes with a manifest and a
+  SHA-256.
+- No firmware is distributed. The toolkit works on the owner's backup and references the public dumps by hash only.
 
 ## 11. Quick start and power saving
 
@@ -259,18 +316,18 @@ All offsets are file offsets; VA = offset − 0x200. VERIFIED by disassembly unl
 4. Audio init; the power-on WAV is posted to the audio task and not waited for.
 5. The power-on logo JPEG is decoded and shown (0x63D0 to 0x64E4; decode time UNKNOWN), then a fixed 50 ms delay (0x64F8); speaker amplifier GPIO 95 and GPIO 38 (an LED, INFERRED) are switched on.
 6. Wait until the AP task reports SD detection/mount (three immediate mount retries, no long timeout) and the sound has started.
-7. Key/ADC init with a 31 ms periodic timer; then state 0x10D, the home/mode screen (HOME_SMALL, redrawn every 0.75 s). It leaves for the photo state (0x1C644) only on message 0x7001. What posts 0x7001 at boot is UNKNOWN: nothing automatic was found, so you need to check whether live view appears without a key press.
+7. Key/ADC init with a 31 ms periodic timer; then state 0x10D, the home/mode screen (HOME_SMALL, redrawn every 0.75 s). It leaves for the photo state (0x1C644) only on message 0x7001. What posts 0x7001 at boot is UNKNOWN. Nothing automatic was found, so check on a camera whether live view appears without a key press.
 8. Preview start (0x1C614 to 0x1BD80) has no OS delays in the first five call levels. Sensor init, LCD init and SDRAM init times cannot be read statically.
 
-Fixed boot delays therefore total only about 150 ms plus whatever the hardware init takes; the rest is sensor/JPEG/SD work and, possibly, waiting on the home screen. No Wi-Fi and no USB waits exist at boot: the Wi-Fi init path (0xA20A4) is reachable only through a mode switch that every caller invokes with "off", and no Wi-Fi task is ever created.
+Fixed boot delays therefore total only about 150 ms plus whatever the hardware init takes. The rest is sensor/JPEG/SD work and possibly waiting on the home screen. There are no Wi-Fi or USB waits at boot. The Wi-Fi init path (0xA20A4) is reachable only through a mode switch that every caller invokes with "off", and no Wi-Fi task is ever created.
 
-**Auto power-off** (key scanner tail 0x76FC to 0x7780): idle seconds are counted from the 1/128 s timer and reset on any key press. Threshold = 60 × M seconds where M comes from settings byte +0x01: value 1 → 3 min, 2 → 5 min, n ≥ 3 → n min (0x7750/0x775C). Both dumps hold 2 (5 minutes); the quick-start guide says 3 minutes. Either the guide describes value 1, or timer 2 runs near 77 Hz rather than 128 Hz and every timing in this section scales by 0.6. One stopwatch measurement on the stock camera settles it. Auto-off is skipped while recording or on USB; on expiry it posts the power-off messages.
+**Auto power-off** (key scanner tail 0x76FC to 0x7780): idle seconds are counted from the 1/128 s timer and reset on any key press. The threshold is 60 × M seconds, where M comes from settings byte +0x01: value 1 → 3 min, 2 → 5 min, n ≥ 3 → n min (0x7750/0x775C). Both dumps hold 2 (5 minutes); the quick-start guide says 3 minutes. Either the guide describes value 1, or timer 2 runs near 77 Hz instead of 128 Hz and every timing in this section scales by 0.6. One stopwatch measurement on the stock camera settles it. Auto-off is skipped while recording or on USB, and on expiry it posts the power-off messages.
 
-**A standby stage exists.** After 60 × (settings byte +0x51) seconds idle (both dumps: 2 → 2 minutes) the firmware switches the speaker amplifier off, stops audio and sets a standby flag; the next power-key press wakes instead of powering off. No LCD backlight write was found, so whether the screen blanks is UNKNOWN. There is no clock lowering and no idle hook was located; the CPU clock multiplier is never written by reachable code, so the running frequency is UNKNOWN statically (144 MHz is the weak favourite).
+**A standby stage exists.** After 60 × (settings byte +0x51) seconds idle (both dumps: 2 → 2 minutes) the firmware switches the speaker amplifier off, stops audio and sets a standby flag. The next power-key press then wakes the camera instead of powering it off. No LCD backlight write was found, so whether the screen blanks is UNKNOWN. There's no clock lowering, and no idle hook was located. The CPU clock multiplier is never written by reachable code, so the running frequency is UNKNOWN statically (144 MHz is the weak favourite).
 
 **Power-off** (0x23008): power-off WAV, 200 ms, logo shown again for 600 ms, ADC and timers off, waits up to 2 s for key release, then writes the PMU register 0xD0000028 through the unlock-key pair (the same pair the boot header programs) and loops.
 
-**Battery**: ADC channel 1 sampled about once a second, five-sample average, thresholds 2190/2420/2600 counts for levels 0 to 3 with 5 counts of hysteresis (table at 0xF3864); level 0 warns, then powers off. Charging is in hardware. The divider ratio is UNKNOWN, so counts do not convert to volts without a measurement.
+**Battery**: ADC channel 1 sampled about once a second, five-sample average, thresholds 2190/2420/2600 counts for levels 0 to 3 with 5 counts of hysteresis (table at 0xF3864). Level 0 warns, then powers off. Charging is in hardware. The divider ratio is UNKNOWN, so counts do not convert to volts without a measurement.
 
 **Candidate changes, cheapest first** (none tested; all are single-byte or settings changes except the last two):
 

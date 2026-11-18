@@ -146,7 +146,7 @@ public final class CandidatesTest {
             UpdateCheck.Result plain = UpdateCheck.check(Candidates.Kind.RESTORE.fileNameFor(UpdateCheck.sha256Hex(restore, 0, restore.length)), restore);
             expect("without a backup the restore file's own checks pass, its vector table is the public build's, and"
                     + " it is not OK yet", plain.ok && !plain.compared && level(plain, "vector-table") == UpdateCheck.Level.PASS
-                    && plain.verdict().startsWith("Not OK to put on the card yet:"));
+                    && plain.verdict().startsWith("Not compared with a backup of this camera's own chip"));
             expect("its build marks name the source folder, and what a folder shows", text(plain, "series").contains(
                     "compiled Oct 14 2025, source folder v006, stamp 202505201029") && text(plain, "series").contains(
                     "the same one does not show the same build, and neither says whether the file fits your camera"));

@@ -181,9 +181,9 @@ public final class CandidatesFactoryTest {
                 && "v0.25".equals(Candidates.Kind.V025.version)
                 && "v0.24".equals(Candidates.Kind.BRINGUP.version) && Candidates.Kind.RESTORE.version == null
                 && Candidates.Kind.PROBE.version == null && !Candidates.Kind.PROBE.repair());
-        expect("the menu rows are short", "v0.26 — factory firmware + Volume/LED + EXIF".equals(
-                Candidates.Kind.V026.menuText()) && "v0.25 — factory firmware + Volume/LED".equals(
-                Candidates.Kind.V025.menuText()) && "v0.24 — public build + OV9732 port".equals(
+        expect("the menu rows are short", "v0.26: factory firmware + Volume/LED + EXIF".equals(
+                Candidates.Kind.V026.menuText()) && "v0.25: factory firmware + Volume/LED".equals(
+                Candidates.Kind.V025.menuText()) && "v0.24: public build + OV9732 port".equals(
                 Candidates.Kind.BRINGUP.menuText()));
         expect("v0.26 and v0.25 are made from the factory dump, v0.24 from the stock dump", Candidates.Kind.V026.base
                 == Candidates.Base.FACTORY && Candidates.Kind.V025.base == Candidates.Base.FACTORY

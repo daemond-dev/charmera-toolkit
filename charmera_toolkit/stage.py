@@ -460,13 +460,13 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route:
     print()
     if stock is None:
         print("No backup of this camera's own flash chip was given, so nothing above compares the file with the firmware the")
-        print("camera runs, and a file that does not fit the camera cannot be undone. No backup of your own camera, no flash:")
-        print("read the chip first (docs/01-FIRST-FLASH.md, step 1) and give it as --stock. stage still writes the file if")
-        print("you confirm below.")
+        print("camera runs. Before you flash, find out what it runs: read its chip (docs/01-FIRST-FLASH.md, step 1) and pass")
+        print("it as --stock, or run `charmera identify` on its photos. If the flash goes wrong, a backup is the only way")
+        print("back. stage still writes the file if you confirm below.")
     else:
-        print("No backup of this camera's own flash chip, no flash: keep --stock safe, it is the way back. Only a read made")
-        print("before the camera was ever flashed says whether a firmware fits it; a read taken after a flash shows what the")
-        print("camera runs now, not what fits it (see the sensor-table line above).")
+        print("Keep the --stock file safe. It's the way back if this flash goes wrong. Only a read made before the camera")
+        print("was ever flashed says whether a firmware fits it. A read taken after a flash shows what the camera runs now,")
+        print("and that says nothing about what fits it (see the sensor-table line above).")
     if donor_route:
         print("Donor route: this file is another camera's firmware (--donor), for a camera whose own firmware is gone. Nothing")
         print("here has tested it on this camera. Whether it fits depends on the two cameras having the same image sensor and")

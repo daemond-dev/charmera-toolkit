@@ -318,7 +318,7 @@ final class Recipe {
      */
     static String problem(Selection sel) {
         if (!Arrays.asList(BASES).contains(sel.base)) {
-            return "there is no base " + sel.base + "; the bases are v012, v006 and v008_test";
+            return "there is no base " + sel.base + " (the bases are v012, v006 and v008_test)";
         }
         for (String m : sel.mods) {
             int i = modIndex(m);
@@ -545,14 +545,14 @@ final class Recipe {
                 return null;
             }
             return "Wrong sensor? Identify says this camera's photos come from " + ("v012".equals(identified)
-                    ? "build v012" : "the v006 family") + ", firmware for the " + theirs + ", and this file drives the "
-                    + mine + ". On a " + theirs + " camera it boots but cannot take pictures, until you flash firmware"
+                    ? "build v012" : "the v006 family") + ", firmware for the " + theirs + ", but this file drives the "
+                    + mine + ". On an " + theirs + " camera it boots but can't take pictures until you flash firmware"
                     + " that fits.";
         }
-        return "Not confirmed: no backup is on record and Identify has not been run, so the app does not know which"
-                + " firmware this camera runs. This file drives the " + mine + "; on an " + other + " camera it boots but"
-                + " cannot take pictures, until you flash firmware that fits. Identify this camera's firmware (from its"
-                + " photos, without opening it) confirms it.";
+        return "Not confirmed: no backup is chosen and Identify hasn't been run, so the app doesn't know which"
+                + " firmware this camera runs. This file drives the " + mine + ". On an " + other + " camera it boots but"
+                + " can't take pictures until you flash firmware that fits. To check without opening the camera, run"
+                + " \"Identify this camera's firmware\" on its photos.";
     }
 
     /** The header the photos of this firmware should have. */
@@ -576,11 +576,11 @@ final class Recipe {
         if (sel.stock() && V012.equals(sel.base)) {
             b.append(" The factory firmware of OV9732 cameras, unchanged.");
         } else if (!drivesOv9732(sel)) {
-            b.append(sel.stock() ? " The base's stock firmware, unchanged." : " SP140A firmware: it does not drive the"
+            b.append(sel.stock() ? " The base's stock firmware, unchanged." : " SP140A firmware. It doesn't drive the"
                     + " OV9732.");
         }
         if (untriedCombination(sel)) {
-            b.append(" Experimental: this combination has not yet been tried on a camera, although each of its mods"
+            b.append(" Experimental: this combination hasn't been tried on a camera yet, though each of its mods"
                     + " has.");
         }
         return b.toString();

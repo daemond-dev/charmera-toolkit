@@ -39,13 +39,13 @@ final class FlashFlow {
     private static final int FIELDS = 18;
 
     /** How to connect a camera whose card may hold an update file: it must not start up with that card in it. */
-    static final String SAFE_ORDER = "Camera off, card out; switch it on with the power key and wait 10 seconds; card"
-            + " in; then connect. The app reads it as soon as it appears.";
+    static final String SAFE_ORDER = "Switch the camera off and take the card out. Switch it on with the power button,"
+            + " wait 10 seconds, put the card back in, then connect it. The app reads it as soon as it appears.";
     /** How to connect a camera whose card the last listing found without an update file. */
-    static final String PLAIN_ORDER = "Switch the camera on with its power key, wait 10 seconds, then connect it. The"
+    static final String PLAIN_ORDER = "Switch the camera on with its power button, wait 10 seconds, then connect it. The"
             + " app reads it as soon as it appears.";
     /** The drive line for a drive ejected with the cable still in, outside the flash: nothing else to do with it now. */
-    static final String EJECTED_IN = "Ejected: unplug the cable.";
+    static final String EJECTED_IN = "Ejected ✓ Unplug the cable.";
     static final String CONNECT_LATER = "Connect it again when you need it.";
     static final String FLASH_NOW_PREFIX = "Flash the camera now and answer the question in step ";
     /** Shown only while the update file is on the card, so it carries the safe order itself. */
@@ -599,7 +599,7 @@ final class FlashFlow {
 
     /** The write step's line while the written file is gone from the card before the answer; "" otherwise. */
     String goneLine() {
-        return writtenGone() ? "The card no longer lists " + cardName + ": write it again in step " + number(Step.WRITE)
+        return writtenGone() ? "The card no longer lists " + cardName + ". Write it again in step " + number(Step.WRITE)
                 + "." : "";
     }
 
@@ -691,7 +691,7 @@ final class FlashFlow {
         switch (stage) {
             case WRITTEN:
                 if (v.open(Step.FLASH)) {
-                    return FLASH_NOW_PREFIX + number(Step.FLASH) + "; its More info gives the safe order to"
+                    return FLASH_NOW_PREFIX + number(Step.FLASH) + ". More info there gives the safe order to"
                             + " reconnect it.";
                 }
                 if (writtenGone() && v.open(Step.WRITE)) {
@@ -701,8 +701,8 @@ final class FlashFlow {
             case ANSWERED:
                 if (!Boolean.TRUE.equals(seen) && v.open(Step.FLASH)) {
                     // The safe order first: the update file is still on the card.
-                    return "Follow More info in step " + number(Step.FLASH) + ": it gives the safe order to reconnect"
-                            + " the camera.";
+                    return "Open More info in step " + number(Step.FLASH) + " for the safe order to reconnect the"
+                            + " camera.";
                 }
                 return v.open(Step.REMOVE) ? RECONNECT_TO_REMOVE : connectLater();
             case REMOVING:
@@ -752,7 +752,7 @@ final class FlashFlow {
 
     /** The flash step's folded line once it is done. */
     String flashSummary(Live live) {
-        return seen == null ? "Flash question not answered; the update file is removed." : answerLine(live);
+        return seen == null ? "Flash question not answered. The update file is removed." : answerLine(live);
     }
 
     /** The write step's folded line when its result is no longer on screen (another route, or a restart). */

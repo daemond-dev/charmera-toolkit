@@ -42,9 +42,9 @@ final class Identify {
     /** How many photos that are not recognised, could not be read or have no file time are named one by one. */
     static final int NAMED_OTHERS = 10;
 
-    static final String CAVEAT_V008 = "A photo cannot tell v006 from v008_test: both are stock builds for SP140A"
-            + " cameras and write the same header; either base works the same for our purposes.";
-    static final String CAVEAT_AFTER_FLASH = "Photos show the firmware that took them: on a camera that was flashed,"
+    static final String CAVEAT_V008 = "A photo can't tell v006 from v008_test. Both are stock builds for SP140A"
+            + " cameras and write the same header, so the app suggests base v006 for either.";
+    static final String CAVEAT_AFTER_FLASH = "Photos show the firmware that took them. On a camera that was flashed,"
             + " or that freezes in Photo mode, only photos from before the flash say what fits.";
     static final String CAVEAT_CLOCK = "Dates and order come from the file times, which come from the camera's clock.";
     static final String OUR_V021_V024 = "If this camera was ever flashed with our v0.21-v0.24, its photos look like"
@@ -349,8 +349,8 @@ final class Identify {
                 }
             }
         }
-        r.evidence.add(String.format(Locale.ROOT, "Photos on the card: %d; read: %d%s; camera-written: %d; not"
-                + " recognised: %d; could not be read: %d.", r.photos, r.headersRead, r.headersRead == r.scanned ? ""
+        r.evidence.add(String.format(Locale.ROOT, "Photos on the card: %d, read %d%s, camera-written %d, not"
+                + " recognised %d, could not be read %d.", r.photos, r.headersRead, r.headersRead == r.scanned ? ""
                 : String.format(Locale.ROOT, " (%d of them for the families)", r.scanned), r.recognised, r.other,
                 r.unreadable));
         if (r.videos > 0) {
@@ -450,17 +450,17 @@ final class Identify {
         if (r.runs.size() == 2) {
             Run a = r.runs.get(0);
             Run b = r.runs.get(1);
-            return "photos from two firmware families: " + familyName(a.family) + " up to " + date(a.last, tz) + ", "
-                    + familyName(b.family) + " from " + date(b.first, tz) + ": the camera was flashed in between, or"
-                    + " the card holds photos from two cameras.";
+            return "photos from two firmware families, " + familyName(a.family) + " up to " + date(a.last, tz) + " and "
+                    + familyName(b.family) + " from " + date(b.first, tz) + ". Either the camera was flashed in between,"
+                    + " or the card holds photos from two cameras.";
         }
         StringBuilder sb = new StringBuilder();
         for (Run x : r.runs) {
             sb.append(sb.length() == 0 ? "" : "; ").append(familyName(x.family)).append(' ').append(date(x.first, tz))
                     .append(" to ").append(date(x.last, tz));
         }
-        return String.format(Locale.ROOT, "photos from two firmware families, which change %d times by date (%s):"
-                + " the camera was flashed more than once, or the card holds photos from more than one camera.",
+        return String.format(Locale.ROOT, "photos from two firmware families, which change %d times by date (%s)."
+                + " Either the camera was flashed more than once, or the card holds photos from more than one camera.",
                 r.runs.size() - 1, sb);
     }
 
@@ -473,25 +473,25 @@ final class Identify {
                                  Entry firstExif, String exifSoftware, boolean v006Seen) {
         List<String> lines = new ArrayList<>();
         if (r.photos == 0) {
-            r.conclusion = "The card holds no photos, so the photos cannot say which firmware this camera runs."
-                    + (r.videos > 0 ? " Videos do not carry the header the app reads." : "");
+            r.conclusion = "The card holds no photos, so they can't say which firmware this camera runs."
+                    + (r.videos > 0 ? " Videos don't carry the header the app reads." : "");
             return;
         }
         if (r.newest == null) {
             if (dated == 0) {
-                lines.add("No photo on the card has a file time, so the app cannot date them or tell which"
+                lines.add("No photo on the card has a file time, so the app can't date them or tell which"
                         + " firmware took them.");
             } else if (r.unreadable == r.headersRead) {
-                lines.add("The app could not read the photos on the card, so it cannot tell which firmware took"
+                lines.add("The app couldn't read the photos on the card, so it can't tell which firmware took"
                         + " them.");
             } else if (r.oldest != null) {
                 // identify.py's first_camera from the newest end found none within the cap: it concludes nothing
-                lines.add(String.format(Locale.ROOT, "None of the newest %d photos the app read has a header a known"
-                        + " Charmera build writes as the camera saves it, so the app cannot tell which firmware"
-                        + " took the newest photos and gives no answer.", Math.min(cap, dated)));
+                lines.add(String.format(Locale.ROOT, "None of the newest %d photos the app read has a header that a known"
+                        + " Charmera build writes as the camera saves it. The app can't tell which firmware took the"
+                        + " newest photos, so it gives no answer.", Math.min(cap, dated)));
             } else {
-                lines.add("None of the photos the app read has a header a known Charmera build writes. They may come"
-                        + " from another camera or app, so the photos cannot say which firmware this camera runs.");
+                lines.add("None of the photos the app read has a header that a known Charmera build writes. They may"
+                        + " come from another camera or app, so they can't say which firmware this camera runs.");
             }
             if (r.undated > 0 && dated > 0) {
                 lines.add(undatedLine(r.undated) + ".");
@@ -538,7 +538,7 @@ final class Identify {
         }
         lines.addAll(r.notStock);
         lines.add("Base to build on: " + baseName(r.base) + (r.changes.isEmpty() ? "."
-                : " (from the oldest photos: photos from before a flash show the stock firmware)."));
+                : " (from the oldest photos, since photos from before a flash show the stock firmware)."));
         if (r.skippedNewest > 0) {
             r.notes.add(r.skippedNewest == 1 ? "The newest photo file was not the camera's own and was skipped."
                     : String.format(Locale.ROOT, "The newest %d photo files were not the camera's own and were"

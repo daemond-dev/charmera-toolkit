@@ -206,7 +206,7 @@ final class FlashLog {
     }
 
     /**
-     * The latest camera firmware state the log knows, in one short line, e.g. "v0.23 — flash seen 11 Nov 13:02",
+     * The latest camera firmware state the log knows, in one short line, e.g. "v0.23, flash seen 11 Nov 13:02",
      * or "unknown". Removing the update file and saving a backup say nothing about the firmware and are passed over.
      */
     String summary(TimeZone tz) {
@@ -215,16 +215,16 @@ final class FlashLog {
             String at = when(e.timeMs, tz);
             switch (e.event) {
                 case FLASH_SEEN:
-                    return named(e.firmware, i) + " — flash seen " + at;
+                    return named(e.firmware, i) + ", flash seen " + at;
                 case FLASH_NOT_SEEN:
-                    return UNKNOWN + " — " + named(e.firmware, i) + " flash not seen " + at;
+                    return UNKNOWN + " (" + named(e.firmware, i) + " flash not seen " + at + ")";
                 case WRITTEN:
                     return named(e.firmware, i) + " written " + at + ", flash not confirmed";
                 case CHECK_OK:
                     // the photo's header shows only the public-build family, not which of its files was written
-                    return named(e.firmware, i) + " written; new photo has the public-build family's header " + at;
+                    return named(e.firmware, i) + " written, a new photo has the public-build family's header " + at;
                 case CHECK_FAILED:
-                    return UNKNOWN + " — photo check failed " + at;
+                    return UNKNOWN + " (photo check failed " + at + ")";
                 default:
                     break;
             }

@@ -84,7 +84,7 @@ public final class UpdateCheckTest {
         expect("without a backup the sensor line is a warning that names step 0", r.ok
                 && line(r, "sensor-table", UpdateCheck.Level.WARN)
                 && text(r, "sensor-table").contains("Choose this camera's backup")
-                && text(r, "sensor-table").contains("the likely cause is a sensor it does not drive"), r);
+                && text(r, "sensor-table").contains("The likely cause is a sensor it doesn't drive"), r);
         // A backup whose firmware is a known build may be a read taken after a flash with it: a match is a warning.
         r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(base));
         expect("against a backup of a known build the same table is a warning, and the software passes", r.ok
@@ -499,7 +499,7 @@ public final class UpdateCheckTest {
         expect("a dump named like a read no second read agreed with is not a backup", unverified != null
                 && unverified.startsWith("its name is one the toolkit's backup and restore give to reads that did not"
                 + " agree and to a single read, and such a read is not a backup until two reads agree.")
-                && unverified.contains("read the chip again with the toolkit's backup command until two reads"
+                && unverified.contains("Read the chip again with the toolkit's backup command until two reads"
                 + " agree"), null);
         Locale language = Locale.getDefault();
         String upper;
@@ -710,7 +710,7 @@ public final class UpdateCheckTest {
         expect("stored photo warns", r.ok && line(r, "photos", UpdateCheck.Level.WARN)
                 && text(r, "photos").contains("1 photo from the camera it was made from"), r);
         expect("without a backup the verdict is not OK yet, and points at the warnings",
-                r.verdict().startsWith("Not OK to put on the card yet: it has not been compared with a backup")
+                r.verdict().startsWith("Not compared with a backup of this camera's own chip")
                 && r.verdict().contains("The file's own checks passed, with these 2 warnings:")
                 && r.verdict().contains("Stored photos: the file carries 1 photo from the camera it was made from, but its"
                 + " photo list is empty, so your camera will not show it.")
@@ -727,10 +727,10 @@ public final class UpdateCheckTest {
         // --- the verdict at the top of the report -------------------------------------------------------------
 
         r = check(base, build);
-        expect("a clean file's verdict without a backup is not OK yet: it was compared with no backup", r.ok
-                && !r.compared && r.verdict().startsWith("Not OK to put on the card yet: it has not been compared with a"
-                + " backup of this camera's own chip, and without one no file goes on the card. The file's own checks"
-                + " passed, with this warning: Image sensor set-up: the same program as the public build's"), r);
+        expect("a clean file's verdict without a backup says it was compared with no backup", r.ok
+                && !r.compared && r.verdict().startsWith("Not compared with a backup of this camera's own chip, so"
+                + " nothing here shows that the file fits this camera. The file's own checks passed, with this"
+                + " warning: Image sensor set-up: the same program as the public build's"), r);
         r = UpdateCheck.check(name(own, "202611050001"), own, build, chip(own));
         expect("the same file compared with a backup is OK", r.ok && r.compared
                 && r.verdict().startsWith("OK to put on the card."), r);

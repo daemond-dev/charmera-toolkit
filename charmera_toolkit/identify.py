@@ -445,12 +445,12 @@ def register(subparsers) -> None:
             "folder or among the files given, and reads only their headers. Photos with no file time are left out of "
             "the dating and counted. It picks the oldest and the newest dated photo the camera wrote as it is, "
             "skipping files another program saved again and exif-fix copies, and reads the kind of every dated photo "
-            "(up to --cap, the oldest and newest always among them). One family on the card: 'This camera runs stock "
-            "v012' (the bare 0x270-byte header; base v012) or 'stock v006 or v008_test' (the 0x590-byte header; base "
-            "v006). It says when the camera does not look stock: our EXIF mod's header (v0.26 or later; base v012, "
-            "the mod's own base), or photos from two families (a flash in between, or two cameras; the base then "
-            "follows the oldest family, since photos from before a flash show the stock firmware, with low "
-            "confidence)."
+            "(up to --cap, the oldest and newest always among them). When every photo is from one family it says "
+            "'This camera runs stock v012' (the bare 0x270-byte header; base v012) or 'stock v006 or v008_test' (the "
+            "0x590-byte header; base v006). It also says when the camera doesn't look stock: when it finds our EXIF "
+            "mod's header (v0.26 or later, base v012, the mod's own base), or photos from two families (a flash in "
+            "between, or two cameras). With two families, the base follows the oldest, since photos from before a "
+            "flash show the stock firmware, and the confidence is low."
         ),
         epilog=(
             "A photo cannot tell v006 from v008_test (both stock builds for SP140A cameras; either base works the "

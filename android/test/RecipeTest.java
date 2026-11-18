@@ -133,7 +133,8 @@ public class RecipeTest {
                 !Recipe.experimental("v006/volume-led") && "experimental".equals(rowsOnly.status())
                         && Recipe.untriedCombination(rowsOnly) && Recipe.describe(rowsOnly).contains("Experimental")
                         && !Recipe.untriedCombination(v026)
-                        && !Recipe.untriedCombination(new Recipe.Selection("v012", "v012/capture-flash")));
+                        && !Recipe.untriedCombination(new Recipe.Selection("v012", "v012/volume-led", "v012/exif",
+                                "v012/boot-last-mode", "v012/capture-flash")));
         expect("describe() names SP140A firmware and the factory firmware, and asks for no backup",
                 Recipe.describe(rowsOnly).contains("SP140A firmware")
                         && !Recipe.describe(rowsOnly).contains("backup")

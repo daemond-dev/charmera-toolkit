@@ -274,7 +274,7 @@ def test_app_offers_the_stock_restore_file_only_for_the_public_build():
     assert "whose backup, read before the camera was ever flashed, shows the public build" in _joined(
         ACTIVITY.read_text(encoding="utf-8"))
     for path in (PKG / "Candidates.java", ACTIVITY):
-        assert "what their cameras ran before is not known" in _joined(path.read_text(encoding="utf-8")), path.name
+        assert "what their cameras ran before isn't known" in _joined(path.read_text(encoding="utf-8")), path.name
 
 
 def test_app_uses_no_library_call_newer_than_its_minimum_android():
@@ -914,7 +914,7 @@ def test_app_flash_steps_open_after_a_missed_eject():
     assert "Done. Flash again" not in java and "attach(col, flashAgainLink);" in _bodies(java, "private void header(")[0]
     # before the answer a listing without the written file opens Write again, and the write step says so (and takes
     # that line back once it no longer holds)
-    assert '"The card no longer lists " + cardName + ": write it again in step " + number(Step.WRITE)' in flow
+    assert '"The card no longer lists " + cardName + ". Write it again in step " + number(Step.WRITE)' in flow
     assert 'private static final String GONE_LINE = "The card no longer lists ";' in java
     assert "String gone = f == null || busy() ? \"\" : f.goneLine();" in _bodies(java, "private void updateButtons()")[0]
     assert "f.serialize()" in _bodies(java, "private void keep(")[0]
@@ -926,7 +926,7 @@ def test_app_flash_steps_open_after_a_missed_eject():
     # the probe's SENSOR.TXT at the write is the run's, so an old file after a restart is never this probe's result
     read = _bodies(java, "private void readSensorResult()")[0]
     assert "final String before = onRecord ? run.sensorAtWrite() : null;" in read
-    assert "The app cannot tell whether the probe wrote this file since the last flash" in _joined(read)
+    assert "The app can't tell whether the probe wrote this file since the last flash" in _joined(read)
     # ...and FlashFlowTest is run by build.sh (test_build_runs_every_jvm_test_and_compiles_the_gate)
     assert (REPO / "android" / "test" / "FlashFlowTest.java").exists()
     # every route is named in user text as its header names it
@@ -944,7 +944,7 @@ def test_app_says_synced_only_where_it_wrote_and_never_claims_an_eject_it_cannot
     mounted = check[check.rindex("} else {"):]
     assert "setStatus(ejectStatus, f != null && f.syncedClaim()" in mounted
     assert "Not ejected yet" not in _joined(java)
-    assert "The drive is connected. If you have not ejected it yet, tap " in _joined(mounted)
+    assert "The drive is connected. If you haven't ejected it yet, tap " in _joined(mounted)
     gone = check[:check.index("} else if (unmounted(v)) {")]
     # off the flashing routes, how to connect it again comes from the drive's runs: the safe order while the card may
     # hold an update file, as the drive line says (never a fixed "connect it again")
@@ -1065,16 +1065,22 @@ def test_app_candidates_match_the_documented_ones():
     assert java.count("V006_COMMIT") == 3   # defined once; the download and the page point at the same fixed commit
 
 
-def test_app_writes_nothing_without_a_backup_of_the_camera():
-    """The hard stop: Write and Save a copy need a backup on record and a check made against that one backup (WriteGate);
-    the confirmation, the tap on Write, the saved copy and the worker ask again; the app's README says so."""
+def test_app_write_gate_warns_but_refuses_known_bricks():
+    """Warn, don't block: Write and Save a copy need a file that passed its checks, no race in flight, and, when a
+    backup is on record, a check made against that one backup (WriteGate); with none on record an unknown file goes
+    too. The confirmation, the tap on Write, the saved copy and the worker ask again."""
     java = ACTIVITY.read_text(encoding="utf-8")
     gate = GATE.read_text(encoding="utf-8")
     assert "import android" not in gate
     refusal = _bodies(gate, "static String refusal(")[0]
-    for clause in ("if (backupLoading)", "if (backupSha256 == null)", "if (checking)", "UpdateCheck.confirms(check, data)",
+    for clause in ("if (backupLoading)", "if (checking)", "UpdateCheck.confirms(check, data)",
+                   "Candidates.withdrawn(check.sha256) != null",
+                   "backupSha256 == null ? check.referenceSha256 != null",
                    "!backupSha256.equals(check.referenceSha256)"):
         assert clause in refusal, clause
+    # no refusal just for having no backup on record
+    assert "no backup of this camera is on record" not in gate
+    assert "if (backupSha256 == null) {" not in refusal
     assert "WriteGate.refusal(check, data, backupSha256, loadingBackup, checking)" in _bodies(java, "private String gate(")[0]
     buttons = _bodies(java, "private void updateButtons()")[0]
     assert "boolean fileOk = gate(fileCheck, fileData) == null;" in buttons
@@ -1097,8 +1103,28 @@ def test_app_writes_nothing_without_a_backup_of_the_camera():
     result = _bodies(java, "protected void onActivityResult(")[0]
     assert 'writeStatus.setText("");\n                cleanStatus.setText("");' in result
     readme = ANDROID_README.read_text(encoding="utf-8")
-    assert re.search(r"No backup of your own camera, no flash", readme)
     assert "Choose this camera's backup" in readme and "Choose this camera's backup" in java
+
+
+def test_app_warns_loudly_on_an_unknown_file_with_no_backup():
+    """An unknown file (not reviewed) checked with no backup goes to the card with none on record; the file step and
+    the write confirmation both carry the loud warning."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    unknown_file = _joined(java[java.index("UNKNOWN_FILE = "):java.index("DOWNLOAD = ")])
+    for fact in ("isn't one of this project's reviewed builds", "with no backup chosen",
+                 "can't compare it with this camera's firmware", "Only write it if you know it fits."):
+        assert fact in unknown_file, fact
+    unknown = _bodies(java, "private boolean unknownNoBackup(")[0]
+    assert "!isReviewedPatch(result) && !result.compared && result.referenceSha256 == null" in unknown
+    assert "backupSha256 == null" in unknown
+    line = _bodies(java, "private SpannableString checkLine(")[0]
+    assert "} else if (unknownNoBackup(result)) {" in line
+    assert 'state = "\\u26a0 Unknown file."' in line
+    assert "next = UNKNOWN_FILE + " in line
+    assert "Needs this camera's backup first" not in java
+    confirm = _bodies(java, "private void confirmWrite()")[0]
+    assert "final boolean unknown = unknownNoBackup(check);" in confirm
+    assert '(unknown ? "\\n\\u26a0 Unknown file. " + UNKNOWN_FILE' in confirm
 
 
 def test_app_never_uses_a_check_made_against_another_backup():
@@ -1331,9 +1357,10 @@ def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
     # the way back: an older version in the menu for a factory version, v0.23's file (made here by Custom) for
     # v0.24, the restore file for v008_test and the SP140A v006 picks; no "no backup" line for a pick that needs one
     repair = _bodies(java, "private void renderRepair()")[0]
-    assert "wayBack(repairSel)" in repair and "No backup is needed" in repair
+    assert "wayBack(repairSel)" in repair and "You don't need a backup." in repair
     back = _bodies(java, "private static String wayBack(")[0]
-    assert "an older version, or stock v012" in back and "it is the way back from every v012 version" in back and "write v0.23's file: the app makes it here too" in back
+    said = _joined(back)
+    assert "an older version, or stock v012" in said and "It's the way back from every v012 version" in said         and "write v0.23's file. The app makes it here too" in said
     v008 = back[back.index("if (Recipe.V008.equals(sel.base)) {"):]
     v008 = v008[:v008.index("}")]
     assert "older version" not in v008 and "stock restore file" in v008
@@ -1398,14 +1425,16 @@ def test_app_identify_route_reads_the_photos_and_writes_nothing():
     assert "Identify.identify(entries, TimeZone.getDefault())" in run and "identifiedBase = r.base;" in run
     # the three guided questions, worded from what is known
     said = _joined(render)
-    for fact in ("are there Volume and LED rows after FORMAT? Then one of our mods (v0.24 or later) is installed.",
-                 "Does Photo or Video mode freeze after a flash? Then that firmware does not drive this camera's sensor",
-                 "Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells nothing."):
+    for fact in ("Setup page 2: are there Volume and LED rows after FORMAT? Then one of our mods (v0.24 or later) is"
+                 " installed.",
+                 "Does photo or video mode freeze after a flash? Then that firmware is for the other sensor family and"
+                 " doesn't drive this camera's sensor",
+                 "Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells you nothing."):
         assert fact in said, fact
     assert "identifyButton.setEnabled(idle && !zipping && !identifying && listed);" in \
         _bodies(java, "private void updateButtons()")[0]
     # Identify's two caveats are always given with its answer
     ident = (PKG / "Identify.java").read_text(encoding="utf-8")
     assert "r.caveats.add(CAVEAT_V008);" in ident and "r.caveats.add(CAVEAT_AFTER_FLASH);" in ident
-    assert "A photo cannot tell v006 from v008_test" in _joined(ident)
+    assert "A photo can't tell v006 from v008_test" in _joined(ident)
     assert "only photos from before the flash say what fits" in _joined(ident)

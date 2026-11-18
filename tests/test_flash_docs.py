@@ -1,6 +1,6 @@
 """The flash steps in docs/01..06 say the same thing: how an update ends, the battery, the edition, the stored
 photos, --allow-modified for mods, eject before removing, the Android 11 slot limit and the USB-C cleanup. Every doc
-holds to the backup rule: the hard stop is stated where a flash starts, every stage example gives --stock, the public
+holds to the rule: knowing what the camera runs is stated where a flash starts, every stage example gives --stock, the public
 dump is never anyone's --stock outside the candidates' recipe, and no doc calls the series or the stamp a proof.
 Every probe, backup, restore and photo-id command line in the docs runs with the options the tool registers, restore
 keeps its read in --out, the docs name backup's files as backup writes them, and they name the warning about a read
@@ -155,13 +155,15 @@ def test_ignored_file_diagnosis_lists_the_real_causes():
 def test_candidates_agree_with_first_flash():
     t = text("03-FLASH-CANDIDATES.md")
     assert "Card formatted FAT32" not in t
-    assert "is recommended" not in t and "Recommended:" not in t     # the backup is required, not recommended
-    assert "No backup, no flash" in t
+    assert "is recommended" not in t and "Recommended:" not in t     # the rule is stated, not recommended
+    assert "know what your camera runs" in t.lower()
+    assert "No backup, no flash" not in t                           # the old hard stop, gone since app 0.30
     assert "did not cause the freeze" in t and "does not fit" in t   # the corrected cause
     assert "The diff confirms" not in t
 
 
-HARD_STOP = re.compile(r"no backup[^.]{0,40}no flash", re.I)
+RULE = re.compile(r"know what (?:your|the|this) camera runs before you flash", re.I)
+OLD_HARD_STOP = re.compile(r"no backup[^.]{0,40}no flash", re.I)
 
 
 def intro(path: Path) -> str:
@@ -171,24 +173,29 @@ def intro(path: Path) -> str:
     return " ".join(" ".join(lines[:end]).split())
 
 
-@pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "1. Back up your camera's chip (no backup, no flash)"),
+@pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "1. Know what your camera runs (back up its chip)"),
                                           ("02-RECOVERY.md", "A. The camera boots and the updater runs: restore through the SD card"),
                                           ("03-FLASH-CANDIDATES.md", CANDIDATES_STEPS),
                                           ("06-ANDROID.md", "Before you flash from a phone"),
                                           ("04-STAGE.md", "What it does, in order")])
-def test_the_backup_is_a_hard_stop_before_every_flash(name, heading):
+def test_the_rule_is_stated_before_every_flash(name, heading):
+    """Know what your camera runs before you flash: a backup or Identify; without either the tools warn, not refuse."""
     s = section(name, heading)
-    assert HARD_STOP.search(s), name
+    assert RULE.search(s), name
+    assert not OLD_HARD_STOP.search(s), name
     assert "recommended" not in s.lower(), name
 
 
 @pytest.mark.parametrize("path", [README, DOCS / "02-RECOVERY.md"], ids=["README.md", "02-RECOVERY.md"])
-def test_the_hard_stop_opens_the_readme_and_recovery(path):
+def test_the_rule_opens_the_readme_and_recovery(path):
     s = intro(path)
-    assert HARD_STOP.search(s), path.name
+    assert RULE.search(s), path.name
+    assert not OLD_HARD_STOP.search(s), path.name
     assert "recommended" not in s.lower(), path.name
     if path == README:
-        assert "- No backup of your own camera, no flash." in path.read_text(encoding="utf-8")   # the first ground rule
+        t = path.read_text(encoding="utf-8")
+        assert "- Know what your camera runs before you flash: a backup of its chip, or the Identify route" in t
+        assert "Neither refuses" in t and "the only way back" in t                          # the first ground rule
 
 
 def test_the_docs_say_what_stage_does_without_a_backup():
@@ -198,7 +205,7 @@ def test_the_docs_say_what_stage_does_without_a_backup():
         for wrong in ("nothing in this toolkit or its app will write to a card without", "baked in everywhere",
                       "baked into the commands"):
             assert wrong not in t, f"{rel(path)}: {wrong!r}"
-    for name, heading in (("01-FIRST-FLASH.md", "1. Back up your camera's chip (no backup, no flash)"),
+    for name, heading in (("01-FIRST-FLASH.md", "1. Know what your camera runs (back up its chip)"),
                           ("04-STAGE.md", "What it does, in order")):
         s = section(name, heading)
         assert re.search(r"without `--stock`,? (?:`stage` |it )shows a WARN line", s, re.I), name

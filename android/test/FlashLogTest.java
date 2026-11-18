@@ -31,7 +31,7 @@ public final class FlashLogTest {
         expect("the SHA-256 prefix is 12 lowercase hex digits", log.entries().get(2).sha256Prefix.equals("abcdef012345"));
         expect("missing fields read as empty", log.entries().get(0).sha256Prefix.isEmpty() && log.entries().get(0).note.isEmpty());
         expect("a removed file is passed over: the flash seen is the state",
-                log.summary(UTC).equals("v0.23 — flash seen 11 Nov 13:03"));
+                log.summary(UTC).equals("v0.23, flash seen 11 Nov 13:03"));
         boolean readOnly;
         try {
             log.entries().clear();
@@ -43,14 +43,14 @@ public final class FlashLogTest {
 
         // summary for each kind of latest event
         expect("written but not seen", one(FlashLog.Event.WRITTEN, "v0.23").equals("v0.23 written 11 Nov 13:02, flash not confirmed"));
-        expect("flash not seen", one(FlashLog.Event.FLASH_NOT_SEEN, "v0.23").equals("unknown — v0.23 flash not seen 11 Nov 13:02"));
-        expect("check failed", one(FlashLog.Event.CHECK_FAILED, "").equals("unknown — photo check failed 11 Nov 13:02"));
+        expect("flash not seen", one(FlashLog.Event.FLASH_NOT_SEEN, "v0.23").equals("unknown (v0.23 flash not seen 11 Nov 13:02)"));
+        expect("check failed", one(FlashLog.Event.CHECK_FAILED, "").equals("unknown (photo check failed 11 Nov 13:02)"));
         expect("only a backup is unknown", one(FlashLog.Event.BACKUP_SAVED, "").equals("unknown"));
         FlashLog checked = new FlashLog();
         checked.add(T - MIN, FlashLog.Event.FLASH_SEEN, "v0.23", null, null);
         checked.add(T, FlashLog.Event.CHECK_OK, "", null, null);
         expect("a check without a firmware takes the one flashed before it",
-                checked.summary(UTC).equals("v0.23 written; new photo has the public-build family's header 11 Nov 13:02"));
+                checked.summary(UTC).equals("v0.23 written, a new photo has the public-build family's header 11 Nov 13:02"));
 
         // the firmware a file name may carry: only a flash seen or a photo check that passed names one
         expect("a passed check names the firmware flashed before it", "v0.23".equals(checked.confirmedFirmware()));
