@@ -9,7 +9,9 @@ import java.util.Locale;
  * Plain-JVM tests for the write gate (WriteGate). MainActivity's races cannot run here, but each one leaves the gate
  * a state: a check made against one backup while another is on record, a backup still being read, a check still
  * running. Each test below is one of those states, named after the race that leads to it, and the gate must refuse
- * every one of them. In the app's package, because WriteGate and the Result constructor are package-private.
+ * every one of them. Warn, don't block: a file that passed its checks with no backup on record (an unknown file
+ * included) goes to the card; known bricks (a FAIL, a withdrawn candidate, a dump) never do. In the app's package,
+ * because WriteGate and the Result constructor are package-private.
  */
 public final class WriteGateTest {
 
@@ -30,18 +32,52 @@ public final class WriteGateTest {
         expect("a file that passed against the backup on record may go to the card",
                 WriteGate.refusal(checkedY, data, backupY, false, false) == null, null);
 
-        // No backup of the camera, no flash.
-        expect("no backup on record: refused", refused(checkedY, data, null, false, false, "no backup"));
-        expect("a check made without a backup: refused, also once a backup is on record",
-                refused(unchecked, data, null, false, false, "no backup")
-                        && refused(unchecked, data, backupY, false, false, "not checked against the backup"));
+        // An unknown file (not reviewed) with no backup on record: written, with a loud warning on screen (not here).
+        expect("an unknown file that passed, checked with no backup, goes to the card with no backup on record",
+                WriteGate.refusal(unchecked, data, null, false, false) == null, null);
+        expect("but once a backup is on record, the check made without one waits for the comparison with it",
+                refused(unchecked, data, backupY, false, false, "checked against the backup"));
+        expect("a check against a backup no longer on record waits for the check made with none",
+                refused(checkedY, data, null, false, false, "checked against the backup"));
+        List<UpdateCheck.Line> failAlone = new ArrayList<>();
+        failAlone.add(new UpdateCheck.Line(UpdateCheck.Level.FAIL, "sum", "Sum", "wrong.", ""));
+        UpdateCheck.Result failedAlone = new UpdateCheck.Result(failAlone, name, sha(data), data.length, false, null);
+        expect("an unknown file that FAILs a check is refused with no backup on record",
+                refused(failedAlone, data, null, false, false, "did not pass"));
+        expect("an unknown file waits while a backup is being read",
+                refused(unchecked, data, null, true, false, "still being read"));
+        expect("an unknown file waits while it is being checked again",
+                refused(unchecked, data, null, false, true, "being checked again"));
+        byte[] changedAlone = data.clone();
+        changedAlone[7] ^= 1;
+        expect("an unknown file's bytes changed after its check are refused",
+                refused(unchecked, changedAlone, null, false, false, "changed"));
+        // A 2 MB dump is never an update file: its size line FAILs, so the gate refuses it with or without a backup.
+        byte[] dumpLike = new byte[0x200000];
+        UpdateCheck.Result dumpCheck = UpdateCheck.check(name, dumpLike, UpdateCheck.PUBLIC_BUILD, null);
+        expect("a 2 MB dump is refused with no backup on record", !dumpCheck.ok
+                && refused(dumpCheck, dumpLike, null, false, false, "did not pass"), dumpCheck.report());
+        // The withdrawn candidates, by SHA-256, whatever their checks say and whatever backup is on record.
+        for (Candidates.Kind k : new Candidates.Kind[]{Candidates.Kind.A, Candidates.Kind.B}) {
+            UpdateCheck.Result w = new UpdateCheck.Result(new ArrayList<>(), k.fileName, k.sha256, data.length, false,
+                    null);
+            UpdateCheck.Result wc = new UpdateCheck.Result(new ArrayList<>(), k.fileName, k.cleanSha256, data.length,
+                    true, backupY);
+            expect("withdrawn candidate " + k + " is refused with no backup on record",
+                    refused(w, data, null, false, false, "withdrawn"));
+            expect("withdrawn candidate " + k + " (cleaned copy) is refused with a backup on record",
+                    refused(wc, data, backupY, false, false, "withdrawn"));
+        }
+        expect("the stock restore file is never taken for a withdrawn candidate",
+                Candidates.withdrawn(Candidates.Kind.RESTORE.sha256) == null
+                        && Candidates.withdrawn(Candidates.Kind.RESTORE.cleanSha256) == null, null);
 
         // app-1: the file was picked, or the restore file made, while backup Y was being read; the check made against
         // X lands after Y is on record.
         expect("a check made against an earlier backup is refused once another is on record",
-                refused(checkedX, data, backupY, false, false, "not checked against the backup on record now"));
+                refused(checkedX, data, backupY, false, false, "checked against the backup chosen now"));
         expect("the same check is refused when the backup that replaced X was refused and none is on record",
-                refused(checkedX, data, null, false, false, "no backup"));
+                refused(checkedX, data, null, false, false, "checked against the backup"));
 
         // app-2 (a): Save, or Write, while "Reading the backup…" shows.
         expect("nothing goes to the card while a backup is being read, even with a check against the current one",
@@ -54,7 +90,7 @@ public final class WriteGateTest {
 
         // The open confirmation, and the worker just before it writes, ask again with the backup on record then.
         expect("Write in a confirmation opened before the backup changed is refused",
-                refused(checkedX, data, backupY, false, false, "not checked against the backup on record now"));
+                refused(checkedX, data, backupY, false, false, "checked against the backup chosen now"));
         expect("the check against the backup on record now opens the gate again",
                 WriteGate.refusal(checkedY, data, backupY, false, false) == null, null);
 
@@ -74,7 +110,7 @@ public final class WriteGateTest {
         UpdateCheck.Result tableless = new UpdateCheck.Result(new ArrayList<>(), name, sha(data), data.length, false,
                 backupY);
         expect("a check against a backup it could not be compared with is refused",
-                refused(tableless, data, backupY, false, false, "not checked against the backup"));
+                refused(tableless, data, backupY, false, false, "checked against the backup"));
 
         // The sensor-ID probe is the one reviewed file the gate lets through without a backup (WriteGate's class
         // note), recognised only by the reviewed SHA-256 and only for the bytes that hash to it. A check that merely
@@ -82,7 +118,7 @@ public final class WriteGateTest {
         // backup.
         UpdateCheck.Result probeClaim = new UpdateCheck.Result(new ArrayList<>(), Candidates.Kind.PROBE.fileName,
                 Candidates.Kind.PROBE.sha256, data.length, false, null);
-        // "changed" (from confirms), not "no backup": the probe branch was taken and the file-level check still ran.
+        // "changed" (from confirms): the probe branch was taken and the file-level check still ran.
         expect("a probe SHA-256 over other bytes is caught by its own check (confirms), not waved through",
                 refused(probeClaim, data, null, false, false, "changed"));
         expect("the probe exemption still waits while the file is being checked",
@@ -134,7 +170,7 @@ public final class WriteGateTest {
             expect("the stock restore file is a reviewed file: with no backup on record it goes to the card",
                     WriteGate.refusal(restoreCheck, restore, null, false, false) == null, restoreCheck.report());
             expect("but a check of it made without a backup waits for the check against the backup once one is on record",
-                    refused(restoreCheck, restore, sha(dump), false, false, "not checked against the backup"));
+                    refused(restoreCheck, restore, sha(dump), false, false, "checked against the backup"));
         }
 
         // v0.25, made from the owner's factory dump, is a Repair version: written with no backup, by the same waiver.
@@ -168,7 +204,7 @@ public final class WriteGateTest {
             expect("v006 + Volume and LED rows with no backup on record goes to the card",
                     rowsAlone.ok && WriteGate.refusal(rowsAlone, rows, null, false, false) == null, rowsAlone.report());
             expect("and a check of it made without a backup is refused once a backup is on record",
-                    refused(rowsAlone, rows, sha(stock), false, false, "not checked against the backup"));
+                    refused(rowsAlone, rows, sha(stock), false, false, "checked against the backup"));
             UpdateCheck.Result rowsAgainst = Candidates.check(Recipe.fileNameFor(sha(rows)), rows, stock);
             expect("v006 + Volume and LED rows checked against the backup on record may go to the card",
                     rowsAgainst.compared && WriteGate.refusal(rowsAgainst, rows, sha(stock), false, false) == null,

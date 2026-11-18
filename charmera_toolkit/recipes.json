@@ -62,7 +62,7 @@
    "base": "v006",
    "name": "sensor-probe",
    "title": "Sensor-ID probe",
-   "description": "A diagnostic, not a repair: in photo mode it reads which image sensor answers on the bus and writes SENSOR.TXT to the card, then stops as before. For finding out what sensor a camera has.",
+   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops as before.",
    "status": "tested",
    "conflicts": [
     "v006/ov9732-port",
@@ -88,7 +88,7 @@
    "base": "v006",
    "name": "ov9732-port",
    "title": "OV9732 port",
-   "description": "Drives an OmniVision OV9732 in place of the SP140A the build was made for: start-up table, exposure and gain, black level and colour tuning (v0.23). For an OV9732 camera that was flashed with this build.",
+   "description": "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning (v0.23). It's for an OV9732 camera that was flashed with this build.",
    "status": "tested",
    "conflicts": [
     "v006/sensor-probe"
@@ -143,7 +143,7 @@
    "base": "v006",
    "name": "volume-led",
    "title": "Volume and LED rows",
-   "description": "Two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
+   "description": "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
    "status": "tested",
    "conflicts": [
     "v006/sensor-probe"
@@ -233,7 +233,7 @@
    "base": "v012",
    "name": "volume-led",
    "title": "Volume and LED rows",
-   "description": "Two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
+   "description": "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
    "status": "tested",
    "conflicts": [],
    "requires": [],
@@ -426,7 +426,7 @@
    "base": "v012",
    "name": "exif",
    "title": "EXIF dates",
-   "description": "Every still photo gets an EXIF block: Make Kodak, Model Charmera, Software v0.26, and the date and time from the camera's clock (set the date first: an unset clock gives 2025:01:01).",
+   "description": "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26, and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",
    "status": "tested",
    "conflicts": [],
    "requires": [],
@@ -671,8 +671,8 @@
    "base": "v012",
    "name": "boot-last-mode",
    "title": "Boot to the last mode",
-   "description": "Power-on goes straight into the camera mode last used, Picture or Video (Picture the first time) instead of the mode menu; a short press of the power button still opens the menu.",
-   "status": "experimental",
+   "description": "Power-on goes straight into the mode you last used, photo or video (photo the first time), instead of the SELECT MODE screen. A short press of the power button still opens it.",
+   "status": "tested",
    "conflicts": [],
    "requires": [],
    "copies": [],
@@ -734,8 +734,8 @@
    "base": "v012",
    "name": "capture-flash",
    "title": "Capture flash",
-   "description": "When a photo is taken the picture area goes black for 120 ms under the on-screen icons, so a shot shows even at Volume 0.",
-   "status": "experimental",
+   "description": "When you take a photo, the picture area goes black for 120 ms under the on-screen icons, so you can see the shot was taken even at Volume 0.",
+   "status": "tested",
    "conflicts": [],
    "requires": [],
    "copies": [],
@@ -863,7 +863,7 @@
    "mods": [],
    "stamp": "202611170027",
    "status": "tested",
-   "label": "stock v008_test (unchanged; the film-mods restore file, renamed)"
+   "label": "stock v008_test (the film-mods restore file, renamed but unchanged)"
   },
   {
    "base": "v012",
@@ -1021,7 +1021,7 @@
     "v012/capture-flash"
    ],
    "stamp": "202611170027",
-   "status": "experimental",
+   "status": "tested",
    "label": "v0.27: v012 + Volume/LED + EXIF + boot to last mode + capture flash"
   }
  ],

@@ -28,15 +28,15 @@ final class Recipes {
     static final String[] MOD_BASES = {"v006", "v006", "v006", "v012", "v012", "v012", "v012"};
     static final String[] MOD_NAMES = {"sensor-probe", "ov9732-port", "volume-led", "volume-led", "exif", "boot-last-mode", "capture-flash"};
     static final String[] MOD_TITLES = {"Sensor-ID probe", "OV9732 port", "Volume and LED rows", "Volume and LED rows", "EXIF dates", "Boot to the last mode", "Capture flash"};
-    static final String[] MOD_STATUS = {"tested", "tested", "tested", "tested", "tested", "experimental", "experimental"};
+    static final String[] MOD_STATUS = {"tested", "tested", "tested", "tested", "tested", "tested", "tested"};
     static final String[] MOD_DESCRIPTIONS = {
-            "A diagnostic, not a repair: in photo mode it reads which image sensor answers on the bus and writes SENSOR.TXT to the card, then stops as before. For finding out what sensor a camera has.",
-            "Drives an OmniVision OV9732 in place of the SP140A the build was made for: start-up table, exposure and gain, black level and colour tuning (v0.23). For an OV9732 camera that was flashed with this build.",
-            "Two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
-            "Two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
-            "Every still photo gets an EXIF block: Make Kodak, Model Charmera, Software v0.26, and the date and time from the camera's clock (set the date first: an unset clock gives 2025:01:01).",
-            "Power-on goes straight into the camera mode last used, Picture or Video (Picture the first time) instead of the mode menu; a short press of the power button still opens the menu.",
-            "When a photo is taken the picture area goes black for 120 ms under the on-screen icons, so a shot shows even at Volume 0.",
+            "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops as before.",
+            "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning (v0.23). It's for an OV9732 camera that was flashed with this build.",
+            "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
+            "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
+            "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26, and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",
+            "Power-on goes straight into the mode you last used, photo or video (photo the first time), instead of the SELECT MODE screen. A short press of the power button still opens it.",
+            "When you take a photo, the picture area goes black for 120 ms under the on-screen icons, so you can see the shot was taken even at Volume 0.",
     };
     static final String[][] MOD_CONFLICTS = {
             {"v006/ov9732-port", "v006/volume-led"},
@@ -385,7 +385,7 @@ final class Recipes {
             {"v006", "v006/ov9732-port", "202611110023", "tested", "v0.23: v006 + OV9732 port"},
             {"v006", "v006/volume-led", "202611170027", "experimental", "v006 + Volume and LED rows"},
             {"v006", "v006/ov9732-port,v006/volume-led", "202611120024", "tested", "v0.24: v006 + OV9732 port + Volume/LED"},
-            {"v008_test", "", "202611170027", "tested", "stock v008_test (unchanged; the film-mods restore file, renamed)"},
+            {"v008_test", "", "202611170027", "tested", "stock v008_test (the film-mods restore file, renamed but unchanged)"},
             {"v012", "", "202611170027", "tested", "stock v012 (the factory firmware, unchanged)"},
             {"v012", "v012/volume-led", "202611130025", "tested", "v0.25: v012 + Volume/LED"},
             {"v012", "v012/exif", "202611170027", "experimental", "v012 + EXIF dates"},
@@ -401,7 +401,7 @@ final class Recipes {
             {"v012", "v012/volume-led,v012/exif,v012/capture-flash", "202611170027", "experimental", "v012 + Volume and LED rows + EXIF dates + Capture flash"},
             {"v012", "v012/volume-led,v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 + Volume and LED rows + Boot to the last mode + Capture flash"},
             {"v012", "v012/exif,v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 + EXIF dates + Boot to the last mode + Capture flash"},
-            {"v012", "v012/volume-led,v012/exif,v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v0.27: v012 + Volume/LED + EXIF + boot to last mode + capture flash"},
+            {"v012", "v012/volume-led,v012/exif,v012/boot-last-mode,v012/capture-flash", "202611170027", "tested", "v0.27: v012 + Volume/LED + EXIF + boot to last mode + capture flash"},
     };
 
     /** {base, mods joined by ',', dump id, file name, sha256}: the reviewed file of each set from each dump. */
