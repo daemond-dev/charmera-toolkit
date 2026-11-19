@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 PRODUCT_PREFIX = "JH_5408"
-STOCK_TIMESTAMP = "202505201029"   # the stamp both known builds carry; a name with it is ignored by either
+STOCK_TIMESTAMP = "202505201029"   # the stamp every known build carries; a name with it is ignored by all of them
 UPDATE_FILE_SIZE = 0x1E0000  # 30 blocks of 64 KiB: the size the published community update files use
 OFFICIAL_UPDATE_SIZE = 0x169000  # where the film-mods files end (code and resources only); official updates would end here too, per their author
 FLASH_SIZE = 0x200000

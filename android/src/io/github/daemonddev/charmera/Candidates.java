@@ -776,10 +776,77 @@ public final class Candidates {
      * passed. They are backup-independent (WriteGate's exemption), so no path may compare one with a backup it was
      * never meant to match — that would fail its sensor-table line and refuse a file that needs no backup (finding 7).
      * Every other file is checked against the reference given. The extra hash runs only when a reference is present
-     * (the common no-backup case is free).
+     * (the common no-backup case is free). A file checked alone while a backup is on record still gets a sensor line
+     * that says which sensor the backup's firmware drives (backupSensor), and its result names that backup
+     * (referenceSha256), so a new backup gets it checked again; it's still not compared with it (compared is false).
      */
     public static UpdateCheck.Result check(String name, byte[] data, byte[] reference) {
-        byte[] ref = reference != null && checkedAlone(UpdateCheck.sha256Hex(data, 0, data.length)) ? null : reference;
+        boolean dropped = reference != null && checkedAlone(UpdateCheck.sha256Hex(data, 0, data.length));
+        UpdateCheck.Result r = checkWith(name, data, dropped ? null : reference);
+        return dropped ? backupSensor(r, data, reference) : r;
+    }
+
+    /**
+     * A file checked alone (checkedAlone) while a backup is on record: its sensor line, which says nothing in the file
+     * can tell which sensor the camera has, becomes one that says which sensor the backup's firmware drives. When that's
+     * the other sensor it's the loud "Wrong sensor?" warning, never a refusal: the camera still boots and takes the
+     * card update, so the flash is undone from the card. The sensor-ID probe works on either sensor and keeps its line.
+     */
+    static UpdateCheck.Result backupSensor(UpdateCheck.Result r, byte[] data, byte[] reference) {
+        String backupSha = UpdateCheck.sha256Hex(reference, 0, reference.length);
+        List<UpdateCheck.Line> lines = new java.util.ArrayList<>();
+        String mine = UpdateCheck.sensorOf(data);
+        String theirs = UpdateCheck.sensorOf(reference);
+        boolean probe = Kind.PROBE.matches(r.sha256);
+        boolean done = probe || mine == null;
+        for (UpdateCheck.Line l : r.lines) {
+            if (probe && "sensor-table".equals(l.name) && l.text.contains(UpdateCheck.BACKUP_STEP)) {
+                // A backup is already chosen, so the line's "choose that dump" step no longer applies.
+                lines.add(new UpdateCheck.Line(l.level, l.name, l.title,
+                        l.text.replace(" " + UpdateCheck.BACKUP_STEP, ""), l.detail));
+            } else if (!done && "sensor-table".equals(l.name) && l.level != UpdateCheck.Level.FAIL) {
+                done = true;
+                lines.add(backupSensorLine(fileLabel(r.sha256), mine, theirs, l.detail));
+            } else {
+                lines.add(l);
+            }
+        }
+        if (!done && theirs != null && !theirs.equals(mine)) {
+            lines.add(backupSensorLine(fileLabel(r.sha256), mine, theirs, ""));
+        }
+        return new UpdateCheck.Result(lines, r.cardName, r.sha256, r.size, false, backupSha);
+    }
+
+    /** The sensor line for a file checked alone against the sensor the backup's firmware drives (theirs, or null). */
+    static UpdateCheck.Line backupSensorLine(String file, String mine, String theirs, String detail) {
+        if (theirs != null && !theirs.equals(mine)) {
+            return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Wrong sensor?", "the firmware in your"
+                    + " backup drives the " + theirs + ", and " + file + " drives the " + mine + ". If the backup is"
+                    + " this camera's, the camera boots with this file but can't take pictures until you flash"
+                    + " firmware that fits. It's a reviewed file, so the app writes it if you go ahead.", detail);
+        }
+        if (theirs != null) {
+            return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Image sensor set-up", "the firmware"
+                    + " in your backup drives the " + theirs + " too, as " + file + " does. That's your camera's sensor"
+                    + " only if the backup was read before the camera was ever flashed.", detail);
+        }
+        return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Image sensor set-up", "the app can't"
+                + " tell which sensor the firmware in your backup drives, so it can't say whether " + file + " fits"
+                + " your camera. This file drives the " + mine + ".", detail);
+    }
+
+    /** What a reviewed file is called in a sensor line: its pick's label, or its Repair version. */
+    static String fileLabel(String sha256) {
+        Recipe.Selection s = Recipe.selectionOf(sha256);
+        if (s != null) {
+            return s.label();
+        }
+        Kind k = repairVersion(sha256);
+        return k != null ? "firmware " + k.version : "this file";
+    }
+
+    /** check without the backup rule: UpdateCheck.check, with the reviewed files' known failures turned into warnings. */
+    private static UpdateCheck.Result checkWith(String name, byte[] data, byte[] ref) {
         UpdateCheck.Result r = UpdateCheck.check(name, data, UpdateCheck.PUBLIC_BUILD, ref);
         Kind k = repairVersion(r.sha256);
         if (k != null && k.base == Base.FACTORY) {

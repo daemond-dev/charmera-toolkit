@@ -70,7 +70,7 @@ def test_app_names_the_film_mods_build_as_image_py_does():
     for number in (b.stamp_offset, b.build_offset, b.sensor_table_offset):
         assert re.search(rf"0x{number:X}\b", block, re.I), hex(number)
     assert f"compiled {b.compiled}" in block and b.compiled == "Nov 19 2025"
-    assert "OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD}" in java
+    assert "OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD, V012_BUILD}" in java
     restore = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
     if restore.is_file():
         data = restore.read_bytes()
@@ -158,6 +158,30 @@ def _source_tree(data: bytes):
     names = collections.Counter(name for name, _ in found)
     folder = names.most_common(1)[0][0]
     return folder, next(at for name, at in found if name == folder), names[folder]
+
+
+def test_app_names_v012_as_image_py_does():
+    """The third known build, v012 of OV9732 cameras: the same fingerprints, offsets, compile date and source folder as
+    image.V012_BUILD, and the OV9732 init table found the way image.py's ov9732_program finds it."""
+    java = SRC.read_text(encoding="utf-8")
+    block = _build_block(java, "V012_BUILD")
+    b = image.V012_BUILD
+    for text in (b.software_sha256, b.official_sha256, b.sensor_table_sha256, b.vector_table_sha256):
+        assert f'"{text}"' in block, text
+    for number in (b.stamp_offset, b.build_offset, b.sensor_table_offset):
+        assert re.search(rf"0x{number:X}\b", block, re.I), hex(number)
+    assert f'"{b.compiled}",' in block and f'"{b.source_tree}",' in block and b.sensor == "OV9732"
+    assert "OV9732_INIT_START = {0x03, 0x01, 0x01, 0x00};" in java and image.OV9732_INIT_START == bytes.fromhex("03010100")
+    assert "OV9732_SCCB = {0x11, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x10, 0x08, 0x6C};" in java
+    assert image.OV9732_SCCB == bytes.fromhex("1100120000000010086c")
+    find = _bodies(java, "public static Marks findMarks(byte[] data)")[0]
+    assert "if (sensorStart < 0 && indexOf(data, OV9732_SCCB, VA_OFFSET, end) >= 0) {" in find
+    assert "reg == 0xFFFF || reg < 0x0100 || reg > 0x5FFF" in find and "n < 16" in find and "bus = 0x6C;" in find
+    factory = Path(os.environ.get("CHARMERA_FACTORY_DUMP", ""))
+    if factory.is_file():
+        data = factory.read_bytes()
+        assert f'"{hashlib.sha256(data[:0x120000]).hexdigest()}"' in block      # the code area
+        assert hashlib.sha256(data[:0x169000]).hexdigest() == b.official_sha256
 
 
 def test_app_records_each_known_builds_source_folder():
@@ -1132,10 +1156,10 @@ def test_app_never_uses_a_check_made_against_another_backup():
     nothing is written meanwhile, and a write confirmation, a "Done" and a "Saved" made with the old backup go."""
     java = ACTIVITY.read_text(encoding="utf-8")
     apply = _bodies(java, "private void applyCheck(")[0]
-    # Finding 7: the reviewed patches (the sensor-ID probe and the OV9732 bring-up) are backup-independent and exempt
-    # from the re-check; every other file whose check was made against a different backup is re-checked, and nothing
-    # is kept meanwhile. Lock the exact condition so a dropped !isReviewedPatch guard cannot pass.
-    assert "if (!Candidates.checkedAlone(result.sha256) && !Objects.equals(result.referenceSha256, backupSha256)) {" in apply
+    # Every file whose check was made with a different backup is re-checked, and nothing is kept meanwhile. The files
+    # checked alone (the probe, the OV9732 builds) are never compared with a backup (finding 7), but their check names
+    # the backup on record and says which sensor it drives, so they're re-checked too.
+    assert "if (!Objects.equals(result.referenceSha256, backupSha256)) {" in apply
     stale = apply.index("!Objects.equals(result.referenceSha256, backupSha256)")
     assert stale < apply.index("recheckFile();") < apply.index("showChecked(result, origin, chosen);")
     assert "fileCheck = null;" in apply[stale:apply.index("recheckFile();")]
@@ -1149,7 +1173,13 @@ def test_app_never_uses_a_check_made_against_another_backup():
     cand = (PKG / "Candidates.java").read_text(encoding="utf-8")
     check_rule = _bodies(cand, "public static UpdateCheck.Result check(")[0]
     # Lock the exact polarity: a != -> == typo must fail here (CandidatesTest also proves the rule by execution).
-    assert "reference != null && checkedAlone(UpdateCheck.sha256Hex(data, 0, data.length)) ? null : reference" in check_rule
+    assert "boolean dropped = reference != null && checkedAlone(UpdateCheck.sha256Hex(data, 0, data.length));" in check_rule
+    assert "checkWith(name, data, dropped ? null : reference)" in check_rule
+    assert "return dropped ? backupSensor(r, data, reference) : r;" in check_rule
+    # a file checked alone is never compared with the backup (compared false), but its check names it
+    sensor_rule = _bodies(cand, "static UpdateCheck.Result backupSensor(")[0]
+    assert "new UpdateCheck.Result(lines, r.cardName, r.sha256, r.size, false, backupSha)" in sensor_rule
+    check_rule += _bodies(cand, "private static UpdateCheck.Result checkWith(")[0]
     probe_rule = _bodies(cand, "public static boolean isProbe(")[0]
     assert "Kind.PROBE.matches(" in probe_rule and "sha256Hex(data" in probe_rule
     # Exactly the reviewed files are exempt, by SHA-256: the probe, the Repair versions and every build of the recipe
@@ -1178,13 +1208,11 @@ def test_app_never_uses_a_check_made_against_another_backup():
     assert "FACTORY_WARN_ONLY.contains(l.name) && failsAlone(alone, l)" in soft
     recheck = _bodies(java, "private void recheckFile()")[0]
     assert "checking = true;" in recheck and "fileCheck = null;" in recheck and "dismissWriteDialog();" in recheck
-    # A file checked with no backup (the probe, the OV9732 builds) is never re-checked against one: the checkedAlone
-    # guard must RETURN. Slice to the NEXT if-statement so a dropped return inside this guard fails here. Every other
-    # file, reviewed SP140A builds included, is re-checked through Candidates.check (its warnings kept).
+    # Every file is re-checked through Candidates.check (its warnings kept) once the backup changes; a file checked
+    # alone (the probe, the OV9732 builds) is still never compared with the backup there (finding 7).
     assert "Candidates.check(name, data, ref);" in recheck
-    guard = recheck.index("if (fileCheck != null && Candidates.checkedAlone(fileCheck.sha256)) {")
-    guard_block = recheck[guard:recheck.index("if (", guard + 1)]
-    assert "return;" in guard_block
+    assert "Candidates.checkedAlone(fileCheck.sha256)) {" not in recheck
+    assert "if (!checking && fileCheck != null && Objects.equals(fileCheck.referenceSha256, backupSha256)) {" in recheck
     posted = _bodies(recheck, "ui.post(() ->")[0]
     assert "check != checkRequest" in posted and "checking = false;" in posted and "dismissWriteDialog();" in posted
     load = _bodies(java, "private void loadBackup(")[0]

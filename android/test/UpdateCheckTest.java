@@ -795,6 +795,73 @@ public final class UpdateCheckTest {
                     && detail(r, "series").contains("source folder at 0x464ba, named in 27 source paths"), r);
         }
 
+        // v012's kind of sensor set-up: no SP140A table, the OV9732 bus context and an init table of 4-byte entries that
+        // the code points at. findMarks takes it as the sensor table (as image.py's ov9732_program does), so the build
+        // marks are complete; a file and a backup that drive different sensors fail with both named.
+        byte[] ov = base.clone();
+        ov[0xF5BFC] = (byte) 0xFE;                       // no SP140A reset table any more
+        System.arraycopy(UpdateCheck.OV9732_SCCB, 0, ov, 0x108374, UpdateCheck.OV9732_SCCB.length);
+        byte[] ovInit = new byte[4 * 22];
+        putU32(ovInit, 0, 0x00010103);                   // the software reset: register 0x0103 = 1
+        for (int i = 1; i < 21; i++) {
+            putU32(ovInit, 4 * i, (i << 16) | (0x3000 + i));
+        }
+        putU32(ovInit, 4 * 21, 0x00FFFFFF);              // register 0xFFFF ends it
+        System.arraycopy(ovInit, 0, ov, 0xF5D3C, ovInit.length);
+        putU32(ov, 0x7AF04, 0xF5D3C - 0x200);
+        UpdateCheck.Marks om = UpdateCheck.findMarks(ov);
+        expect("an OV9732 init table is the sensor table when there is no SP140A one", om.complete()
+                && om.sensorStart == 0xF5D3C && om.sensorEnd == 0xF5D3C + ovInit.length && om.sensorPairs == 21
+                && om.referencedFrom == 0x7AF04 && om.busAddress == 0x6C && om.referencedTables.size() == 1
+                && !om.severalPrograms(), null);
+        // A second OV9732 table the code refers to, with other contents: several programs, refused as SP140A ones are.
+        byte[] ovTwo = ov.clone();
+        byte[] ovInit2 = ovInit.clone();
+        ovInit2[6] ^= 1;                                 // another value in the second write
+        System.arraycopy(ovInit2, 0, ovTwo, 0xF6000, ovInit2.length);
+        putU32(ovTwo, 0x7C100, 0xF6000 - 0x200);
+        UpdateCheck.Marks om2 = UpdateCheck.findMarks(ovTwo);
+        r = check(ovTwo, build);
+        expect("two referenced OV9732 tables that differ are several sensor programs, a FAIL", om2.severalPrograms()
+                && om2.referencedTables.size() == 2 && om2.sensorStart == 0xF5D3C && !r.ok
+                && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && text(r, "sensor-table").contains("more than one image-sensor program"), r);
+        System.arraycopy(ovInit, 0, ovTwo, 0xF6000, ovInit.length);   // the same contents twice: one program
+        expect("two referenced copies of the same OV9732 table are one program",
+                !UpdateCheck.findMarks(ovTwo).severalPrograms() && UpdateCheck.findMarks(ovTwo).referencedTables.size() == 2,
+                null);
+        // The same SP140A table on both sides, but one side's code also carries the OV9732 driver (our port): they
+        // drive different sensors. A warning that says why: such a file boots, and the card undoes it.
+        byte[] ported = base.clone();
+        System.arraycopy(UpdateCheck.OV9732_SCCB, 0, ported, 0x108374, UpdateCheck.OV9732_SCCB.length);
+        r = UpdateCheck.check(name(ported, "202611050001"), ported, build, chip(base));
+        expect("a ported file against an SP140A backup with the same table warns and names both sensors", r.ok
+                && r.compared && line(r, "sensor-table", UpdateCheck.Level.WARN) && text(r, "sensor-table").startsWith(
+                "the same set-up table as the firmware in your backup, but this file also carries the OV9732 driver")
+                && text(r, "sensor-table").contains("the backup is firmware for the SP140A-class sensor"), r);
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(ported));
+        expect("an SP140A file against a ported backup with the same table warns and names both sensors", r.ok
+                && line(r, "sensor-table", UpdateCheck.Level.WARN) && text(r, "sensor-table").startsWith(
+                "the same set-up table as the firmware in your backup, but that firmware also carries the OV9732"
+                + " driver our port adds, so it drives the OmniVision OV9732"), r);
+        expect("sensorOf tells the three apart", "OV9732".equals(UpdateCheck.sensorOf(ported))
+                && "OV9732".equals(UpdateCheck.sensorOf(ov)) && UpdateCheck.sensorOf(new byte[0x1000]) == null, null);
+        byte[] noCtx = ov.clone();
+        noCtx[0x108374] = 0;
+        expect("without the OV9732 bus context there is no sensor table", UpdateCheck.findMarks(noCtx).sensorStart < 0,
+                null);
+        r = UpdateCheck.check(name(ov, "202611050001"), ov, build, chip(base));
+        expect("an OV9732 file against an SP140A backup fails and says which sensor each is for", !r.ok
+                && line(r, "series", UpdateCheck.Level.PASS) && line(r, "sensor-table", UpdateCheck.Level.FAIL)
+                && text(r, "sensor-table").contains("the backup is firmware for the SP140A-class sensor, and this file"
+                + " drives the OmniVision OV9732"), r);
+        r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(ov));
+        expect("an SP140A file against an OV9732 backup with its table fails and says which sensor each is for", !r.ok
+                && text(r, "sensor-table").contains("the backup is firmware for the OmniVision OV9732 sensor, and this"
+                + " file drives the SP140A-class sensor"), r);
+        expect("a backup with v012's kind of table is taken as a backup",
+                UpdateCheck.backupProblem(chip(ov), new String[0]) == null, null);
+
         String real = System.getenv("CHARMERA_UPDATE_FILES");
         if (real != null && !real.isEmpty()) {
             for (String p : real.split(File.pathSeparator)) {

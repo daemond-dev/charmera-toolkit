@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import settings as settings_mod
 from .checksum import OFFICIAL_UPDATE_SIZE, UPDATE_FILE_SIZE, parse_update_name
-from .image import SOUND_SLOTS, SOURCE_TREE_PROVES, known_source_trees, summarize
+from .image import SOUND_SLOTS, SOURCE_TREE_PROVES, known_source_trees, sensor_of, summarize
 from .stage import looks_like_update_file
 
 
@@ -16,7 +16,8 @@ def _fmt_bool(v) -> str:
 
 
 def _program(t) -> str:
-    return (f"{t.pairs} register writes at {t.init[0]:#x}..{t.init[1]:#x} ({t.init_bytes_len} bytes), reset table at {t.reset[0]:#x}"
+    where = (f"OV9732 bus set-up at {t.reset[0]:#x}" if t.sensor == "OV9732" else f"reset table at {t.reset[0]:#x}")
+    return (f"{t.pairs} register writes at {t.init[0]:#x}..{t.init[1]:#x} ({t.init_bytes_len} bytes), {where}"
             + (f", bus address {t.bus_address:#x}" if t.bus_address is not None else "")
             + (f", referenced from code at {t.referenced_from:#x}" if t.referenced_from is not None else ", no code reference found"))
 
@@ -36,7 +37,7 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
     print(f"build:           {info['identity']}  ({info['identity_label']})")
     print("                 a build match says which public image this is, not whether it fits a given camera: only a dump of")
     print("                 that camera's own chip read before it was ever flashed does. The stamp 202505201029 is carried by")
-    print("                 two different builds.")
+    print("                 every known build (v006, v008_test and v012).")
     for k, v in info["identity_checks"].items():
         print(f"  check {k:24s} {_fmt_bool(v)}")
     m = info["marks"]
@@ -57,18 +58,31 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         t = m.sensor
         print(f"sensor table:    {_program(t)}")
         print(f"                 sha256 {t.sha256}")
-        print("                 " + ("the same table as in both known builds (public dump, film-mods): it drives one sensor and reads no chip ID"
-                                    if info["identity_checks"].get("sensor_table_known") else "NOT the known builds' table"))
+        ported = t.sensor != "OV9732" and sensor_of(image) == "OV9732"
+        if not info["identity_checks"].get("sensor_table_known"):
+            print("                 NOT the known builds' table")
+            if ported:
+                print("                 the code also carries our OV9732 port (v0.21 to v0.24): this firmware drives an OV9732")
+        elif t.sensor == "OV9732":
+            print("                 v012's table for the OmniVision OV9732 (bus 0x6C, 16-bit registers): its own driver, with no")
+            print("                 SP140A-style table")
+        elif ported:
+            print("                 the SP140A table, but the code also carries our OV9732 port (v0.21 to v0.24): this firmware")
+            print("                 drives an OV9732")
+        else:
+            print("                 the SP140A table v006 and v008_test carry (public dump, film-mods): it drives one sensor and reads")
+            print("                 no chip ID")
         if t.referenced_from is None:
             print("                 no code refers to it by address, so the code may set the sensor up from another table (verify warns)")
-        others = [p for p in m.sensor_programs if p != t]
+        others = [p for p in (m.sensor_programs or m.ov9732_programs) if p != t]
         for p in others:
             print(f"  also found:    {_program(p)}, sha256 {p.sha256[:8]}...")
         if m.several_sensor_programs:
             print(f"                 SEVERAL sensor programs: the code refers to {len(m.several_sensor_programs)} init tables with different "
                   "contents, so which one sets up the sensor cannot be told; verify refuses the file")
     else:
-        print("sensor table:    not found (no reset table 'fd 00 20 00 ff ff' followed by an init table in the code area)")
+        print("sensor table:    not found (no reset table 'fd 00 20 00 ff ff' followed by an init table in the code area, and no")
+        print("                 OV9732 init table of v012's kind)")
     if info["software_sha256"]:
         print(f"software sha256: {info['software_sha256']}  (bytes 0..0x170000)")
     fp = info.get("official_fingerprint")
@@ -151,7 +165,7 @@ def handler(args) -> int:
             "source_tree": m.source_tree, "source_tree_offset": m.source_tree_offset, "source_tree_paths": m.source_tree_paths,
             "sensor_table": None if not m.sensor else {"reset": list(m.sensor.reset), "init": list(m.sensor.init), "pairs": m.sensor.pairs,
                                                        "sha256": m.sensor.sha256, "bus_address": m.sensor.bus_address,
-                                                       "referenced_from": m.sensor.referenced_from},
+                                                       "referenced_from": m.sensor.referenced_from, "sensor": m.sensor.sensor},
             "sensor_programs": [{"init": list(p.init), "pairs": p.pairs, "sha256": p.sha256, "referenced_from": p.referenced_from}
                                 for p in m.sensor_programs],
             "several_sensor_programs": bool(m.several_sensor_programs),

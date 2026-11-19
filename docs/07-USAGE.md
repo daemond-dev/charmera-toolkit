@@ -7,17 +7,25 @@ You need Python 3.9 or newer, on Windows, Linux or macOS. There are no extra pac
 
 ## On a computer: from the card to a flash
 
-This is what the Android app does, done at the command line. Put the camera's card in a reader first.
+This is what the Android app does, done at the command line. `identify` works from the camera's photos, so take two
+or three with the camera on its card first. Then put the card in a reader.
 
-1. `charmera identify <card>` tells you which stock firmware the camera's photos show, and so the base (v012 for
-   OV9732 cameras, v006 for SP140A ones). It assumes a stock camera and says so when the photos show otherwise.
+1. `charmera identify <card>` tells you which stock firmware took the photos, and so the base (v012 for OV9732
+   cameras, v006 for SP140A ones), and prints the `build` command to run next. It assumes a stock camera and says so
+   when the photos show otherwise. With no usable photo it says so and exits 1.
 2. `charmera build --list`, then `charmera build --base <base> --mods <mods> --download --out out/`, makes the
    firmware file from the base's public cleaned copy. It writes the file only when it's the reviewed file.
-3. `charmera verify out/JH_….bin --stock <your backup>` runs all the checks, and with a backup of this camera's chip
-   it compares the file with that too. Without a backup it still runs, with a warning.
+3. `charmera verify out/JH_….bin --stock <your backup>` runs all the checks and compares the file with your backup.
+   With no backup, `charmera verify out/JH_….bin` runs the same checks and warns that nothing confirms what the
+   camera runs.
 4. `charmera stage out/JH_….bin --card <card> --stock <your backup>` checks the file again, copies it to the card
-   root and reads it back. Then put the card in the camera, switch it on, wait for "Upgrade 100%", and take the file
-   off the card afterwards.
+   root and reads it back. With no backup, leave out `--stock`: it warns the same way and still writes when you
+   confirm. Then put the card in the camera, switch it on, wait for "Upgrade 100%", and take the file off the card
+   afterwards.
+
+The way back is the stock build of the base that fits the camera (`charmera build --base v012 --download --out out/`,
+or `--base v006`), flashed the same way. That works as long as the camera still boots, and a file for the other sensor
+does. A flash that is cut off, or firmware that won't boot, needs a chip programmer ([Recovery](02-RECOVERY.md)).
 
 ## Read-only commands
 
@@ -47,24 +55,34 @@ charmera sensor-read E:\                                            # what the s
 - which settings record is current, and whether UI sounds are on
 - whether it holds another owner's photos
 
-The build is named by a fingerprint over its bytes, never by the version stamp, which two different builds share.
+The build is named by a fingerprint over its bytes, never by the version stamp, which every known build shares. The
+known builds are `public-dump` (v006), `film-mods` (v008_test) and `v012`, the factory build of OV9732 cameras. v012
+sets up its sensor with a table of another form (167 writes for the OV9732), and `inspect` names it as v012's.
 
-A file counts as a known build "with changes" (`public-dump-modified`, `film-mods-modified`) only when its build marks
-lie where that build keeps them and it carries that build's stamp, sensor table, source-tree folder and compile date,
-as a mod made from it does. Any other file laid out like a known build is a build the toolkit doesn't know, "laid out
-like" it (`charmera-unknown-build`). `verify`'s `build` line and the app say the same
-([Image layout](11-FORMAT.md#build-identity)).
+A file counts as a known build "with changes" (`public-dump-modified`, `film-mods-modified`, `v012-modified`) only
+when its build marks lie where that build keeps them and it carries that build's stamp, sensor table, source-tree
+folder and compile date, as a mod made from it does. Any other file laid out like a known build is a build the toolkit
+doesn't know, "laid out like" it (`charmera-unknown-build`). `verify`'s `build` line and the app say the same ([Image
+layout](11-FORMAT.md#build-identity)).
 
 `verify` is the gate before a card. It checks the filename checksum, the stamp, the size rule, the magic, the build
 marks, the sensor table, the ARM vector table and the software region, and says what each result proves. It refuses
 the withdrawn candidates A and B by their SHA-256 and names C, whose bytes are the stock restore file made from the
 cleaned stock dump.
 
-Always give `--stock <a dump of the camera the file goes into>`. The sensor table, the ARM vector table and the
-software region are compared with it, and the stamp in the file's name must differ from the one in it
-(`stamp-camera`). That comparison is the only check that says anything about your camera. `--stock` must be a
-complete read of a chip (exactly 2 MiB, starting with `SPII`, with the build string and the stamp), or `verify` fails.
-One that's byte for byte a public dump is a WARN, since it may be this camera's own read after a flash with the public
+A file `charmera build` makes from a public copy is a reviewed file (one from your own read isn't), and `verify` knows
+it by its SHA-256. For one of those you'll see an INFO `reviewed` line that names the build, the dump and whether it
+has been tried on a camera. Its `series`, `build`, `software-region` and `sensor-table` lines are a WARN where another
+file would FAIL, ending "(a reviewed build: this is expected)", and it needs no `--allow-modified`. Without `--stock`
+you get a WARN `unconfirmed` (not for the sensor-ID probe). With a `--stock` that is firmware for the other sensor you
+get a WARN `wrong-sensor`. The size, checksum, stamp, vector-table, sensor-program and resource checks treat it like
+any other file. The rest of this section is about files you made yourself.
+
+Give `--stock <a dump of the camera the file goes into>` when you have one. The sensor table, the ARM vector table and
+the software region are compared with it, and the stamp in the file's name must differ from the one in it
+(`stamp-camera`). That comparison is the only check that says anything about your camera. `--stock` must be a complete
+read of a chip (exactly 2 MiB, starting with `SPII`, with the build string and the stamp), or `verify` fails. One
+that's byte for byte a public dump is a WARN, since it may be this camera's own read after a flash with the public
 restore file.
 
 `backup` and `restore` name a single read, and reads that differ, `<label>_<UTC time>.unverified-read<n>.bin`. A
@@ -80,9 +98,9 @@ a WARN says the program around it differs, since a different program can drive t
 line means don't use the file.
 
 `--allow-modified` accepts a software region that differs from the reference. Any mod of the code or the resources
-needs it, and the line is then a WARN, never a PASS. Settings-only files pass without it. `stage` always uses it. With
-`--donor` it lets through a mod built on the donor's firmware that keeps the donor's boot header, vector table
-(0..0x240) and sensor table, as a WARN.
+needs it (a reviewed file from `build` doesn't), and the line is then a WARN, never a PASS. Settings-only files pass
+without it. `stage` always uses it. With `--donor` it lets through a mod built on the donor's firmware that keeps the
+donor's boot header, vector table (0..0x240) and sensor table, as a WARN.
 
 `--allow-unknown-build` lets through a file whose build marks aren't all found, or, without `--stock`, a sensor table
 that isn't the known builds'. The line it lets through is a WARN, and the software comparison with `--stock` still
@@ -102,7 +120,8 @@ What no flag accepts:
   none of them. No toolkit mod changes that table. Firmware that drives a sensor the camera doesn't have leaves it
   unable to take pictures, and a file without such a table leaves nothing to compare with the camera's own. The one
   way past them is the donor route, `--donor <a read of another, working camera's chip>`, for a camera whose own
-  firmware is gone and doesn't fit it. `--stock` is optional there (a WARN without it). The route takes the donor's
+  firmware is gone and doesn't fit it. `--stock` is optional there (a WARN without it). A reviewed file from `build`
+  gets a WARN for these instead, as above. The route takes the donor's
   firmware unchanged, or with `--allow-modified` (which `stage` always gives) a mod built on it that keeps its boot
   header, vector table and sensor table, as a WARN. It says that the fit to this camera is unknown
   ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
@@ -170,11 +189,12 @@ same text (VERIFIED by search), and any other text shows that other code wrote t
 photos are compared with this camera's own pre-flash photos without opening anything
 ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 
-`identify` does the same for a whole card and answers one question: which stock firmware does this camera run, and so
-which base do you build on? It assumes a stock camera that was never flashed or modded. A flashed or modded camera is
-the exception. `identify` says so in a line of its own and still gives a base. Give it the
-card's root folder (it then searches only `DCIM`), a `DCIM` folder, any other folder, or photo and video files. It
-reads only headers.
+`identify` does the same for a whole card and answers one question: which stock firmware took this camera's photos,
+and so which base do you build on? It assumes a stock camera that was never flashed or modded. A flashed or modded
+camera is the exception. `identify` says so in a line of its own and still gives a base. Give it the card's root
+folder (it then searches only `DCIM`), a `DCIM` folder, any other folder, or photo and video files. It reads only
+headers. It needs photos the camera took on that card, at least two for `high` confidence, so take two or three
+first.
 
 Photos with no file time (0 or missing) are left out of the dating and of the change detection, and listed ("N photos
 have no file time and were left out of the dating"). `identify` picks the oldest and the newest dated photo, by
@@ -187,10 +207,11 @@ The v006 family is the 0x590-byte Generalplus header (stock v006 or v008_test, o
 the bare 0x270-byte one (stock v012, on OV9732 cameras). The 0x340-byte EXIF-mod header is ours (v0.26 and later,
 built on v012), so a camera that writes it isn't stock, and it's of the v012 family. The possible answers:
 
-- All dated camera-written photos of one family: "This camera runs stock v012" (base `v012`) or "This camera runs
-  stock v006 or v008_test" (base `v006`). Confidence is `high` when the scan wasn't capped and at least two
-  camera-written photos agree, and `medium` for a single photo or a capped scan. v006-family photos aren't doubted
-  just because our v0.21-v0.24 write the same header. One line says "If this camera was ever flashed with our
+- All dated camera-written photos of one family: "The photos were taken by stock v012 (an OV9732 camera): base v012"
+  or "The photos were taken by stock v006 or v008_test (an SP140A camera): base v006", followed by "If the camera was
+  flashed after these photos, it runs something else now". Confidence is `high` when the scan wasn't capped and at
+  least two camera-written photos agree, and `medium` for a single photo or a capped scan. v006-family photos aren't
+  doubted just because our v0.21-v0.24 write the same header. One line says "If this camera was ever flashed with our
   v0.21-v0.24, its photos look like this too."
 - Any EXIF-mod photo: "This camera does not look stock: our EXIF mod (v0.26 or later) is installed", with "installed
   between <date> and <date>" when bare photos come before them. The base is `v012` (the mod is built on it), with
@@ -202,9 +223,11 @@ built on v012), so a camera that writes it isn't stock, and it's of the v012 fam
 
 It always adds two caveats: a photo can't tell v006 from v008_test (both are stock builds for SP140A cameras, and
 either base works the same for our purposes), and photos show the firmware that took them. The dates are the files'
-modification times, set by the camera's clock. `--json` prints the same as JSON, with `stock`, `not_stock`, `base`,
-`family` (the base's family), `confidence`, `notes` and `undated`. The exit code is 0 when it reached a conclusion and
-1 when no usable photo was found.
+modification times, set by the camera's clock. With a conclusion it ends with a `next:` line, `charmera build --list,
+then charmera build --base <base> --mods <mods> --download --out out/`. `--json` prints the same as JSON, with
+`stock`, `not_stock`, `base`, `family` (the base's family), `confidence`, `next`, `notes` and `undated`. The exit code
+is 0 when it reached a conclusion and 1 when no usable photo was found. Then it tells you to take two or three photos
+with the camera on that card and run it again.
 
 `sensor-read` decodes the `SENSOR.TXT` that the sensor-ID probe writes to the card's top folder when Photo mode opens,
 with the same decoder as the app. Give it the card's root folder or the file. It reads all four layouts the probe has
@@ -213,6 +236,12 @@ probe's two bytes. The 16-bit ID read names the part from its chip-ID registers 
 0x300A/0x300B). `sensor-read` says whether a sensor answered at the SP140A's address 0x3C (bus 0x78), the one the
 probe's firmware drives, somewhere else, or nowhere. The file says what the probe read when it ran, but not when that
 was. The exit code is 0 when a file was decoded, 1 when there's no `SENSOR.TXT`, and 2 when it can't be read.
+
+To make the probe, run `charmera build --base v006 --mods sensor-probe --download --out out/`, then verify and stage
+it as any update file. It's v006 with a patch, so it changes no boot or update code. On an SP140A camera the stock
+v006 build (the stock restore file) undoes it. On an OV9732 camera undo it with stock v012 or v0.25 or later, not the
+stock restore file. You don't need the probe when `identify` already names the base from photos taken before any
+flash.
 
 ## Commands that write files on your computer
 
@@ -225,16 +254,25 @@ camera's photos point to. Mods are the changes we wrote for that base.
 ```
 charmera build --list                                                # every base, mod and combination
 charmera build --base v012 --mods volume-led,exif --download --out out/
+charmera build --base v012 --download --out out/                     # no --mods: stock v012
 charmera build --dump charmera_flash_....bin --mods volume-led,exif,boot-last-mode,capture-flash --out out/
 ```
 
 - `--download` fetches the base's public cleaned copy from the-dumping-grounds' repositories at a fixed commit, and
-  uses it only if its SHA-256 matches. `--dump` takes a dump you have: your own read of the chip, or a public copy.
-- The file is written only when it's byte for byte the reviewed file listed for that combination in
-  `charmera_toolkit/recipes.json`, and every mod checks the bytes it replaces first. Combinations not yet tried on a
-  camera are built with a warning (`[experimental]` in `--list`).
-- Then it runs `verify` on the result and prints the `verify --stock` and `stage` commands to run next. `verify`
-  knows these files by SHA-256. It says which build a file is and doesn't refuse it for being modded.
+  uses it only if its SHA-256 matches. `--dump` takes a dump you have: a public copy, or your own read of a v006 or
+  v012 chip.
+- From a public copy, the file is written only when it's byte for byte the reviewed file listed for that combination
+  in `charmera_toolkit/recipes.json`, and every mod checks the bytes it replaces first. Combinations not yet tried on
+  a camera are built with a warning (`[experimental]` in `--list`).
+- From your own read, the firmware in it (bytes 0..0x169000) must be stock v006 or v012 byte for byte, or `build`
+  refuses it. A camera that was flashed with a mod reads like that, so build from the public copy instead, or from a
+  read taken before the camera was flashed. The file keeps your read's settings (from a v012 read the photos stored
+  in the camera's own memory are blanked, as in the cleaned copy). No published hash matches it, so `build` prints
+  `NOT a reviewed file` and a WARN, and `verify`, `stage` and the app check it as any file you made yourself.
+- Then it runs `verify` on the result and prints the commands to run next. For a reviewed file those are `verify` and
+  `stage` with `--stock <your backup>`, and the same two without `--stock` for when you have no backup. For a file
+  from your own read they give that read as `--stock` (and `--allow-modified` when it has mods). `verify` knows
+  reviewed files by SHA-256. It says which build a file is and doesn't refuse it for being modded.
 - Our versions are combinations too: v0.24 is `--base v006 --mods ov9732-port,volume-led`, v0.25 is `--base v012
   --mods volume-led`, v0.26 adds `exif`, and v0.27 adds `boot-last-mode,capture-flash`.
 
@@ -276,8 +314,8 @@ blocks above 0x1E0000 are left alone ([Image layout](11-FORMAT.md#update-file-jh
 folder that has a DCIM folder (that's a card, and `stage` is what puts the file there), and one that already holds
 another `JH_*.bin`. `--factory-settings` keeps only the first CRC-valid settings record and erases the rest of the
 bank. It zeroes the photo directory only when that sector is erased, so stored photos stay unless you add
-`--blank-photos`. `--stamp` takes 12 ASCII digits 0-9. `pack` refuses an input without the Charmera build marks unless
-`--allow-unknown-build` is given, and notes a build it doesn't know.
+`--blank-photos`. `--stamp` takes 12 ASCII digits 0-9. `pack` refuses an input without the Charmera build marks
+(v006, v008_test and v012 all have them) unless `--allow-unknown-build` is given, and notes a build it doesn't know.
 
 `settings set` keeps everything else in the record and leaves that record as the only one in the bank. `tweak apply`
 refuses any patch whose original bytes aren't where it expects them, so it can't land on the wrong build or on top of
@@ -305,6 +343,7 @@ Nobody has tried a custom boot logo on a camera yet.
 charmera stage out/restore/JH_5408<stamp>_<sum>.bin --card E: --stock my_backup.bin                         # Windows
 charmera stage out/restore/JH_5408<stamp>_<sum>.bin --card /run/media/deck/<label> --stock my_backup.bin    # Steam Deck
 charmera stage out/restore/JH_5408<stamp>_<sum>.bin --card E: --stock my_backup.bin --plan-only             # all checks, writes nothing
+charmera stage out/JH_5408<stamp>_<sum>.bin --card E:                                                       # no backup: warns, still writes
 charmera restore --image my_backup.bin --out backups/                                                       # the chip, through a CH341A clip
 ```
 
@@ -312,18 +351,27 @@ charmera restore --image my_backup.bin --out backups/                           
 root, and reads it back to compare hashes. `stage` warns without `--stock` but still writes a file that passes, as
 decided on 2026-11-06 ([details](04-STAGE.md#what-it-does-in-order)).
 
-`probe` and `backup` ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly))
-only read the chip. Before they run they print a checklist: a 3.3 V programmer (never an unmodified black CH341A), the
-battery lead lifted, and pin 1 of the clip on the chip's dot.
+`probe` and `backup` ([Recovery, section
+B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)) only read the chip. Before they
+run they print a checklist: a 3.3 V programmer (never an unmodified black CH341A), the battery lead lifted, pin 1 of
+the clip on the chip's dot, and a multimeter check of the clip with the programmer plugged in alone: pin 8 (VCC) and
+pin 1 (CS) against pin 4 (GND) both read about 3.3 V. If either reads near 5 V, stop. A board that looks right can
+still put 5 V on CS.
 
 `restore` prints the same checklist and reads the chip twice before it writes, and writes nothing when the reads
 differ. It keeps that read in the folder given as `--out`, which it requires, as `<label>_<UTC time>.bin` with a
 `.sha256` and a `.manifest.json` (`--label` defaults to `before-restore`). It shows the 64 KiB blocks in which the
-image differs from that read, and writes nothing when the chip already holds the image. It refuses an image with
-several sensor programs (more than one sensor table the code refers to, with different contents). It shows the image's
-sensor table next to the chip's and asks for a second word, `DIFFERENT`, when they differ, when the chip holds none of
-the kind the known builds use, or when the chip holds several sensor programs. It has flashrom write a private copy of
-the bytes it checked, never your file in place ([Recovery, section B](02-RECOVERY.md#restore)).
+image differs from that read, and writes nothing when the chip already holds the image. It refuses an image without
+the Charmera build marks, one that isn't v006, v008_test or v012 or is damaged, and one whose ARM vector table
+(0x200..0x240) is erased or isn't the one those builds carry, unless `--allow-unknown-build` is given, which is only
+for a good read of this camera's own chip. It asks for `DIFFERENT` when the image's resource pack is damaged or
+missing, and names the damaged entries. The cleaned v006 and v012 copies and a read of a v006
+or v012 chip pass without it. It refuses an image with several sensor programs (more than one sensor table the code
+refers to, with different contents) whatever the flags. It shows the image's sensor table next to the chip's and asks
+for a second word, `DIFFERENT`, when they differ (naming the sensor each is for when they're for different sensors),
+when the chip holds none of the kind the known builds use, or when the chip holds several sensor programs. It has
+flashrom write a private copy of the bytes it checked, never your file in place ([Recovery, section
+B](02-RECOVERY.md#restore)).
 
 `card-fix` and `stage` print what they're about to do and wait for you to type the target back. `restore` waits for
 the word RESTORE. See [SD card problems](05-CARDS.md) and [Recovery](02-RECOVERY.md).

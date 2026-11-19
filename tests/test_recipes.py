@@ -174,6 +174,35 @@ def test_a_plain_stock_file_is_eased_too_and_unconfirmed_is_a_warning(monkeypatc
     assert "unconfirmed" not in out
 
 
+def test_a_reviewed_build_never_asks_for_allow_modified(monkeypatch):
+    """A reviewed file needs no --allow-modified: neither verify's FAIL hint nor stage's "accepted because of" survives."""
+    row = {"base": "v012", "mods": ["v012/volume-led"], "dump": "v012-clean", "name": "JH_x.bin", "sha256": "0" * 64}
+    monkeypatch.setattr(R, "reviewed", lambda sha, recipes=None: row)
+    for allow in (False, True):
+        checks = [verify.Check("software-region", allow, "the software region differs from v012; give --stock <x> to see which 64 KiB "
+                               "blocks" + (verify.ALLOW_MODIFIED_ACCEPTED if allow else verify.ALLOW_MODIFIED_HINTS[1]),
+                               "warn" if allow else "fail"),
+                  verify.Check("software-region", allow, "bytes differ" + (verify.ALLOW_MODIFIED_ACCEPTED if allow
+                                                                         else verify.ALLOW_MODIFIED_HINTS[0]),
+                               "warn" if allow else "fail")]
+        for c in verify.reviewed_build(b"\0" * 0x200000, checks):
+            assert "--allow-modified" not in c.detail, c.detail
+            if c.name == "software-region":
+                assert c.detail.endswith(" (a reviewed build: this is expected)")
+
+
+def test_reviewed_files_from_real_dumps_never_mention_allow_modified():
+    for var in ("CHARMERA_STOCK_IMAGE", "CHARMERA_FACTORY_DUMP"):
+        dump = DUMPS[var]
+        if dump is None:
+            continue
+        mods = ["volume-led", "exif"] if R.dump_for(dump, DOC)["build"] == "v012" else ["ov9732-port", "volume-led"]
+        built = R.make(dump, mods, DOC)
+        for allow in (False, True):     # verify as typed, and as stage calls it
+            for c in verify.verify_update(Path(built.name), built.data, allow_modified=allow):
+                assert "--allow-modified" not in c.detail, (var, allow, c.name, c.detail)
+
+
 def test_sensor_of_tells_the_two_sensors_apart():
     assert verify.sensor_of(b"\0" * 64 + verify.SP140A_INIT) == "SP140A"
     assert verify.sensor_of(b"\0" * 64 + verify.OV9732_SCCB) == "OV9732"

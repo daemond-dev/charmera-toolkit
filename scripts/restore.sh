@@ -7,14 +7,16 @@
 # keeps that read in --out (before-restore_<UTC time>.bin, a .sha256 and a .manifest.json, as
 # backup.sh keeps them). That read is the way back if the image does not suit this camera. When the
 # two reads differ it writes nothing. It shows the block diff against that read and the image's
-# sensor table against the chip's, and when the tables differ it asks a second time: nothing here
-# can tell whether that firmware fits this camera. flashrom writes a private copy of the checked
+# sensor table against the chip's, and when the tables or the sensors they drive differ it asks a
+# second time: nothing here can tell whether that firmware fits this camera. flashrom writes a private copy of the checked
 # image, never the file named in --image.
 #
 # Before the clip goes on (restore prints this list too; docs/02-RECOVERY.md, section B):
 #   - a 3.3 V programmer: a blue CH341A jumpered to 3.3 V, a V1.7 CH341A switched to 3.3 V, a Pico
 #     running pico-serprog or a CH347. Never an unmodified black CH341A board: its data lines run
 #     at 5 V, which can damage the flash chip and the processor that shares its bus.
+#   - the multimeter check: with the programmer plugged in alone and the clip on nothing, pin 8
+#     (VCC) and pin 1 (CS) against pin 4 (GND) both read about 3.3 V. Near 5 V, stop.
 #   - the camera's battery lead lifted from its pad and taped.
 #   - the clip's pin 1 (red stripe or "1") on the chip's dot.
 #

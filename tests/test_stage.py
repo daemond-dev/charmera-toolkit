@@ -192,7 +192,8 @@ def test_happy_path_copies_and_verifies(update_file, backup, card, confirmed, ca
     assert "millennium" in low and "photos it stored there" in low
     # a backup fits its camera only when it was read before the camera was ever flashed
     flat = " ".join(out.split())
-    assert "A backup of a camera read before it was ever flashed, packed with pack, fits that camera whatever its edition." in flat
+    assert ("A backup of a camera read before it was ever flashed fits that camera whatever its edition, made into a file "
+            "with pack or with charmera build --dump.") in flat
     assert "A camera's own backup" not in flat
     # Tags mirror verify: no FAIL line anywhere.
     assert not any(line.startswith("FAIL") for line in out.splitlines())
@@ -203,9 +204,14 @@ def test_without_a_backup_stage_warns_and_still_writes(update_file, card, confir
     assert run(str(update_file), "--card", str(card), OVERRIDE) == 0
     out = capsys.readouterr().out
     assert "WARN backup" in out and "nothing here compares the file with the camera's own firmware" in out
-    assert "a file that does not fit the camera cannot be undone" in out
+    assert "cannot be undone" not in out and "the only way back" not in out
+    flat = " ".join(out.split())
+    assert ("A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes "
+            "it (charmera build --base v006 --download --out out/ for an SP140A camera, charmera build --base v012 --download "
+            "--out out/ for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a "
+            "chip programmer.") in flat
     assert "backup:       none given (--stock)" in out
-    assert "No backup of this camera's own flash chip was given" in out and "stage still writes the file" in out
+    assert "No backup of this camera's own flash chip was given" in out and "stage still writes the file" in flat
     assert (card / update_file.name).read_bytes() == update_file.read_bytes() and confirmed == [str(card)]
     # the file already on the card: nothing to do, and the warning is still there
     assert run(str(update_file), "--card", str(card), OVERRIDE) == 0

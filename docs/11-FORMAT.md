@@ -54,12 +54,13 @@ followed in the code.
 
 ## Build identity
 
-The version stamp `202505201029` doesn't identify a build, because two different builds carry it. One is the
-public dump. The other is the build on the charmera-film-mods author's camera, which has different bytes (its
-author confirmed it from their own dump on 2026-11-06, and that project's public restore file holds it). The
-two also share the build string `JH5408  20250520`. Their compile dates differ (`Oct 14 2025` in the public
-dump, `Nov 19 2025` in the film-mods build), and so do the source-tree folders in their source paths, `v006`
-and `v008_test` (below). So the factory rebuilt the firmware under one stamp.
+The version stamp `202505201029` doesn't identify a build, because three different builds carry it. One is the
+public dump (v006). Another is the factory firmware of OV9732 cameras (v012). The third is the build on the
+charmera-film-mods author's camera (v008_test). Its author confirmed it from their own dump on 2026-11-06, and
+that project's public restore file holds it. All three show the build string `JH5408  20250520`. Their compile
+dates differ (`Oct 14 2025` for v006, `Nov 19 2025` for v008_test, `Jan 12 2026` for v012), and so do the
+source-tree folders in their source paths, `v006`, `v008_test` and `v012` (below). So the factory rebuilt the
+firmware under one stamp.
 
 A different compile date shows that two builds differ. It never shows that a file fits a camera, and the
 same date wouldn't show that two builds are the same. The film-mods author's boot screen and body aren't

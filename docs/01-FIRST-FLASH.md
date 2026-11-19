@@ -6,56 +6,97 @@ How to put a modified firmware on a Charmera for the first time, step by step, w
 Every step links to a longer document. Read it before the step, not during it. The [list of all docs](README.md) has
 them in reading order.
 
-Only have a phone? The [Charmera Card app](../android/README.md) does steps 4 to 7 on the phone and makes the
-published stock restore file itself. Without the backup from step 1 it still writes. For a reviewed file it warns
-when nothing confirms what the camera runs, and for a file it doesn't know it warns loudly. Version 0.4, published
-before 0.5, had no backup step and didn't refuse the withdrawn candidates, so if you still have it installed, don't
-flash with it ([how to tell the two apart](../android/README.md#install)). Read steps 0 and 1 here first.
+Camera already flashed and now freezing in photo or video mode? Go to
+[Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera). It still boots, so it can be fixed
+from the card. A camera that doesn't start at all, or whose flash was cut off, is
+[Recovery, section C](02-RECOVERY.md#c-an-interrupted-flash) or
+[section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
+
+Only have a phone? The [Charmera Card app](../android/README.md) identifies the camera's firmware from its photos,
+builds the reviewed files (the stock restore file, the sensor-ID probe, v0.23 to v0.27, or Custom) and does steps 4
+to 7 on the phone. Without the backup from step 1 it still writes. For a reviewed file it warns when nothing confirms
+what the camera runs, and for a file it doesn't know it warns loudly. Version 0.4, published before 0.5, had no
+backup step and didn't refuse the withdrawn candidates, so if you still have it installed, don't flash with it
+([how to tell the two apart](../android/README.md#install)). Read steps 0 and 1 here first.
 
 Not flashing anything? If you only want the photo and video dates fixed, go to
 [Photo dates (EXIF)](10-EXIF.md). If your phone won't read the camera's card, go to
 [SD card problems](05-CARDS.md).
 
 This only covers the original 2025 series (matte body, yellow Kodak boot screen). Don't flash a Millennium Edition or
-a CLOT edition with any file made from the public dump, and don't flash an original-series camera with one either
-until its own firmware has been read. See [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).
+a CLOT edition with any file made from the public dumps. On an original-series camera, find out which firmware it
+runs first (step 1). See [Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).
 
-## 0. Decide what you can afford to lose
+## 0. Pick a route
 
-There are two ways to get a camera back after a bad flash, both in [Recovery](02-RECOVERY.md). The SD updater
-([section A](02-RECOVERY.md#a-the-camera-boots-and-the-updater-runs-restore-through-the-sd-card)) needs a camera that
-still boots far enough to read the card. The CH341A programmer
-([section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)) needs the camera
-opened and a clip on the flash chip, and it works whatever the firmware does. Nobody has published a recovery of a
-camera that doesn't boot without opening it.
+There are two image sensors in original-series cameras, and each firmware drives one of them. SP140A cameras run
+v006 (the public stock dump, and v008_test from the film-mods project). OV9732 cameras ship with v012. A file for
+the wrong sensor boots, shows the menus and plays back photos, then freezes the moment photo or video mode starts.
+That's what the v006 restore file did on 2026-11-06 to an OV9732 camera. It was brought back later from the card
+with firmware made for its sensor ([what happened](FIRST-FLASH-INCIDENT.md)).
 
-So are you willing to open the camera? The backup in step 1 needs it opened anyway. If you aren't, stop here and keep
-the camera as it is. A flash that doesn't fit the camera leaves it unable to take pictures, and without a backup of
-its own chip there's no way back from that. That's what the public dump did on 2026-11-06 to one original-series
-camera, bought in Japan in November 2026 ([what happened](FIRST-FLASH-INCIDENT.md)).
+You can flash with or without opening the camera.
 
-## 1. Know what your camera runs (back up its chip)
+Without a clip, the camera stays closed:
+
+1. Find out what it runs with Identify (step 1). It needs photos the camera took on its card, so take two or three
+   first.
+2. Build the file for that base (step 2), verify it (step 3), put it on the card (step 4) and flash it (step 5).
+3. The way back is the stock build of the same base, flashed the same way (step 7).
+
+A file for the wrong sensor still boots, and flashing the stock build of the right base from the card undoes it.
+What this route can't undo is a flash that's cut off (the battery dies, the card comes out) or firmware that won't
+boot. Those need the camera opened and a chip programmer
+([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)). Nobody has
+published a recovery of a camera that doesn't boot without opening it.
+
+With a clip, you open the camera and back up its chip first (step 1). This is the stronger route. The backup is the
+one file the checks can compare an update file with, it puts back your own settings and stored photos, and with the
+programmer it also brings back a camera whose flash was cut off or won't boot.
+
+## 1. Know what your camera runs (Identify, or a backup of its chip)
 
 Know what your camera runs before you flash. That means a verified dump of this camera's own flash chip, or the
 Identify route (`charmera identify`, or "Identify this camera's firmware" in the app). Without either, the app and
 `stage` warn, but they don't refuse.
 
-The dump is the better of the two. It's the only way back if a flash goes wrong, and the one file the checks can
-compare an update file with. The app writes without one. For a reviewed file it warns when nothing confirms what the
-camera runs. For a file it doesn't know it warns loudly that this project didn't review it and it wasn't compared with
-this camera's firmware. Without `--stock`, `stage` shows a WARN line but still writes a file that passes
-([details](04-STAGE.md#what-it-does-in-order)). Warning instead of refusing was decided on 2026-11-06. Give
-`--stock <your backup>` to every `verify` and every `stage`.
+The dump is the better of the two. It's the way back from any flash, one that won't boot included, and the one file
+the checks can compare an update file with. The app writes without one. For a reviewed file it warns when nothing
+confirms what the camera runs. For a file it doesn't know it warns loudly that this project didn't review it and it
+wasn't compared with this camera's firmware. Without `--stock`, `stage` shows a WARN line but still writes a file
+that passes ([details](04-STAGE.md#what-it-does-in-order)). Give `--stock <your backup>` to every `verify` and every
+`stage` when you have one.
 
-You can't tell from outside whether a firmware fits a camera. The public firmware drives exactly one image
-sensor. It writes that sensor a fixed table of 61 register settings, never reads which sensor is fitted, and carries
-on when the writes fail. A camera with another sensor boots with that firmware, shows its menus and plays back
-photos, then freezes the moment photo or video mode starts. The body, the yellow boot screen and the version stamp
-don't tell the builds apart: two different builds carry the same stamp `202505201029`
-([Research report](13-PHASE1-REPORT.md), [Image layout](11-FORMAT.md#build-identity)). The one file known to fit your
-camera is the one read from it before it was ever flashed.
+You can't tell from outside which sensor a camera has. v006 writes its sensor a fixed table of 61 register settings,
+never reads which sensor is fitted, and carries on when the writes fail. v012 has its own driver for the OV9732, with
+a table of 167 writes. The body, the yellow boot screen and the version stamp don't tell the builds apart: every
+known build carries the stamp `202505201029` ([Research report](13-PHASE1-REPORT.md),
+[Image layout](11-FORMAT.md#build-identity)). The camera's photos tell you which stock build took them, and a read of
+its chip taken before it was ever flashed shows what it shipped with.
 
-With a CH341A clip ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)):
+### Without a clip
+
+Put the camera's card in a reader and run Identify on it:
+
+```
+charmera identify E:\
+```
+
+It reads only the headers of the photos the camera took, so the card needs some. On a new or empty card, take two or
+three photos with the camera first. A bare 0x270-byte header means stock v012, an OV9732 camera, base v012. The
+0x590-byte header means stock v006 or v008_test, an SP140A camera, base v006. It prints the `charmera build` command
+to run next (step 2). The same check is "Identify this camera's firmware" in the app
+([Using an Android phone](06-ANDROID.md#identify-this-cameras-firmware)).
+
+Photos show the firmware that took them. If the camera was flashed after them, by you, a seller or an earlier owner,
+it runs something else now. On a camera that was flashed before, use photos from before that flash. If there are
+none, the sensor-ID probe finds the sensor
+([Using an Android phone](06-ANDROID.md#identify-the-image-sensor-the-sensor-id-probe)).
+
+### With a clip
+
+Use a CH341A or another 3.3 V programmer
+([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)):
 
 ```
 charmera probe
@@ -64,15 +105,23 @@ charmera inspect backups/<file>.bin
 ```
 
 `probe` and `backup` print a checklist first: a 3.3 V programmer (never an unmodified black CH341A), the battery lead
-lifted, and pin 1 of the clip on the chip's dot. `backup` reads the chip twice and keeps the file only when the reads
-agree. `inspect` must find the build marks (the build string, the stamp and the sensor table) and say which build the
-file is:
+lifted, pin 1 of the clip on the chip's dot, and a multimeter check. With the programmer plugged in alone and the
+clip on nothing, pin 8 (VCC) and pin 1 (CS) should both read about 3.3 V against pin 4 (GND). If either reads near
+5 V, stop. A CH341A board used for this project measured 5 V on CS.
 
-- `public-dump`: your camera runs the same software as the public dump, byte for byte.
-- `film-mods`: it runs the build of the charmera-film-mods author's camera.
-- `public-dump-modified` or `film-mods-modified`: that build with changes, such as a mod made from it
-  ([Image layout](11-FORMAT.md#build-identity) says what counts as one).
+`backup` reads the chip twice and keeps the file only when the reads agree. `inspect` must find the build marks (the
+build string, the stamp and the sensor table) and say which build the file is:
+
+- `public-dump`: your camera runs the same software as the public v006 dump, byte for byte (an SP140A camera).
+- `film-mods`: it runs v008_test, the build of the charmera-film-mods author's camera (SP140A).
+- `v012`: it runs the factory build of OV9732 cameras, the same software as the cleaned public v012 copy.
+- `public-dump-modified`, `film-mods-modified` or `v012-modified`: that build with changes, such as a mod made from
+  it ([Image layout](11-FORMAT.md#build-identity) says what counts as one).
 - `charmera-unknown-build`: it runs a build nobody has published, which is exactly the case the backup is for.
+
+The sensor table line says which kind it found: the SP140A table v006 and v008_test carry, or v012's table for the
+OmniVision OV9732. A camera that runs our v0.23 or v0.24 shows the SP140A table, because the port keeps it, and
+`inspect` adds that the code carries our OV9732 port. That camera is an OV9732.
 
 Keep the file in two places. It's your way back, and it's the `--stock` that every later `verify` and `stage` takes.
 
@@ -80,41 +129,48 @@ Keep the file in two places. It's your way back, and it's the `--stock` that eve
 
 A read of a camera that has been flashed before (by you, a seller or an earlier owner) shows the firmware it runs
 now, not the one it shipped with. It's still the way back to that state, but it says nothing about which firmware
-fits. Comparing a file with it compares the file with whatever
-was flashed. A camera flashed with the public restore file reads as the public build (`inspect` says `public-dump`),
-and the stock restore file then matches that read whether or not it fits the camera. So when your backup is itself
-one of the known builds, `verify`, `stage` and the app show a matching sensor table as a WARN instead of a PASS. The
-match proves a fit only if the backup was read before the camera was ever flashed, and nothing in the file can tell
-you that. A camera that can't take pictures with the firmware it runs now needs another working camera's firmware:
-the donor route in [Recovery, section D](02-RECOVERY.md#the-donor-route).
-
-### Without a clip
-
-Don't flash. The public dump is a copy of one camera. It isn't known to fit yours, and a flash with it can't be undone
-without your own backup.
-
-A camera that already lost its original firmware this way can still be flashed through the card, but only a dump from
-a working camera with the same sensor can fix it (the donor route above). Read its current chip first if you can,
-because that read is the way back if the donor's firmware doesn't start. You can start choosing a donor without a
-clip. `photo-id` reads the header of a would-be donor's photos and of the ones this camera took before its flash,
-without opening either camera. A different header written by the cameras' own firmware shows a different build. A
-photo that another program saved again says nothing about the camera. `photo-id` calls a photo re-saved only when its
-header carries a mark an editor leaves, such as an XMP block. Any other header that neither known build writes may be
-such a copy or another build's, and nothing in it tells you which. So use the photos as they came off each camera's
-card ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
+fits. Comparing a file with it compares the file with whatever was flashed. A camera flashed with the public restore
+file reads as the public build (`inspect` says `public-dump`), and the stock restore file then matches that read
+whether or not it fits the camera. So when your backup is itself one of the known builds, `verify`, `stage` and the
+app show a matching sensor table as a WARN instead of a PASS. The match proves a fit only if the backup was read
+before the camera was ever flashed, and nothing in the file can tell you that. A camera that can't take pictures
+with the firmware it runs now needs firmware for its sensor:
+[Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera) covers finding the sensor and the
+builds that fit, and [the donor route](02-RECOVERY.md#the-donor-route) for a sensor neither public build drives.
 
 ## 2. Pick the file
 
-Build the file from your own backup. `pack` turns the backup into an update file that puts back exactly what the
-camera runs now, settings and stored photos included. With `--official-size` it makes a 0x169000-byte file instead,
-which writes the software only and leaves the camera's own area to a factory reset. 0x169000 bytes is the size of the
-film-mods files, and it's where an official update would end by that project author's reading of the updater. They
-also report flashing a file of that size on their own camera (REPORTED). No official update file has been published
-or examined here, and this project hasn't flashed one of this size
+Most files come from `charmera build`. It makes a firmware file from a base, the stock firmware of one build, and the
+mods you pick:
+
+```
+charmera build --list
+charmera build --base v012 --mods volume-led,exif --download --out out/
+```
+
+Take the base Identify gave you (v012 for an OV9732 camera, v006 for an SP140A one). Leave out `--mods` for the stock
+build. `--list` shows every base, mod and combination. For v012 that's v0.25 (Volume and LED rows), v0.26 (plus EXIF
+dates) and v0.27 (plus boot to the last mode and capture flash), and the other mixes. For v006 it's the stock restore
+file, the sensor-ID probe and Volume/LED. v0.23 and v0.24 are v006 ported to the OV9732, for an OV9732 camera that
+was flashed with v006. `--download` fetches the base's cleaned public copy at a fixed commit and checks its SHA-256.
+The file is written only when it's the reviewed one listed for that combination, and `build` runs `verify` on it.
+Combinations marked experimental have been built and checked but not tried on a camera, and `build` says so. More in
+[Command reference](07-USAGE.md#build-a-firmware-file-from-a-base-and-mods-charmera-build).
+
+With a backup, `--dump <your backup>` builds from your own read instead, when its firmware is still stock v006 or
+v012 byte for byte. The file carries your camera's settings, and it isn't a reviewed file, so `build` labels it that
+way and prints the `verify` and `stage` lines to run with `--stock <your backup>`.
+
+Or build the file from your own backup with `pack`. It turns the backup into an update file that puts back exactly
+what the camera runs now, settings and stored photos included. With `--official-size` it makes a 0x169000-byte file
+instead, which writes the software only and leaves the camera's own area to a factory reset. 0x169000 bytes is the
+size of the film-mods files, and it's where an official update would end by that project author's reading of the
+updater. They also report flashing a file of that size on their own camera (REPORTED). No official update file has
+been published or examined here, and this project hasn't flashed one of this size
 ([Image layout](11-FORMAT.md#update-file-jh_5408stamp_sumbin)).
 
-A mod starts from that backup too. Each of these commands prints what it will change and won't write until you pass
-its gate flag:
+Lower-level mods start from that backup too. Each of these commands prints what it will change and won't write until
+you pass its gate flag:
 
 - `sounds` and `settings`: mute or replace the sounds, change auto-off and standby ([Command reference](07-USAGE.md)).
 - `frames`: your own photo frames ([Photo frames](08-FRAMES.md)).
@@ -123,45 +179,57 @@ its gate flag:
   [Boot and power notes](12-NOTES-boot-and-power.md) says what each patch changes and why it's a guess.
 
 The three candidates C, A and B in [Flash candidates](03-FLASH-CANDIDATES.md) are withdrawn. `verify` and the app
-refuse A and B by their SHA-256, and name C, whose bytes are also the stock restore file made from the cleaned stock
-dump. The published stock restore file on the same page fits only a camera whose own firmware is the public build,
-and only a backup read before the camera was ever flashed can show that yours is. With that backup as `--stock`, the
+refuse A and B by their SHA-256, and name C, whose bytes are also the stock v006 file built from the cleaned v006
+copy. The published stock restore file on the same page is stock v006, for SP140A cameras. Only a backup read before
+the camera was ever flashed, or Identify, can show that yours is one. With that backup as `--stock`, the
 `software-region` line says byte-identical and the `sensor-table` line says the same table. (This is a WARN, because
-the backup is then the public build itself. See [After a flash](#after-a-flash).) Read both lines yourself. `stage`
-refuses a different sensor table, and the app shows a loud "Wrong sensor?" warning for it (the restore file is a
-reviewed file) but writes it if you go ahead. Both take a different program with a WARN. If both lines say the same,
-that file and a `pack` of your backup are the same software, and the `pack` also puts back your own settings and
-photos.
+the backup is then the public build itself. See [After a flash](#after-a-flash).) Read both lines yourself. If both
+say the same, that file and a `pack` of your backup are the same software, and the `pack` also puts back your own
+settings and photos. With a backup of an OV9732 camera, `verify`, `stage` and the app show a loud wrong-sensor
+warning for it ("Wrong sensor?" in the app) and write it if you go ahead. On that camera it boots but can't take
+pictures.
 
 ## 3. Verify
 
 ```
 charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup>
 charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup> --allow-modified   # a mod of code or resources
+charmera verify out/JH_5408<stamp>_<sum>.bin                                          # no backup
 charmera diff <your backup> out/JH_5408<stamp>_<sum>.bin
 ```
 
-Always give `--stock <your backup>`. It's the one comparison that says something about your camera, and it only says
-what fits for a backup read before the camera was ever flashed. It must be a complete read of a chip as `backup`
-writes it: exactly 2 MiB, starting with `SPII`, with the build string and the stamp. Anything else (an update file, a
-cut-off read) is a FAIL. A `--stock` that is byte for byte a public dump is a WARN. It may be this camera's own read
-after a flash with the public restore file, and then it shows what the camera runs, not what fits it.
+For a file from `charmera build`, here's what you'll see. An INFO `reviewed` line names it. Without `--stock` there's
+a WARN `backup` and a WARN `unconfirmed`, because nothing confirms which firmware the camera runs. Its `series`,
+`build`, `software-region` and `sensor-table` problems show as WARN (marked as expected for a reviewed build), and a
+backup for the other sensor adds a WARN `wrong-sensor`. It needs no `--allow-modified`. The name, size, checksum and
+vector-table checks still FAIL as they would for any file. The rules below apply in full to every other file, such
+as one from `pack` or the mod commands, or a `build --dump` of your own read.
+
+Give `--stock <your backup>` when you have one. It's the one comparison that says something about your camera, and
+it only says what fits for a backup read before the camera was ever flashed. It must be a complete read of a chip as
+`backup` writes it: exactly 2 MiB, starting with `SPII`, with the build string and the stamp. Anything else (an update
+file, a cut-off read) is a FAIL. A `--stock` that is byte for byte a public dump is a WARN. It may be this camera's
+own read after a flash with the public restore file, and then it shows what the camera runs, not what fits it.
 
 `verify` fails closed: a FAIL line means the file doesn't go on a card.
 
-The `sensor-table` line compares the file's image-sensor set-up table with your backup's, found by content in both:
+The `sensor-table` line compares the file's image-sensor set-up table with your backup's, found by content in both.
+There are two kinds the toolkit knows: the SP140A table v006 and v008_test carry, and v012's table for the OV9732.
 
-- The table differs from your backup's: FAIL, and no flag clears it, `--allow-unknown-build` included. That
-  difference is what leaves a camera unable to take pictures.
-- The file or the backup has no sensor table of the kind the known builds use: FAIL, since there's nothing to compare.
+- The table differs from your backup's: FAIL, and no flag clears it, `--allow-unknown-build` included. The line names
+  the sensor each one is for. That difference is what leaves a camera unable to take pictures.
+- The file or the backup has no sensor table of a kind the toolkit knows: FAIL, since there's nothing to compare.
 - The tables match and your backup is one of the known builds: WARN ([After a flash](#after-a-flash)).
 - The tables match and your backup is a build nobody has published: PASS only when the program around the table
   (bytes 0..0x120000, the code and its data) is your backup's too. Otherwise it's a WARN that says the program
   differs, because a different program can drive the same sensor differently.
 
+Without `--stock`, a known table is a WARN that says which sensor it fits and that nothing in the file can tell
+which sensor your camera has.
+
 The one deliberate way past the FAILs is the donor route ([Recovery, section D](02-RECOVERY.md#the-donor-route)).
 `--allow-unknown-build` covers only a file without all the build marks (with `--stock`, only one that still has a
-sensor table of the known kind) and, without `--stock`, a table that isn't the known builds'.
+sensor table of a known kind) and, without `--stock`, a table that isn't the known builds'.
 
 The `build` line names the known build a file was made from, unchanged or "with changes", or says the build is
 unknown. It adds what a build match proves: which public image the file came from, not whether it fits your camera.
@@ -191,10 +259,10 @@ one you intended and nothing else moved. [Image layout](11-FORMAT.md) covers wha
 
 `stage` runs `verify` again with the same `--stock`, refuses a card that already holds another update file, copies
 the file to the card root and reads the copy back to compare hashes. It asks you to type the card path before it
-writes. Without `--stock` it warns that no backup of this camera was given and still writes (step 1), so give it.
-[Putting the file on the card](04-STAGE.md) explains each refusal. To do this from a phone, use the
-[Charmera Card app](../android/README.md) (on Android 11 and later through a USB card reader or the camera's USB-C
-cable, not the phone's own SD slot). [Using an Android phone](06-ANDROID.md) covers the rest.
+writes. With no backup, leave out `--stock`. It then warns that nothing compares the file with this camera and still
+writes once you confirm (step 1). [Putting the file on the card](04-STAGE.md) explains each refusal. To do this from
+a phone, use the [Charmera Card app](../android/README.md) (on Android 11 and later through a USB card reader or the
+camera's USB-C cable, not the phone's own SD slot). [Using an Android phone](06-ANDROID.md) covers the rest.
 
 ```
 charmera stage out/JH_5408<stamp>_<sum>.bin --card E: --stock <your backup>          # Windows
@@ -217,7 +285,8 @@ plug in the cable. Eject the drive before you unplug the cable.
 Before you start:
 
 - You know what the camera runs (step 1). If you made a backup, it passed `inspect` and is kept in two places.
-  Without one there's no way back if this flash doesn't fit.
+  Without one, a file for the wrong sensor is undone from the card (step 7), but a flash that's cut off or won't
+  boot needs the camera opened.
 - Original 2025 series only: matte body, yellow Kodak boot screen. Never a Millennium Edition (blue boot
   screen) or a CLOT edition ([Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). The body
   alone proves nothing, as the incident showed. What does is the comparison in step 3 with a backup read before the
@@ -226,12 +295,12 @@ Before you start:
   that window leaves a camera that only a chip programmer can bring back
   ([Recovery, section C](02-RECOVERY.md#c-an-interrupted-flash)).
 - The photos the camera stores in its own memory (up to two, taken with no card in) are replaced by a 0x1E0000-byte
-  file. The candidates, and any file packed with `--blank-photos`, erase them. A file packed from someone else's dump
-  replaces them with that owner's. Only a file packed from your own backup without `--blank-photos` puts back the
-  photos that were in the camera when you made that backup. A 0x169000-byte file (`--official-size`) leaves the
-  photo data in place, but the camera empties its photo list, so it no longer shows them and the next photo it
-  stores overwrites them. If they matter and you have no backup, get them off the camera first. The camera copies
-  them to the `SPIDCIM` folder on the card
+  file. The candidates, the files from `build --download` and any file packed with `--blank-photos` erase them. A
+  file packed from someone else's dump replaces them with that owner's. Only a file packed from your own backup
+  without `--blank-photos` puts back the photos that were in the camera when you made that backup. A 0x169000-byte
+  file (`--official-size`) leaves the photo data in place, but the camera empties its photo list, so it no longer
+  shows them and the next photo it stores overwrites them. If they matter and you have no backup, get them off the
+  camera first. The camera copies them to the `SPIDCIM` folder on the card
   ([Research report, section 2](13-PHASE1-REPORT.md#2-firmware-container-format)), so check that folder on a
   computer before you flash.
 
@@ -256,14 +325,28 @@ Then:
 Power on without a card. Does the boot screen appear, does the live view come up, does a shutter press take a
 picture? With a card, does a photo save and play back? A muted file should make no sound at power-on, shutter or
 power-off. A camera that boots and shows its menus but freezes when photo or video mode starts has received firmware
-that doesn't fit it. The way back is step 7 with your backup. If that backup was read after an earlier flash, it
-holds that flash's firmware ([After a flash](#after-a-flash)). Write down anything that differs from the stock
-behaviour, because few of these files have run on hardware before you.
+that doesn't fit it. The way back is step 7. If your backup was read after an earlier flash, it holds that flash's
+firmware ([After a flash](#after-a-flash)). Write down anything that differs from the stock behaviour, because few of
+these files have run on hardware before you.
 
 ## 7. Undo
 
-`pack` your own backup (`--factory-settings --blank-photos` optional) and flash it the same way to get back exactly
-what you had. If the camera doesn't boot far enough to read the card, see
+With a backup, `pack` it (`--factory-settings --blank-photos` optional) and flash it the same way to get back exactly
+what you had.
+
+Without a backup, flash the stock build of the camera's base:
+
+```
+charmera build --base v012 --download --out out/      # OV9732 camera
+charmera build --base v006 --download --out out/      # SP140A camera
+```
+
+Verify and stage it as in steps 3 and 4, then flash it as in step 5. It puts back the factory software with the
+cleaned copy's factory settings, and it erases the photos stored in the camera. If the camera froze after a flash
+with firmware for the other sensor, the base is the one its photos from before that flash show (step 1). In the app,
+stock v012 is Custom with base v012 and no mods.
+
+If the camera doesn't boot far enough to read the card, see
 [Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
 
 ## Background
@@ -274,7 +357,8 @@ You don't need these to flash, but every claim above comes from them:
 [Research report](13-PHASE1-REPORT.md) for the sources, with each finding labelled verified, reported or inferred. If
 a camera was already flashed with firmware for the other image sensor, the
 [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md) and
-[OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md) cover the repair.
+[OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md) cover the repair, and
+[Using an Android phone](06-ANDROID.md#repair-an-ov9732-camera-the-ov9732-bring-up) has the builds for it.
 
 ---
 

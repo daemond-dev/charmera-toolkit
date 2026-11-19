@@ -44,7 +44,7 @@ SPII_MAGIC = b"SPII"
 # --- Known builds -------------------------------------------------------------------------------------
 #
 # What identifies a firmware build, and what does not. The 12-digit stamp the updater compares against
-# (`202505201029`) is carried by at least two different builds: the public dump and the build on the
+# (`202505201029`) is carried by at least three different builds: the public dump, v012 and the build on the
 # charmera-film-mods author's camera (its code and resources are public as that project's restore file).
 # The build string `JH5408  20250520`, the yellow boot screen and the "original series" body do not tell
 # them apart. The compile date does: `Oct 14 2025` in the public dump, `Nov 19 2025` in the film-mods
@@ -54,8 +54,10 @@ SPII_MAGIC = b"SPII"
 # public dump and v008_test in the film-mods build (27 paths in each, VERIFIED). A different folder shows a
 # different build; the same folder does not show the same build. A fingerprint over the software names a
 # build exactly, and even that says which image a file was made from, not whether it fits the camera it goes
-# into: the two known builds drive the same sensor with the same 61-write table, and a camera fitted with
-# another sensor needs a build nobody has shared. None of these marks says whether a file fits a camera.
+# into: the public dump's build and the film-mods build drive the SP140A-class sensor with the same 61-write table.
+# The third, v012 (the factory build of OV9732 cameras, compiled Jan 12 2026, source folder v012, the same stamp),
+# drives the OmniVision OV9732 through a driver of its own: bus 0x6C, 16-bit registers and a 167-write init table of
+# another form (ov9732_program). None of these marks says whether a file fits a camera.
 
 CODE_AREA_END = 0x120000          # boot header, code, read-only and initialised data, and the padding below the pack
 
@@ -66,10 +68,10 @@ class KnownBuild:
     label: str
     source: str
     status: str                    # VERIFIED: hashed here from a public file. REPORTED: fingerprint published by its owner.
-    stamp: str                     # the 12-digit stamp compiled into it (the same in both known builds)
+    stamp: str                     # the 12-digit stamp compiled into it (the same in every known build)
     official_sha1: str             # SHA-1 of bytes 0..0x169000 (the span the official-size files write)
     official_byte_sum: int         # the camera's own checksum over the same span
-    sensor_table_sha256: str       # SHA-256 of the 124-byte sensor init table (identical in both known builds)
+    sensor_table_sha256: str       # SHA-256 of the sensor init table, end marker included (v006 and v008_test share theirs)
     software_sha256: Optional[str] = None   # SHA-256 of bytes 0..0x170000, when the dump is public
     code_sha256: Optional[str] = None       # SHA-256 of bytes 0x200..0x100000 (code and read-only data)
     official_sha256: Optional[str] = None   # SHA-256 of bytes 0..0x169000
@@ -81,6 +83,7 @@ class KnownBuild:
     compiled: Optional[str] = None          # the compile date the build carries (it differs between the known builds)
     vector_table_sha256: Optional[str] = None   # SHA-256 of bytes 0x200..0x240 (VECTOR_TABLE)
     source_tree: Optional[str] = None       # the folder its source paths name (it differs between the known builds)
+    sensor: str = "SP140A"                  # the image sensor its table drives: SP140A (v006, v008_test) or OV9732 (v012)
 
     @property
     def layout(self) -> Optional[Tuple[int, int, int]]:
@@ -132,9 +135,32 @@ FILM_MODS_BUILD = KnownBuild(
     source_tree="v008_test",
 )
 
-KNOWN_BUILDS = {b.key: b for b in (PUBLIC_BUILD, FILM_MODS_BUILD)}
+V012_BUILD = KnownBuild(
+    key="v012",
+    label=("the factory build v012 of OV9732 cameras (the-dumping-grounds/charmera-firmware-v012, same stamp 202505201029, "
+           "compiled Jan 12 2026)"),
+    source=("the-dumping-grounds/charmera-firmware-v012 charmera-v012-2026-01-12-clean.bin (the cleaned copy of a never-flashed "
+            "camera's read; bytes 0..0x170000 are that read's, byte for byte)"),
+    status="VERIFIED",
+    stamp="202505201029",
+    official_sha1="2cc13517f5b88d3253f5cde7b5fcde9e43df5fce",
+    official_byte_sum=0x0852E193,
+    sensor_table_sha256="718cf3a161fc9961fc79a1c8b5a1ba7016973818c6d634c9a0eef309265361d6",
+    software_sha256="c93c7b80a0c20b5ec1ec36c415b830172008b9a04b0253563e41c87ebaed3d66",
+    code_sha256="6e0488e69715dd727b0361e197e59284f2ff0e616f746525d8ab377cb535656e",
+    official_sha256="5c08c0e1ac6a6c458c7d071e39dbc667867310f6c9611f91919ae2ab8fc12a6f",
+    stamp_offset=0x218D0,
+    build_offset=0x1897C,
+    sensor_table_offset=0xF5D3C,
+    compiled="Jan 12 2026",
+    vector_table_sha256="cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",   # the same bytes as v006's
+    source_tree="v012",
+    sensor="OV9732",
+)
 
-# The stamp both known builds carry. A file name with this stamp is ignored by a camera running either build.
+KNOWN_BUILDS = {b.key: b for b in (PUBLIC_BUILD, FILM_MODS_BUILD, V012_BUILD)}
+
+# The stamp every known build carries. A file name with this stamp is ignored by a camera running any of them.
 SHARED_STAMP = "202505201029"
 
 # Public full dumps, for reference only. Never redistributed by this toolkit.
@@ -219,6 +245,7 @@ class SensorTables:
     sha256: str                # of the init table bytes, end marker included
     bus_address: Optional[int]  # the write address the config struct after the reset table names (0x78 here); INFERRED
     referenced_from: Optional[int]  # file offset of the code literal holding the init table's RAM address, or None
+    sensor: str = "SP140A"     # the sensor the table is for: SP140A (8-bit pairs after 'fd 00 20 00 ff ff') or OV9732
 
     @property
     def init_bytes_len(self) -> int:
@@ -235,6 +262,9 @@ class BuildMarks:
     compiled_offset: Optional[int] = None
     sensor: Optional[SensorTables] = None
     sensor_programs: Tuple[SensorTables, ...] = ()   # every reset and init table pair found, in file order
+    # Every OV9732 program found (ov9732_programs), in file order, when there is no SP140A program: the sensor mark is
+    # then one of them.
+    ov9732_programs: Tuple[SensorTables, ...] = ()
     stamp_conflict: Tuple[str, ...] = ()             # the different stamps that follow '*.bin', when they disagree
     # The folder the firmware was built in (source_tree_marks); not one of the marks `complete` asks for.
     source_tree: Optional[str] = None
@@ -249,8 +279,9 @@ class BuildMarks:
     @property
     def several_sensor_programs(self) -> List[SensorTables]:
         """The sensor programs the code refers to, when they are more than one with different init tables; else
-        empty. Which of them sets up the sensor cannot be told from the file."""
-        referenced = [t for t in self.sensor_programs if t.referenced_from is not None]
+        empty. Which of them sets up the sensor cannot be told from the file. The programs counted are the kind the
+        sensor mark is picked from: the SP140A ones, or the OV9732 ones when there is no SP140A program."""
+        referenced = [t for t in (self.sensor_programs or self.ov9732_programs) if t.referenced_from is not None]
         return referenced if len({t.sha256 for t in referenced}) > 1 else []
 
     @property
@@ -338,13 +369,71 @@ def _pick_sensor_program(programs: List[SensorTables]) -> Optional[SensorTables]
     return (referenced or programs)[0] if programs else None
 
 
+# v012's own OV9732 driver (VERIFIED in the cleaned v012 copy and the read it was made from): the SCCB bus context
+# "11 00 12 00 00 00 00 10 08 6c" (bus 0x6C, 16-bit register addresses; our OV9732 port carries it too), and an init
+# table of 4-byte entries (u16 register, u16 value, little-endian) that starts with the software reset 0x0103 = 1 and
+# ends with register 0xFFFF: 167 writes at 0xF5D3C, referred to from code at 0x7AF04.
+OV9732_SCCB = bytes.fromhex("1100120000000010086c")
+OV9732_INIT_START = bytes.fromhex("03010100")
+OV9732_BUS = 0x6C
+
+# What a firmware image drives, from its bytes: the SP140A-class sensor (its 61-write init table, which starts
+# fd 00 2f 1b) or the OmniVision OV9732 (the SCCB context of v012's own driver, which our OV9732 port carries too).
+# The OV9732 context wins: a v006 build with our port (v0.21 to v0.24) still holds the SP140A table.
+SP140A_INIT = bytes.fromhex("fd002f1b")
+
+
+def sensor_of(image: bytes) -> Optional[str]:
+    """'OV9732', 'SP140A' or None (neither seen) for a firmware image or a chip read."""
+    code = image[:SOFTWARE_END]
+    if OV9732_SCCB in code:
+        return "OV9732"
+    if SP140A_INIT in code:
+        return "SP140A"
+    return None
+
+
+def ov9732_program(image: bytes) -> Optional[SensorTables]:
+    """v012's OV9732 program, or None: of ov9732_programs, the one the code refers to by address wins, else the first
+    found."""
+    return _pick_sensor_program(ov9732_programs(image))
+
+
+def ov9732_programs(image: bytes) -> List[SensorTables]:
+    """Every OV9732 program of v012's kind, in file order: the bus context and an init table that starts with a
+    software reset, both in the code area. Each table holds at least 16 writes to registers 0x0100..0x5FFF and ends
+    with register 0xFFFF. Empty without the bus context."""
+    end = min(len(image), CODE_AREA_END)
+    ctx = image.find(OV9732_SCCB, HEADER_SIZE, end)
+    if ctx < 0:
+        return []
+    found = []
+    i = image.find(OV9732_INIT_START, HEADER_SIZE, end)
+    while i >= 0:
+        if i % 4 == 0:
+            p, pairs = i, 0
+            while p + 4 <= end:
+                reg = struct.unpack_from("<H", image, p)[0]
+                if reg == 0xFFFF or not 0x0100 <= reg <= 0x5FFF:
+                    break
+                pairs += 1
+                p += 4
+            if p + 4 <= end and pairs >= 16 and struct.unpack_from("<H", image, p)[0] == 0xFFFF:
+                e = p + 4
+                found.append(SensorTables((ctx, ctx + len(OV9732_SCCB)), (i, e), pairs, hashlib.sha256(image[i:e]).hexdigest(),
+                                          OV9732_BUS, _literal_offset(image, i - VA_OFFSET, end), "OV9732"))
+        i = image.find(OV9732_INIT_START, i + 1, end)
+    return found
+
+
 def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
     """Locate the sensor reset table and the init table the firmware writes to the image sensor at boot.
 
     When more than one spot fits (sensor_programs), the one whose init table the code refers to by address wins.
-    Whether the code refers to several programs with different tables is BuildMarks.several_sensor_programs.
+    Whether the code refers to several programs with different tables is BuildMarks.several_sensor_programs. An image
+    with no SP140A-style program falls back to v012's OV9732 one (ov9732_program).
     """
-    return _pick_sensor_program(sensor_programs(image))
+    return _pick_sensor_program(sensor_programs(image)) or ov9732_program(image)
 
 
 def source_tree_marks(code: bytes) -> Tuple[Optional[str], Optional[int], int]:
@@ -372,7 +461,7 @@ SOURCE_TREE_PROVES = ("a different folder shows a different build; the same fold
 
 
 def known_source_trees() -> str:
-    """The known builds' source-tree folders, as 'public-dump: v006, film-mods: v008_test'."""
+    """The known builds' source-tree folders, as 'public-dump: v006, film-mods: v008_test, v012: v012'."""
     return ", ".join(f"{b.key}: {b.source_tree}" for b in KNOWN_BUILDS.values() if b.source_tree)
 
 
@@ -393,12 +482,15 @@ def find_marks(image: bytes) -> BuildMarks:
     b = _BUILD_STRING_RE.search(code)
     c = _COMPILED_RE.search(code)
     programs = sensor_programs(image)
+    ov_programs = [] if programs else ov9732_programs(image)
     tree, tree_off, tree_paths = source_tree_marks(code)
     return BuildMarks(
         stamp=stamp, stamp_offset=stamp_off,
         build_string=b.group(0) if b else None, build_offset=b.start() if b else None,
         compiled=c.group(0) if c else None, compiled_offset=c.start() if c else None,
-        sensor=_pick_sensor_program(programs), sensor_programs=tuple(programs), stamp_conflict=conflict,
+        sensor=_pick_sensor_program(programs or ov_programs), sensor_programs=tuple(programs),
+        ov9732_programs=tuple(ov_programs),
+        stamp_conflict=conflict,
         source_tree=tree, source_tree_offset=tree_off, source_tree_paths=tree_paths,
     )
 
@@ -575,6 +667,16 @@ def vector_table_sha256(image: bytes) -> Optional[str]:
     """SHA-256 of the ARM vector table (bytes 0x200..0x240), or None when the image ends before it."""
     lo, hi = VECTOR_TABLE
     return hashlib.sha256(image[lo:hi]).hexdigest() if len(image) >= hi else None
+
+
+def known_vector_tables() -> Dict[str, List[str]]:
+    """The SHA-256 of each known build's ARM vector table, with the builds that carry it (v006, v008_test and v012
+    share one)."""
+    out: Dict[str, List[str]] = {}
+    for b in KNOWN_BUILDS.values():
+        if b.vector_table_sha256 is not None:
+            out.setdefault(b.vector_table_sha256, []).append(b.key if b.source_tree is None else b.source_tree)
+    return out
 
 
 def updater_extra_erase(file_len: int) -> int:

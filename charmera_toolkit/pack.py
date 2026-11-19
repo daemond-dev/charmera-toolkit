@@ -168,7 +168,8 @@ def _sensor_line(build) -> str:
     if t is None:
         return "NOT FOUND"
     return (f"{t.pairs} writes at {t.init[0]:#x}, sha256 {t.sha256[:8]}..."
-            + (" (the one both known builds carry)" if build.checks.get("sensor_table_known") else " (NOT the known builds' table)")
+            + ((" (v012's, for the OV9732)" if t.sensor == "OV9732" else " (the SP140A one v006 and v008_test carry)")
+               if build.checks.get("sensor_table_known") else " (NOT the known builds' table)")
             + ("" if t.referenced_from is not None else "; no code reference found"))
 
 
@@ -269,8 +270,8 @@ def handler(args) -> int:
     build = detect_build(payload)
     if not build.charmera and not args.allow_unknown_build:
         print("error: this image carries no Charmera build marks (build string, 12-digit stamp, sensor table), so the toolkit")
-        print("       cannot tell that it is Charmera firmware at all. Refusing to pack it. Use --allow-unknown-build only for a")
-        print("       dump taken from the camera it will go back into.")
+        print("       cannot tell that it is Charmera firmware at all: it is not v006, v008_test or v012, or it is damaged.")
+        print("       Refusing to pack it. Use --allow-unknown-build only for a good read of the camera it will go back into.")
         return 2
     if build.made_from is None and build.charmera:
         print("note: Charmera firmware of a build this toolkit does not know. It belongs only in the camera it was dumped from,")
@@ -334,7 +335,8 @@ def handler(args) -> int:
         print(f"error: cannot write into {out_dir}: {exc}")
         return 2
     print(f"wrote {out}")
-    print("Next: run `charmera verify` on it with --stock <a backup of the camera it goes into>.")
+    print("Next: run `charmera verify` on it with --stock <a backup of the camera it goes into>, or without --stock if")
+    print("you have no backup (verify then warns that nothing compares it with the camera).")
     return 0
 
 
@@ -348,7 +350,7 @@ def register(subparsers) -> None:
     p.add_argument("--out", default="out",
                    help="output directory on the computer; refused if it is a drive root or mount point, lies on removable media "
                         "or holds a DCIM folder (a card: use stage), or holds another JH_*.bin")
-    p.add_argument("--stamp", help="build stamp of 12 ASCII digits 0-9, YYYYMMDDhhmm (default: now, UTC); must differ from 202505201029, the stamp both known builds carry")
+    p.add_argument("--stamp", help="build stamp of 12 ASCII digits 0-9, YYYYMMDDhhmm (default: now, UTC); must differ from 202505201029, the stamp every known build carries")
     p.add_argument("--factory-settings", action="store_true",
                    help="keep only the first CRC-valid (factory) settings record and erase the rest of the bank; the photo directory "
                         "is zeroed only if it is erased, and stored photos are kept (add --blank-photos to remove them)")

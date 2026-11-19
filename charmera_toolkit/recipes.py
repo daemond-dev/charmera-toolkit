@@ -12,6 +12,10 @@ android/.../Recipes.java, is generated from it by tools/gen_recipes.py). It list
            listed here, so a file it writes is always one this project generated, reviewed and published by hash.
 
 A mod is checked before it is applied: the bytes it replaces must hash to what was recorded. File offset = VA + 0x200.
+
+An owner's own read of a v006 or v012 chip (own_read) is a base too: its firmware must be that build's, byte for byte
+over 0..0x169000, and its settings and photos are its own. A file made from one cannot be a reviewed file, since no
+published hash covers that camera's own area, so make() returns it marked reviewed=False.
 """
 
 from __future__ import annotations
@@ -48,11 +52,39 @@ class Made:
     dump_id: str
     status: str          # "tested" or "experimental"
     label: str
+    reviewed: bool = True  # False for a file made from an owner's own read (own_read): no published hash matches it
 
 
 def load(path: Path = RECIPES) -> dict:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+# The known builds (image.KNOWN_BUILDS keys) an own read can be of, and the base each one is.
+OWN_READ_BASES = {"public-dump": "v006", "v012": "v012"}
+
+
+def own_read(data: bytes, recipes: Optional[dict] = None) -> dict:
+    """A dumps entry for an owner's own read of a v006 or v012 chip, or RecipeError. The read must be a complete 2 MiB
+    read of the chip whose firmware (bytes 0..0x169000) is that build's unchanged; it is prepared as that base's
+    cleaned copy is."""
+    from . import image
+    recipes = recipes or load()
+    problem = image.chip_read_problem(data)
+    if problem:
+        raise RecipeError(f"not a dump the recipes start from (SHA-256 {sha256(data)}), and not a read of a v006 or v012 "
+                          f"chip either: {problem}")
+    build = image.match_known_build(data)
+    base = OWN_READ_BASES.get(build.key) if build is not None else None
+    if base is None:
+        found = image.detect_build(data)
+        raise RecipeError("not a dump the recipes start from, and the firmware in this read is not stock v006 or v012 byte "
+                          f"for byte (it is {found.identity}: {found.label}). A camera flashed with a mod reads like this. "
+                          "Build from the public copy instead (--download), or from a read taken before the camera was "
+                          "flashed")
+    clean = next(d for d in recipes["dumps"] if d["build"] == base and d["copy"] == "clean")
+    return {"id": f"{base}-own-read", "build": base, "copy": "own", "prep": clean["prep"], "size": len(data),
+            "sha256": sha256(data), "source": "your own read of the chip", "url": None}
 
 
 def dump_for(data: bytes, recipes: Optional[dict] = None) -> dict:
@@ -134,10 +166,12 @@ def apply(out: bytearray, dump: bytes, mod: dict) -> None:
         out[off:off + len(new)] = new
 
 
-def compose(dump: bytes, mod_ids: Sequence[str], recipes: Optional[dict] = None) -> Tuple[bytes, dict]:
-    """The bytes of a base plus mods, unchecked against the builds table (tools/gen_recipes.py uses this)."""
+def compose(dump: bytes, mod_ids: Sequence[str], recipes: Optional[dict] = None,
+            entry: Optional[dict] = None) -> Tuple[bytes, dict]:
+    """The bytes of a base plus mods, unchecked against the builds table (tools/gen_recipes.py uses this). entry is the
+    dumps entry the dump is (default: dump_for)."""
     recipes = recipes or load()
-    entry = dump_for(dump, recipes)
+    entry = entry or dump_for(dump, recipes)
     base = entry["build"]
     mods = {m["id"]: m for m in mods_for(base, recipes)}
     out = prepare(dump, entry)
@@ -152,15 +186,26 @@ def name_for(data: bytes, stamp: str) -> str:
     return checksum.build_update_name(data, stamp).filename
 
 
-def make(dump: bytes, names: Iterable[str] = (), recipes: Optional[dict] = None) -> Made:
-    """A reviewed file: the dump's base with these mods, refused unless the result is the listed one."""
+def make(dump: bytes, names: Iterable[str] = (), recipes: Optional[dict] = None, own: bool = False) -> Made:
+    """A reviewed file: the dump's base with these mods, refused unless the result is the listed one. With own, a dump
+    the recipes do not list may be an owner's own read of a v006 or v012 chip (own_read): the file made from it is
+    returned with reviewed=False, unless it happens to be a reviewed file byte for byte."""
     recipes = recipes or load()
-    entry = dump_for(dump, recipes)
+    try:
+        entry = dump_for(dump, recipes)
+    except RecipeError:
+        if not own:
+            raise
+        entry = own_read(dump, recipes)
     base = entry["build"]
     ids = resolve(base, names, recipes)
     s = set_for(base, ids, recipes)
-    data, _ = compose(dump, ids, recipes)
+    data, _ = compose(dump, ids, recipes, entry)
     sha = sha256(data)
+    if entry["copy"] == "own":
+        row = reviewed(sha, recipes)
+        name = row["name"] if row else name_for(data, s["stamp"])
+        return Made(data, name, sha, base, ids, entry["id"], s["status"], s["label"], reviewed=row is not None)
     for b in recipes["builds"]:
         if b["base"] == base and tuple(b["mods"]) == ids and b["dump"] == entry["id"]:
             if b["sha256"] != sha:

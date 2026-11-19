@@ -8,6 +8,7 @@ this file can touch a real programmer.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -20,6 +21,7 @@ import pytest
 
 from charmera_toolkit import cli, flash, image
 from charmera_toolkit.flash import FLASH_SIZE, TAIL_START
+from test_core import SYNTHETIC_VECTORS, put_resource_pack
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -128,10 +130,31 @@ SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xF
                                + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
 
 
+# The synthetic images' ARM vector table (bytes 0x200..0x240), taken as a known build's by restore in these tests
+# (known_vectors): the real one is not kept in the repo.
+# (test_core.SYNTHETIC_VECTORS)
+
+
+@pytest.fixture(autouse=True)
+def known_vectors(monkeypatch):
+    """restore takes the synthetic vector table as a known build's, as it takes the real builds' one."""
+    real = image.known_vector_tables
+
+    def with_synthetic():
+        out = dict(real())
+        out.setdefault(hashlib.sha256(SYNTHETIC_VECTORS).hexdigest(), ["v006"])   # the builds named stay the real ones
+        return out
+
+    monkeypatch.setattr(image, "known_vector_tables", with_synthetic)
+
+
 def make_image(fill: int = 0x5A) -> bytes:
-    """A 2 MiB image shaped like a stock dump: magic, the build marks, a 0xFF tail."""
+    """A 2 MiB image shaped like a stock dump: magic, the vector table, the build marks, a resource pack, a 0xFF
+    tail."""
     body = bytearray(bytes([fill]) * TAIL_START)
     body[0:4] = b"SPII"
+    body[0x200:0x240] = SYNTHETIC_VECTORS
+    put_resource_pack(body)
     body[BUILD_OFFSET: BUILD_OFFSET + 17] = b"JH5408  20250520\x00"
     body[STAMP_OFFSET - 1: STAMP_OFFSET + 13] = b"\x00202505201029\x00"   # NUL-terminated, as in the firmware
     body[0xF5BFC: 0xF5C02] = image.SENSOR_RESET_TABLE
@@ -645,10 +668,10 @@ def test_restore_refuses_missing_build_marks_without_flag(fake_flashrom, tmp_pat
     err = capsys.readouterr().err
     assert "no Charmera build marks" in err and "stamp missing" in err
     assert "--allow-unknown-build" in err
-    # the freeze was seen on one camera; its cause is inferred, as public_image_note says
-    assert ("After a flash, one camera started but froze in photo and video mode; the likely cause is a sensor the firmware "
-            "does not drive (INFERRED)") in flat(err)
-    assert "seen on hardware" not in err
+    # it names the builds the toolkit knows, and no longer says "only if this image is this camera's own"
+    assert "It is not v006, v008_test or v012 (the builds this toolkit knows), or it is damaged." in flat(err)
+    assert "only for a read of this camera's own chip that you know is good" in flat(err)
+    assert "only if you know this image is this camera's own" not in flat(err)
     assert not fake_flashrom.wrote_anything()
     # another stamp at the same place is still a Charmera build mark: the stamp is not an identity
     data = bytearray(make_image())
@@ -825,6 +848,62 @@ def test_restore_asks_a_second_time_when_the_sensor_tables_differ(fake_flashrom,
     answers[:] = ["DIFFERENT", "DIFFERENT"]
     assert restore(image, tmp_path / "r3") == 1
     assert not fake_flashrom.wrote_anything()
+
+
+def with_our_ov9732_port(data: bytes) -> bytes:
+    """A v006-style image that also carries our OV9732 port's SCCB context, as v0.21 to v0.24 do: the SP140A table stays."""
+    out = bytearray(data)
+    out[0x40000: 0x40000 + len(image.OV9732_SCCB)] = image.OV9732_SCCB
+    return bytes(out)
+
+
+def test_restore_of_v006_over_a_v024_chip_asks_different(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A chip running our OV9732 port keeps v006's SP140A table: the same table hash, but it drives an OV9732, so a v006
+    image over it is DIFFERENT, never "The same table"."""
+    data = make_image()
+    image_path = tmp_path / "v006.bin"
+    image_path.write_bytes(data)
+    chip = with_our_ov9732_port(make_image(0x00))
+    marks = flash.analyze_image(chip)["build_marks"]["sensor_table"]
+    assert marks["sensor"] == "SP140A" and marks["drives"] == "OV9732"
+    assert marks["sha256"] == flash.analyze_image(data)["build_marks"]["sensor_table"]["sha256"]
+    fake_flashrom.set_chip(chip)
+    prompts, answers = [], ["RESTORE", "no"]
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert restore(image_path, tmp_path / "r") == 1
+    text = flat(capsys.readouterr().out)
+    assert "The same table" not in text
+    assert "(OV9732 port)" in text
+    assert ("DIFFERENT: the image drives the SP140A-class sensor, the firmware on the chip drives the OmniVision OV9732"
+            in text)
+    assert len(prompts) == 2 and "Type DIFFERENT" in prompts[1] and not fake_flashrom.wrote_anything()
+
+
+def test_a_clean_copy_over_the_other_sensor_is_called_expected(capsys):
+    """The cleaned stock copy written over the other sensor's firmware is the case Recovery B expects: no donor advice."""
+    v006 = flash.analyze_image(make_image())["build_marks"]["sensor_table"]
+    ported = flash.analyze_image(with_our_ov9732_port(make_image(0x00)))["build_marks"]["sensor_table"]
+    ask = flash.print_sensor_comparison(v006, ported, (), flash.CLEAN_V006)
+    text = flat(capsys.readouterr().out)
+    assert "Expected when you're writing the stock build for this camera's sensor" in text
+    assert "sensor module" not in text
+    assert ask and "Write it if this camera has the SP140A-class sensor." in ask
+    flash.print_sensor_comparison(v006, ported)
+    assert "sensor module" in flat(capsys.readouterr().out)
+
+
+def test_inspect_names_our_ov9732_port(tmp_path, capsys):
+    from charmera_toolkit import inspect_cmd
+    path = tmp_path / "v024.bin"
+    data = with_our_ov9732_port(make_image())
+    path.write_bytes(data)
+    inspect_cmd.print_report(path, data)
+    assert "OV9732 port (v0.21 to v0.24): this firmware drives an OV9732" in flat(capsys.readouterr().out)
 
 
 def test_restore_on_a_chip_without_a_sensor_table_asks_a_second_time(fake_flashrom, tmp_path, monkeypatch, capsys):
@@ -1215,7 +1294,7 @@ def test_restore_wrappers_say_restore_reads_the_chip_first(name):
 @pytest.mark.parametrize("name", ["backup.sh", "backup.ps1", "restore.sh", "restore.ps1"])
 def test_wrappers_carry_the_checklist(name):
     comments = wrapper_comments(name)
-    for words in ("a 3.3 V programmer", "Never an unmodified black CH341A board: its data lines run at 5 V",
+    for words in ("a 3.3 V programmer", "Never an unmodified black CH341A board: its data lines run at 5 V", "the multimeter check",
                   "the camera's battery lead lifted from its pad", "the clip's pin 1", "on the chip's dot"):
         assert words in comments, (name, words)
     if name.startswith("backup"):
@@ -1259,3 +1338,111 @@ def test_the_notes_say_what_a_cleaned_copy_is():
     assert "factory build v012" in " ".join(flash.public_read_note(flash.CLEAN_V012))
     assert flash.PUBLIC_DUMPS["75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082"] == flash.CLEAN_V006
     assert flash.PUBLIC_DUMPS["63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c"] == flash.CLEAN_V012
+
+
+# ---------------------------------------------------------------------------------------------- restore: vector table and resources
+
+
+def test_restore_refuses_an_image_whose_vector_table_is_erased(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """An erased vector table is a known no-boot brick: refused before flashrom runs, unless --allow-unknown-build."""
+    data = bytearray(make_image())
+    data[0x200:0x240] = bytes([0xFF]) * 0x40
+    path = tmp_path / "erased.bin"
+    path.write_bytes(bytes(data))
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask: the image is refused"))
+    assert restore(path, tmp_path / "r") == 1
+    err = flat(capsys.readouterr().err)
+    assert ("refusing: the ARM vector table of erased.bin (0x200..0x240, where the camera starts) is erased (all 0xFF). "
+            "A camera written with a damaged vector table won't start, so the card updater can't run on it again and "
+            "only a chip programmer brings it back.") in err
+    assert "Pass --allow-unknown-build only for a read of this camera's own chip that you know is good." in err
+    assert "Nothing was written." in err
+    assert fake_flashrom.calls() == [] and not fake_flashrom.wrote_anything()
+    # a changed one names the builds that carry the known one
+    data[0x200:0x240] = SYNTHETIC_VECTORS
+    data[0x203] ^= 0x01
+    path.write_bytes(bytes(data))
+    assert restore(path, tmp_path / "r") == 1
+    err = flat(capsys.readouterr().err)
+    assert "(0x200..0x240, where the camera starts) isn't the one v006, v008_test and v012 all carry." in err
+    # with --allow-unknown-build it is a warning and restore goes on to ask
+    monkeypatch.setattr("builtins.input", lambda prompt="": "no")
+    assert restore(path, tmp_path / "r", "--allow-unknown-build") == 1
+    out = capsys.readouterr().out
+    assert "continuing because --allow-unknown-build was given" in out and "Stopped. Nothing was written." in out
+    assert not fake_flashrom.wrote_anything()
+
+
+def test_the_known_builds_share_one_vector_table():
+    known = image.known_vector_tables()
+    real = image.V012_BUILD.vector_table_sha256
+    assert real == image.PUBLIC_BUILD.vector_table_sha256 == image.FILM_MODS_BUILD.vector_table_sha256
+    assert sorted(known[real]) == ["v006", "v008_test", "v012"]
+
+
+def test_restore_asks_different_when_the_resource_pack_is_damaged(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A damaged resource pack is a warning: restore says which entries and asks DIFFERENT, then writes on that word."""
+    data = bytearray(make_image())
+    beep = image.RESOURCE_BASE + 4 * 0x200                 # BEEP.WAV's slot in the synthetic pack
+    data[beep: beep + 0x400] = bytes([0xFF]) * 0x400
+    path = tmp_path / "pack.bin"
+    path.write_bytes(bytes(data))
+    fake_flashrom.set_chip(make_image(0x00))
+    prompts = []
+    answers = ["RESTORE", "no"]
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert restore(path, tmp_path / "r") == 1
+    out = capsys.readouterr().out
+    assert "resources: 1 of 6 entries are DAMAGED:" in out and "BEEP.WAV at 0x120800: erased" in out
+    assert ("The image's resource pack is damaged (the resources lines above). The camera opens its boot logo from it "
+            "at every start, before it reads the card, so a damaged one can leave a camera that the card updater can't "
+            "reach, and only a chip programmer can write it again.") in flat(out)
+    assert len(prompts) == 2 and "DIFFERENT" in prompts[1]
+    assert not fake_flashrom.wrote_anything()
+    # DIFFERENT writes it
+    answers[:] = ["RESTORE", "DIFFERENT"]
+    prompts.clear()
+    assert restore(path, tmp_path / "r2") == 0
+    assert fake_flashrom.written() == bytes(data)
+    # no pack at all is the same kind of warning
+    data[image.RESOURCE_BASE: image.RESOURCE_BASE + 4] = b"\x00\x00\x00\x00"
+    path.write_bytes(bytes(data))
+    fake_flashrom.set_chip(make_image(0x00))
+    answers[:] = ["RESTORE", "no"]
+    assert restore(path, tmp_path / "r3") == 1
+    out = flat(capsys.readouterr().out)
+    assert "resources: NO resource pack found at 0x120000 (every known build has one)" in out
+    assert "The image has no resource pack (the resources line above)." in out
+
+
+def test_restore_takes_an_intact_image_without_a_second_word(fake_flashrom, tmp_path, monkeypatch, capsys):
+    data = make_image()
+    path = tmp_path / "stock.bin"
+    path.write_bytes(data)
+    fake_flashrom.set_chip(make_image(0x00))
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompts.append(prompt) or "RESTORE")
+    assert restore(path, tmp_path / "r") == 0
+    assert "resources: 6 entries, none damaged" in capsys.readouterr().out and len(prompts) == 1
+
+
+@pytest.mark.parametrize("env", ["CHARMERA_STOCK_IMAGE", "CHARMERA_FACTORY_DUMP"])
+def test_restore_gate_takes_the_real_dumps_and_an_own_read(env):
+    """The real dumps (originals or cleaned copies) and a stand-in for a camera's own read of them pass the vector-table
+    gate and the resource checks: restore asks only for RESTORE (and DIFFERENT only for a sensor difference)."""
+    path = Path(os.environ.get(env, ""))
+    if not path.is_file():
+        pytest.skip(f"set {env}")
+    data = path.read_bytes()
+    assert image.vector_table_sha256(data) == image.V012_BUILD.vector_table_sha256    # the real one, not the stand-in
+    own = bytearray(data)
+    own[0x170300] ^= 0x5A                                  # another setting saved
+    for d in (data, bytes(own)):
+        assert flash.vector_table_problem(d, "x.bin") is None
+        lines, ask = flash.resource_pack_check(d)
+        assert ask is None and lines[0].endswith("entries, none damaged"), lines

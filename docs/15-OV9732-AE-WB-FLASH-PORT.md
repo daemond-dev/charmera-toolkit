@@ -378,10 +378,11 @@ The v0.24 file is `JH_5408202611120024_0F0613AC.bin`, SHA-256 `0919c5d8…85b1c6
 
 Built 2026-11-13. It hadn't been flashed when this section was written. It has since been flashed and works.
 
-The owner's second camera, never flashed, was read through its flash chip on 2026-11-13. It runs a build nobody has
-published: the same stamp `202505201029`, source folder `v012`, compiled `Jan 12 2026`. That build drives the OV9732
-natively. Of about 4,590 functions, 4,542 match stock v006 apart from where they sit in memory. These are the real
-changes (VERIFIED from the bytes, each claim checked by a second, independent reading):
+The owner's second camera, never flashed, was read through its flash chip on 2026-11-13. It runs a build nobody had
+published then (it's public now as the cleaned v012 copy): the same stamp `202505201029`, source folder `v012`,
+compiled `Jan 12 2026`. That build drives the OV9732 natively. Of about 4,590 functions, 4,542 match stock v006 apart
+from where they sit in memory. These are the real changes (VERIFIED from the bytes, each claim checked by a second,
+independent reading):
 
 - Sensor driver:
   - Bus 0x6C with 16-bit register addresses.
@@ -422,11 +423,15 @@ original bytes before it patches anything, and it blanks the two internal photo 
 travel. The Unicorn runs of the new code pass (35), and an independent review accounted for every changed byte (172) and
 found no defect.
 
-This file is another camera's firmware with a change, so it goes through the donor route:
-`verify FILE --donor <the 2026-11-13 read> --allow-modified`. It passes with warnings and nothing blocking. The camera
-it goes into isn't opened for a read, because it's the only working one. Its way back is the v0.24 file it runs,
-flashed from a card. `stage FILE --donor <the 2026-11-13 read>` copies it to the card, with the same
-warnings.
+This file is another camera's firmware with a change, so on 2026-11-13 it went through the donor route:
+`verify FILE --donor <the 2026-11-13 read> --allow-modified`. It passed with warnings and nothing blocking. The camera
+it went into wasn't opened for a read, because it's the only working one. Its way back was the v0.24 file it ran,
+flashed from a card. `stage FILE --donor <the 2026-11-13 read>` copied it to the card, with the same warnings.
+
+That was the procedure before reviewed builds existed. Today this file, and the v0.25 that `charmera build --base v012
+--mods volume-led --download` makes from the cleaned v012 copy (`JH_5408202611130025_0FB76FE9.bin`), are reviewed
+files. `verify` and `stage` know them by SHA-256 and accept them without `--donor` and without the 2026-11-13 read,
+with a warning when no backup confirms what the camera runs.
 
 What to expect:
 

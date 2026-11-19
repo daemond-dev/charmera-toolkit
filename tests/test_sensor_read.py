@@ -20,6 +20,10 @@ def test_the_16_bit_read_names_the_ov9732():
     assert text.startswith("A sensor answered at 0x36 (bus 0x6C), not the 0x3C (bus 0x78) the firmware drives")
     assert "0x36 (bus 0x6C): OmniVision OV9732  [0x300A/B/C = 97 32 00]" in text
     assert "3000-301F: FF FF FF FF FF FF FF FF  FF FF 97 32 00 FF FF FF" in text
+    assert sr.OV9732_NEXT in text and "charmera build --base v012 --download" in text   # what to flash next
+    assert "Send" not in text
+    other = sr.decode_sensor(a7(record16(0x36, {0x300A: 0x26, 0x300B: 0x80})))
+    assert sr.OV9732_NEXT not in other and "Keep SENSOR.TXT" in other
 
 
 def test_the_16_bit_read_other_parts_and_answers():

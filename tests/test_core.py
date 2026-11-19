@@ -94,33 +94,39 @@ def synthetic_image(records=(), with_sounds=True):
     img[0x200:0x240] = SYNTHETIC_VECTORS
     put_build_marks(img)   # a changed copy of the public build to detect_build (the software hash cannot match)
     if with_sounds:
-        base = image.RESOURCE_BASE
-        img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
-        names = ["BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV", "ZZZGPZP"]
-        sector = 4
-        off = base + 0x18
-        for i, n in enumerate(names):
-            img[off: off + 20] = n.encode().ljust(20, b"\x00")
-            img[off + 20: off + 24] = struct.pack("<I", sector)
-            if n != "ZZZGPZP":
-                bits = 16 if n == "BEEPWAV" else 8
-                rate = 11025 if n in ("BEEPWAV", "IMGWAV") else 8000
-                data = bytes([0x80 if bits == 8 else 0x11]) * 400
-                wav = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * bits // 8, bits // 8, bits) + b"data" + struct.pack("<I", len(data)) + data
-                p = base + sector * 0x200
-                img[p: p + len(wav)] = wav
-            else:
-                p = base + sector * 0x200
-                gpzp = frames.encode_gpzp(b"\x00" * 64)   # a real fixed-Huffman stream, as verify expects
-                img[p: p + len(gpzp)] = gpzp
-            off += 24
-            sector += 2
+        put_resource_pack(img)
     for i, rec in enumerate(records):
         o = settings.SETTINGS_BASE + i * settings.RECORD_STRIDE
         img[o: o + 256] = rec
         img[o + 256: o + 512] = b"\x00" * 256
     img[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 0x200] = b"\x00" * 0x200
     return bytes(img)
+
+
+def put_resource_pack(img: bytearray) -> None:
+    """A GP+ pack at the resource base holding five tiny WAVs and a GPZP, as synthetic_image has it."""
+    base = image.RESOURCE_BASE
+    img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
+    names = ["BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV", "ZZZGPZP"]
+    sector = 4
+    off = base + 0x18
+    for i, n in enumerate(names):
+        img[off: off + 20] = n.encode().ljust(20, b"\x00")
+        img[off + 20: off + 24] = struct.pack("<I", sector)
+        if n != "ZZZGPZP":
+            bits = 16 if n == "BEEPWAV" else 8
+            rate = 11025 if n in ("BEEPWAV", "IMGWAV") else 8000
+            data = bytes([0x80 if bits == 8 else 0x11]) * 400
+            wav = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * bits // 8, bits // 8, bits) + b"data" + struct.pack("<I", len(data)) + data
+            p = base + sector * 0x200
+            img[p: p + len(wav)] = wav
+        else:
+            p = base + sector * 0x200
+            gpzp = frames.encode_gpzp(b"\x00" * 64)   # a real fixed-Huffman stream, as verify expects
+            img[p: p + len(gpzp)] = gpzp
+        off += 24
+        sector += 2
+    img[off] = 0   # the directory ends here, whatever the bytes around the pack are
 
 
 def test_settings_records_and_current():
@@ -874,7 +880,7 @@ def test_verify_names_the_build_and_says_what_a_match_proves(tmp_path, synthetic
     payload = pack.prepare_payload(synthetic_image([make_record()]))
     p = _named(tmp_path, payload)
     by = {c.name: c for c in verify.verify_update(p, payload, allow_modified=True)}
-    assert by["series"].ok and "identifies neither" in by["series"].detail
+    assert by["series"].ok and "identifies none of them" in by["series"].detail
     assert by["build"].ok and "the public dump's build" in by["build"].detail and "says whether it fits" in by["build"].detail
     assert by["stamp-in-file"].severity == "info" and "flashes it again at every power-on" in by["stamp-in-file"].detail
     # a file whose marks sit elsewhere is Charmera firmware of an unknown build: a warning, never a stamp-based pass
@@ -935,7 +941,8 @@ def test_the_source_tree_folder_is_a_build_mark_and_is_shown(tmp_path, capsys, s
     assert "source tree v006 at 0x3a512" in series and "so do their source trees" in series
     assert "the same one does not show the same build" in series and "says whether the file fits a camera" in series
     text = pack.describe(payload, "202611061431")
-    assert "source tree:     v006 at 0x3a512, named by 2 source paths (public-dump: v006, film-mods: v008_test)" in text
+    assert ("source tree:     v006 at 0x3a512, named by 2 source paths (public-dump: v006, film-mods: v008_test, v012: v012)"
+            in text)
     assert image.SOURCE_TREE_PROVES in text
     (tmp_path / "tree.bin").write_bytes(payload)
     assert cli.main(["inspect", str(tmp_path / "tree.bin")]) == 0
@@ -1348,7 +1355,9 @@ def test_without_stock_a_warning_says_nothing_compares_the_file_with_the_camera(
     p = _named(tmp_path, payload)
     by = _checks(p, payload, allow_modified=True)
     assert by["backup"].severity == "warn" and "nothing here compares the file with the camera's own firmware" in by["backup"].detail
-    assert "cannot be undone" in by["backup"].detail and "A backup is the only way back" in by["backup"].detail
+    # the way back without a backup is said as it is: a wrong-sensor flash boots and is undone from the card
+    assert "cannot be undone" not in by["backup"].detail and "the only way back" not in by["backup"].detail
+    assert verify.WAY_BACK in by["backup"].detail and "needs a chip programmer" in verify.WAY_BACK
     # the known table without --stock is a WARN, as in the app, never INFO
     assert by["sensor-table"].severity == "warn"
     backup = tmp_path / "backup.bin"
