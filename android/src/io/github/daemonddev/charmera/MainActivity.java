@@ -5483,14 +5483,10 @@ public class MainActivity extends Activity {
             checking = false;
             return;
         }
-        // The reviewed patches (probe, Repair versions) are backup-independent; their check is never re-made against one.
-        // This keys on the applied check (fileCheck), set and cleared together with fileData on the UI thread, so a
-        // patch in fileData always has isReviewedPatch(fileCheck) true here (finding 7). Keep that lock-step if you
-        // change how file state is set.
-        if (fileCheck != null && Candidates.checkedAlone(fileCheck.sha256)) {
-            checking = false;
-            return;
-        }
+        // A file checked alone (the probe, the OV9732 builds: Candidates.checkedAlone) is never compared with a backup
+        // (finding 7), but its sensor line says which sensor the backup on record drives, and its check names that
+        // backup (referenceSha256): so it's checked again through Candidates.check, like any file, when the backup
+        // changes, and still never compared with it.
         if (!checking && fileCheck != null && Objects.equals(fileCheck.referenceSha256, backupSha256)) {
             return;   // already checked against this backup
         }
@@ -5532,11 +5528,10 @@ public class MainActivity extends Activity {
         fileName = name;
         fileOrigin = origin;
         fileChosen = chosen;
-        // The reviewed patches (probe, Repair versions) are backup-independent (WriteGate's exemption): each is checked with
-        // no reference (buildRestore), so its check never needs re-checking against the backup on record, and must not
-        // be — comparing it with a backup it was never meant to match would fail its sensor-table line and refuse a
-        // file that needs no backup. Apply the patch's check as it stands.
-        if (!Candidates.checkedAlone(result.sha256) && !Objects.equals(result.referenceSha256, backupSha256)) {
+        // A check made with another backup than the one on record now is never applied. That holds for the files checked
+        // alone too (Candidates.checkedAlone): they're never compared with a backup (finding 7), but their sensor line
+        // says which sensor the backup drives, so a check made with another one is checked again.
+        if (!Objects.equals(result.referenceSha256, backupSha256)) {
             fileCheck = null;
             recheckFile();
             return;

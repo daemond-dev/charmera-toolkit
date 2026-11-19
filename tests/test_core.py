@@ -94,33 +94,39 @@ def synthetic_image(records=(), with_sounds=True):
     img[0x200:0x240] = SYNTHETIC_VECTORS
     put_build_marks(img)   # a changed copy of the public build to detect_build (the software hash cannot match)
     if with_sounds:
-        base = image.RESOURCE_BASE
-        img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
-        names = ["BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV", "ZZZGPZP"]
-        sector = 4
-        off = base + 0x18
-        for i, n in enumerate(names):
-            img[off: off + 20] = n.encode().ljust(20, b"\x00")
-            img[off + 20: off + 24] = struct.pack("<I", sector)
-            if n != "ZZZGPZP":
-                bits = 16 if n == "BEEPWAV" else 8
-                rate = 11025 if n in ("BEEPWAV", "IMGWAV") else 8000
-                data = bytes([0x80 if bits == 8 else 0x11]) * 400
-                wav = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * bits // 8, bits // 8, bits) + b"data" + struct.pack("<I", len(data)) + data
-                p = base + sector * 0x200
-                img[p: p + len(wav)] = wav
-            else:
-                p = base + sector * 0x200
-                gpzp = frames.encode_gpzp(b"\x00" * 64)   # a real fixed-Huffman stream, as verify expects
-                img[p: p + len(gpzp)] = gpzp
-            off += 24
-            sector += 2
+        put_resource_pack(img)
     for i, rec in enumerate(records):
         o = settings.SETTINGS_BASE + i * settings.RECORD_STRIDE
         img[o: o + 256] = rec
         img[o + 256: o + 512] = b"\x00" * 256
     img[settings.PHOTO_DIRECTORY: settings.PHOTO_DIRECTORY + 0x200] = b"\x00" * 0x200
     return bytes(img)
+
+
+def put_resource_pack(img: bytearray) -> None:
+    """A GP+ pack at the resource base holding five tiny WAVs and a GPZP, as synthetic_image has it."""
+    base = image.RESOURCE_BASE
+    img[base: base + 0x18] = b"GP+\x00\x03\x00\x03\x00" + b"\x00" * 16
+    names = ["BEEPWAV", "CLICKWAV", "IMGWAV", "POWEROFF_AUDIOWAV", "POWERON_AUDIOWAV", "ZZZGPZP"]
+    sector = 4
+    off = base + 0x18
+    for i, n in enumerate(names):
+        img[off: off + 20] = n.encode().ljust(20, b"\x00")
+        img[off + 20: off + 24] = struct.pack("<I", sector)
+        if n != "ZZZGPZP":
+            bits = 16 if n == "BEEPWAV" else 8
+            rate = 11025 if n in ("BEEPWAV", "IMGWAV") else 8000
+            data = bytes([0x80 if bits == 8 else 0x11]) * 400
+            wav = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * bits // 8, bits // 8, bits) + b"data" + struct.pack("<I", len(data)) + data
+            p = base + sector * 0x200
+            img[p: p + len(wav)] = wav
+        else:
+            p = base + sector * 0x200
+            gpzp = frames.encode_gpzp(b"\x00" * 64)   # a real fixed-Huffman stream, as verify expects
+            img[p: p + len(gpzp)] = gpzp
+        off += 24
+        sector += 2
+    img[off] = 0   # the directory ends here, whatever the bytes around the pack are
 
 
 def test_settings_records_and_current():

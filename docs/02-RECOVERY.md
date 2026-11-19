@@ -70,7 +70,8 @@ Steps:
 
 1. Build the update file from your own backup. `<your backup>` is a read of this camera's own chip. It's how you
    know what your camera runs before you flash, and it's this step's input. No backup? Make the stock build of the
-   camera's base instead (`charmera build --base v012` for an OV9732 camera, `--base v006` for an SP140A one, as
+   camera's base instead (`charmera build --base v012 --download --out out/` for an OV9732 camera, `charmera build
+   --base v006 --download --out out/` for an SP140A one, as
    [section D](#the-camera-boots-but-photo-mode-freezes) shows) and carry on from step 2 without `--stock`. `pack`
    prints a plan first and writes nothing:
 
@@ -386,10 +387,14 @@ The sources, best first:
 
 `restore` refuses an image that isn't exactly 2,097,152 bytes, doesn't start with `SPII`, or carries no Charmera
 build marks (the build string, the stamp and the sensor table, found by content). It knows v006, v008_test and v012,
-so both cleaned copies and a read of a v006 or v012 chip pass without a flag. `--allow-unknown-build` overrides that
-last check and nothing else, so use it only for a good read of this camera's own chip. `restore` also refuses an
-image whose code refers to more than one sensor program with different contents, since there's no telling which one
-would set up the sensor. It prints the image's size, SHA-256 and build marks and which build it is, and reminds you
+so both cleaned copies and a read of a v006 or v012 chip pass without a flag. It also refuses an image whose ARM
+vector table (bytes 0x200..0x240, where the camera starts) is erased or isn't the one all three builds carry: with a
+damaged one the camera won't start, and only a chip programmer brings it back. `--allow-unknown-build` overrides
+those two checks and nothing else, so use it only for a good read of this camera's own chip. `restore` also refuses
+an image whose code refers to more than one sensor program with different contents, since there's no telling which
+one would set up the sensor. An image whose resource pack is damaged or missing isn't refused, but `restore` names
+the damaged entries and asks for `DIFFERENT` too: the camera opens its boot logo from that pack before it reads the
+card. It prints the image's size, SHA-256 and build marks and which build it is, and reminds you
 that a build match says which public image it is, not whether it fits this camera.
 
 `restore` never writes without first backing up the chip on the clip. It reads the chip itself, because a backup

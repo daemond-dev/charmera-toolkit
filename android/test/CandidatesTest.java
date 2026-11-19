@@ -90,8 +90,9 @@ public final class CandidatesTest {
             byte[] probe7 = Candidates.build(dump, Candidates.Kind.PROBE);
             UpdateCheck.Result probeWithBackup = Candidates.check(Candidates.Kind.PROBE.fileNameFor(UpdateCheck.sha256Hex(probe7, 0, probe7.length)), probe7, dump);
             UpdateCheck.Result probeNoBackup = Candidates.check(Candidates.Kind.PROBE.fileNameFor(UpdateCheck.sha256Hex(probe7, 0, probe7.length)), probe7, null);
-            expect("the probe is checked with no reference even when a backup is passed", probeWithBackup.ok
-                    && !probeWithBackup.compared && probeWithBackup.referenceSha256 == null);
+            expect("the probe is checked with no reference even when a backup is passed, and its check names the"
+                    + " backup on record", probeWithBackup.ok && !probeWithBackup.compared
+                    && UpdateCheck.sha256Hex(dump, 0, dump.length).equals(probeWithBackup.referenceSha256));
             expect("the probe comes out identical with or without a backup passed", probeNoBackup.ok
                     && !probeNoBackup.compared && probeNoBackup.referenceSha256 == null
                     && probeWithBackup.sha256.equals(probeNoBackup.sha256));
@@ -104,8 +105,9 @@ public final class CandidatesTest {
             // backup it was never meant to match cannot fail its sensor-table line and refuse it (finding 7).
             byte[] bringup7 = Candidates.build(dump, Candidates.Kind.BRINGUP);
             UpdateCheck.Result bringupWithBackup = Candidates.check(Candidates.Kind.BRINGUP.fileNameFor(UpdateCheck.sha256Hex(bringup7, 0, bringup7.length)), bringup7, dump);
-            expect("the bring-up is checked with no reference even when a backup is passed", bringupWithBackup.ok
-                    && !bringupWithBackup.compared && bringupWithBackup.referenceSha256 == null);
+            expect("the bring-up is checked with no reference even when a backup is passed, and its check names the"
+                    + " backup on record", bringupWithBackup.ok && !bringupWithBackup.compared
+                    && UpdateCheck.sha256Hex(dump, 0, dump.length).equals(bringupWithBackup.referenceSha256));
             expect("isReviewedPatch covers the probe, the bring-up and the restore file; only the first two are checked alone",
                     Candidates.isReviewedPatch(probe7) && Candidates.isReviewedPatch(bringup7)
                     && Candidates.isReviewedPatch(restore) && !Candidates.isProbe(bringup7)
@@ -233,7 +235,8 @@ public final class CandidatesTest {
             UpdateCheck.Result withBackup = Candidates.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025, factory);
             UpdateCheck.Result plain = Candidates.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025, null);
             expect("v0.25 passes with v012's build marks found (its OV9732 table included), and no backup comparison",
-                    withBackup.ok && plain.ok && !withBackup.compared && withBackup.referenceSha256 == null
+                    withBackup.ok && plain.ok && !withBackup.compared
+                    && UpdateCheck.sha256Hex(factory, 0, factory.length).equals(withBackup.referenceSha256)
                     && level(plain, "series") == UpdateCheck.Level.PASS && level(plain, "sensor-table") == UpdateCheck.Level.WARN
                     && Candidates.Kind.V025.fileNameFor(plain.sha256).equals(plain.cardName));
             expect("every other line UpdateCheck gives v0.25 is unchanged", level(plain, "checksum") == UpdateCheck.Level.PASS

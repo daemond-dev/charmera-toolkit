@@ -73,7 +73,8 @@ bytes that passed `verify`, which a plain copy to a cheap card through a cheap r
    that passes. The warning says no backup of this camera was given, so nothing compares the file with its own
    firmware, and tells you to find out what the camera runs first (its chip, or `charmera identify` on its photos).
    A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes it
-   (`charmera build --base v006` or `--base v012`). A flash that is cut off, or firmware that won't boot, needs a chip
+   (`charmera build --base v006 --download --out out/` for an SP140A camera, `charmera build --base v012 --download
+   --out out/` for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a chip
    programmer. Warning instead of refusing was a deliberate choice, made on 2026-11-06.
 
    `--donor donor.bin` is the donor route, for a camera whose own firmware is gone and doesn't fit it ([Recovery,

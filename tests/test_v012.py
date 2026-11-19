@@ -20,6 +20,7 @@ from test_core import SENSOR_RESET_OFFSET, make_record, synthetic_build, synthet
 FACTORY = Path(os.environ.get("CHARMERA_FACTORY_DUMP", ""))
 STOCK = Path(os.environ.get("CHARMERA_STOCK_IMAGE", ""))
 needs_factory = pytest.mark.skipif(not FACTORY.is_file(), reason="set CHARMERA_FACTORY_DUMP to a v012 dump")
+needs_stock = pytest.mark.skipif(not STOCK.is_file(), reason="set CHARMERA_STOCK_IMAGE to a v006 dump")
 needs_both = pytest.mark.skipif(not (FACTORY.is_file() and STOCK.is_file()),
                                 reason="set CHARMERA_FACTORY_DUMP (v012) and CHARMERA_STOCK_IMAGE (v006)")
 CLEAN_V012 = "63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c"
@@ -101,7 +102,7 @@ def test_a_file_for_the_other_sensor_than_the_backup_fails_and_says_which(tmp_pa
     assert "The file's table is for the OmniVision OV9732, --stock's for the SP140A-class sensor." in by["sensor-table"].detail
 
 
-def test_restore_takes_an_image_with_an_ov9732_program(tmp_path, capsys):
+def test_restore_takes_an_image_with_an_ov9732_program(tmp_path, capsys, synthetic_build):
     img = tmp_path / "ov.bin"
     img.write_bytes(ov9732_like(synthetic_image([make_record()])))
     args = argparse.Namespace(image=str(img), out=str(tmp_path / "r"), flashrom=str(tmp_path / "no-flashrom"),
@@ -282,7 +283,8 @@ def test_verify_says_how_a_wrong_sensor_flash_is_undone(tmp_path, capsys, synthe
     assert verify.handler(args) == 0
     out = " ".join(capsys.readouterr().out.split())
     assert ("A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes "
-            "it (charmera build --base v006 or --base v012). A flash that is cut off, or firmware that won't boot, needs a "
+            "it (charmera build --base v006 --download --out out/ for an SP140A camera, charmera build --base v012 --download "
+            "--out out/ for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a "
             "chip programmer.") in out
     assert "the only way back" not in out and "cannot be undone" not in out
 
@@ -300,3 +302,119 @@ def test_release_notes_say_what_the_app_does_now():
                  "android/README.md"):
         assert part in notes, part
     assert "\u2014" not in notes and "\u2013" not in notes
+
+
+# --- several OV9732 programs, and the sensor family behind the same table -------------------------------------------
+
+SECOND_OV_AT, SECOND_LITERAL_AT = 0xF6000, 0x7C100
+
+
+def with_a_second_ov9732_program(img: bytes, same: bool = False) -> bytes:
+    """The OV9732-like image with a second init table the code refers to: other contents, or the same ones."""
+    table = bytearray(SYNTHETIC_OV_INIT)
+    if not same:
+        table[6] ^= 0x01                                   # another value in the second write
+    out = bytearray(img)
+    out[SECOND_OV_AT: SECOND_OV_AT + len(table)] = table
+    out[SECOND_LITERAL_AT: SECOND_LITERAL_AT + 4] = struct.pack("<I", SECOND_OV_AT - image.VA_OFFSET)
+    return bytes(out)
+
+
+def test_several_ov9732_programs_are_refused_as_sp140a_ones_are(tmp_path, capsys, synthetic_build):
+    one = ov9732_like(synthetic_image([make_record()]))
+    two = with_a_second_ov9732_program(one)
+    marks = image.find_marks(two)
+    assert marks.sensor_programs == () and len(marks.ov9732_programs) == 2
+    assert len(marks.several_sensor_programs) == 2 and marks.sensor.init[0] == INIT_AT     # the pick is unchanged
+    assert image.find_marks(one).several_sensor_programs == [] and len(image.find_marks(one).ov9732_programs) == 1
+    assert image.find_marks(with_a_second_ov9732_program(one, same=True)).several_sensor_programs == []
+    payload = pack.prepare_payload(two)
+    for kw in ({}, {"stock": one}):
+        s = checks(named(tmp_path, payload), payload, allow_modified=True, allow_unknown_build=True, **kw)["sensor-table"]
+        assert not s.ok and s.severity == "fail"
+        assert "several sensor programs: the code refers to 2 image-sensor set-up tables with different contents" in s.detail
+        assert "(OV9732)" in s.detail and "referred to from 0x7af04" in s.detail and "referred to from 0x7c100" in s.detail
+    good = pack.prepare_payload(one)
+    s = checks(named(tmp_path, good), good, stock=two, allow_modified=True)["sensor-table"]
+    assert not s.ok and "several sensor programs in --stock" in s.detail
+    # restore refuses it the same way, whatever the flags
+    p = tmp_path / "two.bin"
+    p.write_bytes(two)
+    for allow in (False, True):
+        args = argparse.Namespace(image=str(p), out=str(tmp_path / "r"), flashrom=str(tmp_path / "no-flashrom"),
+                                  programmer="ch341a_spi", chip="SFDP-capable chip", label="before-restore",
+                                  allow_unknown_build=allow)
+        assert flash.cmd_restore(args) == 2
+        err = " ".join(capsys.readouterr().err.split())
+        assert "refusing: the code in two.bin refers to 2 image-sensor set-up tables with different contents" in err
+
+
+def test_the_same_sp140a_table_with_the_ov9732_port_is_another_sensor(tmp_path, synthetic_build):
+    """The same SP140A table on both sides, but one side's code carries the OV9732 driver: they drive different
+    sensors, so verify refuses it as a different table, and says why, as restore's sensor comparison says DIFFERENT."""
+    sp = bytearray(synthetic_image([make_record()]))
+    sp[0x100000: 0x100004] = image.SP140A_INIT
+    sp = bytes(sp)
+    ported = bytearray(sp)
+    ported[CTX_AT: CTX_AT + len(image.OV9732_SCCB)] = image.OV9732_SCCB
+    ported = bytes(ported)
+    assert image.sensor_of(sp) == "SP140A" and image.sensor_of(ported) == "OV9732"
+    assert image.find_marks(ported).sensor.sha256 == image.find_marks(sp).sensor.sha256
+    for file, stock, ours, theirs in ((ported, sp, "OV9732", "SP140A"), (sp, ported, "SP140A", "OV9732")):
+        payload = pack.prepare_payload(file)
+        s = checks(named(tmp_path, payload), payload, stock=stock, allow_modified=True)["sensor-table"]
+        assert s.ok and s.severity == "warn"     # boots, and the card undoes it: a warning, not a refusal
+        assert s.detail.startswith("the image-sensor set-up table is the same as in --stock (")
+        assert f"but the file is firmware for the {ours} and --stock for the {theirs}: one of them also carries" in s.detail
+        assert "refusing" not in s.detail
+        table = flash.build_marks_found(file)["sensor_table"]
+        chip = flash.build_marks_found(stock)["sensor_table"]
+        assert flash._drives(table) != flash._drives(chip)
+    # the same file against itself is still the same table and the same sensor
+    payload = pack.prepare_payload(ported)
+    assert checks(named(tmp_path, payload), payload, stock=ported)["sensor-table"].ok
+
+
+@needs_stock
+def test_a_reviewed_ported_build_against_an_sp140a_backup_warns(tmp_path):
+    """v0.23 (v006 with our OV9732 port) keeps v006's table: against a v006 backup that's the same table for another
+    sensor. Both the reviewed file and one made from an own read get a warning: an OV9732 camera that was flashed
+    with v006 has exactly that own read, and v0.24 from it is the fix."""
+    v006 = STOCK.read_bytes()
+    port = recipes.make(v006, ["ov9732-port"])
+    by = checks(Path(port.name), port.data, stock=v006)
+    assert by["sensor-table"].severity == "warn"
+    assert "but the file is firmware for the OV9732 and --stock for the SP140A" in by["sensor-table"].detail
+    assert by["wrong-sensor"].severity == "warn"
+    assert not any(c.severity == "fail" and not c.ok for c in by.values())
+    mine = recipes.make(own_read(v006), ["ov9732-port"], own=True)
+    by = checks(Path(mine.name), mine.data, stock=v006, allow_modified=True)
+    assert by["sensor-table"].ok and by["sensor-table"].severity == "warn"
+    assert "but the file is firmware for the OV9732 and --stock for the SP140A" in by["sensor-table"].detail
+    assert not any(c.severity == "fail" and not c.ok for c in by.values())
+
+
+@needs_factory
+def test_v012_holds_one_ov9732_program():
+    marks = image.find_marks(FACTORY.read_bytes())
+    assert len(marks.ov9732_programs) >= 1 and marks.several_sensor_programs == []
+    assert marks.sensor.sha256 == image.V012_BUILD.sensor_table_sha256
+
+
+def test_the_way_back_commands_work():
+    """Every `charmera build` command the way-back text gives parses, with --download, which build needs without --dump."""
+    texts = [verify.WAY_BACK, (Path(__file__).resolve().parent.parent / "charmera_toolkit" / "stage.py").read_text(encoding="utf-8"),
+             (Path(__file__).resolve().parent.parent / "charmera_toolkit" / "verify.py").read_text(encoding="utf-8")]
+    for doc in ("02-RECOVERY.md", "04-STAGE.md"):
+        texts.append((Path(__file__).resolve().parent.parent / "docs" / doc).read_text(encoding="utf-8"))
+    from charmera_toolkit import cli
+    import re
+    found = 0
+    for text in texts:
+        flat_text = " ".join(text.replace('")', " ").replace('print("', " ").replace("`", " ").split())
+        assert "--base v006 or --base v012" not in flat_text and "charmera build --base v012 for" not in flat_text
+        for m in re.finditer(r"charmera build --base (v006|v012) --download --out out/", flat_text):
+            found += 1
+            args = cli.build_parser().parse_args(m.group(0).split()[1:])
+            assert args.download and args.base == m.group(1) and args.out == "out/"
+    assert found >= 8

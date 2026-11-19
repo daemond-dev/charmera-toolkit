@@ -1156,10 +1156,10 @@ def test_app_never_uses_a_check_made_against_another_backup():
     nothing is written meanwhile, and a write confirmation, a "Done" and a "Saved" made with the old backup go."""
     java = ACTIVITY.read_text(encoding="utf-8")
     apply = _bodies(java, "private void applyCheck(")[0]
-    # Finding 7: the reviewed patches (the sensor-ID probe and the OV9732 bring-up) are backup-independent and exempt
-    # from the re-check; every other file whose check was made against a different backup is re-checked, and nothing
-    # is kept meanwhile. Lock the exact condition so a dropped !isReviewedPatch guard cannot pass.
-    assert "if (!Candidates.checkedAlone(result.sha256) && !Objects.equals(result.referenceSha256, backupSha256)) {" in apply
+    # Every file whose check was made with a different backup is re-checked, and nothing is kept meanwhile. The files
+    # checked alone (the probe, the OV9732 builds) are never compared with a backup (finding 7), but their check names
+    # the backup on record and says which sensor it drives, so they're re-checked too.
+    assert "if (!Objects.equals(result.referenceSha256, backupSha256)) {" in apply
     stale = apply.index("!Objects.equals(result.referenceSha256, backupSha256)")
     assert stale < apply.index("recheckFile();") < apply.index("showChecked(result, origin, chosen);")
     assert "fileCheck = null;" in apply[stale:apply.index("recheckFile();")]
@@ -1173,7 +1173,13 @@ def test_app_never_uses_a_check_made_against_another_backup():
     cand = (PKG / "Candidates.java").read_text(encoding="utf-8")
     check_rule = _bodies(cand, "public static UpdateCheck.Result check(")[0]
     # Lock the exact polarity: a != -> == typo must fail here (CandidatesTest also proves the rule by execution).
-    assert "reference != null && checkedAlone(UpdateCheck.sha256Hex(data, 0, data.length)) ? null : reference" in check_rule
+    assert "boolean dropped = reference != null && checkedAlone(UpdateCheck.sha256Hex(data, 0, data.length));" in check_rule
+    assert "checkWith(name, data, dropped ? null : reference)" in check_rule
+    assert "return dropped ? backupSensor(r, data, reference) : r;" in check_rule
+    # a file checked alone is never compared with the backup (compared false), but its check names it
+    sensor_rule = _bodies(cand, "static UpdateCheck.Result backupSensor(")[0]
+    assert "new UpdateCheck.Result(lines, r.cardName, r.sha256, r.size, false, backupSha)" in sensor_rule
+    check_rule += _bodies(cand, "private static UpdateCheck.Result checkWith(")[0]
     probe_rule = _bodies(cand, "public static boolean isProbe(")[0]
     assert "Kind.PROBE.matches(" in probe_rule and "sha256Hex(data" in probe_rule
     # Exactly the reviewed files are exempt, by SHA-256: the probe, the Repair versions and every build of the recipe
@@ -1202,13 +1208,11 @@ def test_app_never_uses_a_check_made_against_another_backup():
     assert "FACTORY_WARN_ONLY.contains(l.name) && failsAlone(alone, l)" in soft
     recheck = _bodies(java, "private void recheckFile()")[0]
     assert "checking = true;" in recheck and "fileCheck = null;" in recheck and "dismissWriteDialog();" in recheck
-    # A file checked with no backup (the probe, the OV9732 builds) is never re-checked against one: the checkedAlone
-    # guard must RETURN. Slice to the NEXT if-statement so a dropped return inside this guard fails here. Every other
-    # file, reviewed SP140A builds included, is re-checked through Candidates.check (its warnings kept).
+    # Every file is re-checked through Candidates.check (its warnings kept) once the backup changes; a file checked
+    # alone (the probe, the OV9732 builds) is still never compared with the backup there (finding 7).
     assert "Candidates.check(name, data, ref);" in recheck
-    guard = recheck.index("if (fileCheck != null && Candidates.checkedAlone(fileCheck.sha256)) {")
-    guard_block = recheck[guard:recheck.index("if (", guard + 1)]
-    assert "return;" in guard_block
+    assert "Candidates.checkedAlone(fileCheck.sha256)) {" not in recheck
+    assert "if (!checking && fileCheck != null && Objects.equals(fileCheck.referenceSha256, backupSha256)) {" in recheck
     posted = _bodies(recheck, "ui.post(() ->")[0]
     assert "check != checkRequest" in posted and "checking = false;" in posted and "dismissWriteDialog();" in posted
     load = _bodies(java, "private void loadBackup(")[0]

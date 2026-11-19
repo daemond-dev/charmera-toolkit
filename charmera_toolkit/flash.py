@@ -12,11 +12,12 @@ Safety rules:
 - `backup` keeps a read as <label>_<UTC time>.bin only when two or more reads are identical. A single read,
   and reads that differ, keep the name <label>_<UTC time>.unverified-read<n>.bin, which nobody takes for a
   backup.
-- `restore` refuses an image that is not exactly 2 MiB, does not start with the "SPII" magic, or carries no
-  Charmera build marks (build string, 12-digit stamp, sensor table, each found by content; unless
-  --allow-unknown-build), and, whatever the flags, one whose code refers to several sensor programs with
-  different tables, as verify does. No backup of the chip on the clip, no write: restore reads the chip twice
-  itself, keeps that read in --out as backup does (with its SHA-256 and a manifest), and writes nothing when
+- `restore` refuses an image that is not exactly 2 MiB, does not start with the "SPII" magic, carries no
+  Charmera build marks (build string, 12-digit stamp, sensor table, each found by content) or has an ARM vector
+  table (0x200..0x240) that no known build carries (these two unless --allow-unknown-build), and, whatever the
+  flags, one whose code refers to several sensor programs with different tables, as verify does. A damaged or
+  missing resource pack is a warning that asks for the second word. No backup of the chip on the clip, no
+  write: restore reads the chip twice itself, keeps that read in --out as backup does (with its SHA-256 and a manifest), and writes nothing when
   the two reads differ. A backup file given from elsewhere could not prove that it came from this chip, now.
   It prints a 64 KiB block diff of the image against that read, the image's sensor table against the chip's,
   the SHA-256 and the exact plan, and only runs `flashrom -w` after the owner types RESTORE, and a second
@@ -807,6 +808,17 @@ def cmd_restore(args: argparse.Namespace) -> int:
                 text + ". It is not v006, v008_test or v012 (the builds this toolkit knows), or it is damaged.\n"
                 "Pass --allow-unknown-build only for a read of this camera's own chip that you know is good."
             )
+    vectors = vector_table_problem(image, image_path.name)
+    if vectors:
+        if args.allow_unknown_build:
+            print(f"warning: {vectors}; continuing because --allow-unknown-build was given.")
+            print("Be sure this image is a dump of this camera's own chip.")
+        else:
+            refusals.append(
+                vectors + ". A camera written with a damaged vector table won't start, so the card updater can't\n"
+                "run on it again and only a chip programmer brings it back. A build this toolkit doesn't know could also\n"
+                "carry another one. Pass --allow-unknown-build only for a read of this camera's own chip that you know is good."
+            )
     if refusals:
         for r in refusals:
             print(f"refusing: {r}", file=sys.stderr)
@@ -842,6 +854,10 @@ def cmd_restore(args: argparse.Namespace) -> int:
         else:
             print(f"mark:     {k.replace('_', ' ')} {v['value']!r} at {v['offset']}")
     print(f"tail:     {'all 0xFF' if info['tail_blank'] else 'NOT all 0xFF (every known dump is)'}")
+    resources, resource_ask = resource_pack_check(image)
+    print(f"resources: {resources[0]}")
+    for line in resources[1:]:
+        print(f"           {line}")
     if info["public_dump"]:
         _note(public_image_note(info["public_dump"]), "note:     ")
 
@@ -881,6 +897,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
         return 0
     second_word = print_sensor_comparison(info["build_marks"]["sensor_table"], kept.info["build_marks"]["sensor_table"],
                                           kept.info["several_sensor_programs"], info["public_dump"])
+    if resource_ask:
+        second_word = (second_word or []) + resource_ask
 
     work = Path(tempfile.mkdtemp(prefix="charmera-restore-"))
     copy_path = work / "image.bin"
@@ -896,6 +914,50 @@ def cmd_restore(args: argparse.Namespace) -> int:
             work.rmdir()   # stays when a read-back that does not match the image is kept in it
         except OSError:
             pass
+
+
+def vector_table_problem(image: bytes, name: str) -> Optional[str]:
+    """Why an image's ARM vector table (0x200..0x240, where the camera starts) is not one a known build carries, or
+    None when it is. v006, v008_test and v012 all carry the same one."""
+    lo, hi = image_mod.VECTOR_TABLE
+    sha = image_mod.vector_table_sha256(image)
+    known = image_mod.known_vector_tables()
+    if sha in known:
+        return None
+    where = f"the ARM vector table of {name} ({lo:#x}..{hi:#x}, where the camera starts)"
+    if sha is None:
+        return f"{name} ends before the end of its ARM vector table ({lo:#x}..{hi:#x}, where the camera starts)"
+    builds = sorted({b for names in known.values() for b in names})
+    carry = (image_mod._listed(builds) + (" all carry" if len(builds) > 2 else " both carry" if len(builds) == 2 else " carries")
+             if builds else "the known builds carry")
+    if image[lo:hi] == b"\xff" * (hi - lo):
+        return f"{where} is erased (all 0xFF)"
+    return f"{where} isn't the one {carry}"
+
+
+# How many damaged resource entries restore names before it only counts the rest.
+RESTORE_LISTED_PROBLEMS = 3
+
+
+def resource_pack_check(image: bytes):
+    """(the lines restore prints about the image's resource pack, the words it asks DIFFERENT with, or None). The
+    same checks as verify's resources and resource-slots lines; a damaged pack is a warning, not a refusal."""
+    from . import verify as verify_mod
+    entries = image_mod.resource_directory(image)
+    if not entries:
+        return (["NO resource pack found at 0x120000 (every known build has one)"],
+                ["The image has no resource pack (the resources line above). The camera opens its boot logo from it",
+                 "at every start, before it reads the card, so without it the camera may not get as far as the card",
+                 "updater, and only a chip programmer can write it again."])
+    problems = verify_mod.resource_problems(image, entries)
+    if not problems:
+        return [f"{len(entries)} entries, none damaged"], None
+    listed = problems[:RESTORE_LISTED_PROBLEMS]
+    more = len(problems) - len(listed)
+    return ([f"{len(problems)} of {len(entries)} entries are DAMAGED:"] + listed + ([f"and {more} more"] if more else []),
+            ["The image's resource pack is damaged (the resources lines above). The camera opens its boot logo from it",
+             "at every start, before it reads the card, so a damaged one can leave a camera that the card updater",
+             "can't reach, and only a chip programmer can write it again."])
 
 
 def _drives(table: dict) -> str:
@@ -1160,7 +1222,8 @@ def register(subparsers) -> None:
     restore.add_argument(
         "--allow-unknown-build",
         action="store_true",
-        help="write an image that carries no Charmera build marks. After a flash, one camera started but froze in photo and "
+        help="write an image that carries no Charmera build marks, or whose ARM vector table (0x200..0x240) no known build "
+        "carries. After a flash, one camera started but froze in photo and "
         "video mode; the likely cause, a sensor the firmware does not drive, is INFERRED. It never writes an image whose "
         "code refers to several sensor programs",
     )

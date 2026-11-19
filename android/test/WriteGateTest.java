@@ -231,6 +231,70 @@ public final class WriteGateTest {
                     && WriteGate.refusal(v012WithStock, v012, stock == null ? null : sha(stock), false, false) == null,
                     v012WithStock.report());
         }
+        // The files checked alone (Candidates.checkedAlone) are never compared with a backup, but a backup on record
+        // still says which sensor its firmware drives: the other one is the loud "Wrong sensor?" warning (still
+        // written: the camera boots and takes the card update), the same one is no such warning, and the line for no
+        // backup at all ("Nothing in the file can tell...") is never shown while a backup is on record.
+        if (stockEntry == null || !"v006".equals(stockEntry[1]) || factory == null || !Candidates.isFactoryDump(factory)
+                || !Candidates.isStockDump(stock)) {
+            System.out.println("WriteGateTest: backup-sensor checks SKIPPED (set CHARMERA_STOCK_IMAGE to the v006 dump"
+                    + " and CHARMERA_FACTORY_DUMP to the v012 dump)");
+        } else {
+            byte[] dump = Candidates.stockDump(stock);
+            String[] names = {"stock v012", "v0.25", "v0.26", "v0.27", "v0.23", "v0.24"};
+            byte[][] ov = {Recipe.build(factory, new Recipe.Selection("v012")),
+                    Candidates.build(factory, Candidates.Kind.V025), Candidates.build(factory, Candidates.Kind.V026),
+                    Candidates.build(factory, Candidates.Kind.V027),
+                    Recipe.build(stock, new Recipe.Selection("v006", "v006/ov9732-port")),
+                    Candidates.build(dump, Candidates.Kind.BRINGUP)};
+            for (int i = 0; i < ov.length; i++) {
+                String card = Recipe.fileNameFor(sha(ov[i])) != null ? Recipe.fileNameFor(sha(ov[i]))
+                        : Candidates.repairVersion(sha(ov[i])).fileNameFor(sha(ov[i]));
+                expect(names[i] + " is checked alone", Candidates.checkedAlone(sha(ov[i])));
+                UpdateCheck.Result onSp = Candidates.check(card, ov[i], stock);
+                UpdateCheck.Line l = sensorLine(onSp);
+                expect(names[i] + " against an SP140A backup: OK with a Wrong sensor? warning, never compared, and it"
+                        + " names the backup", onSp.ok && !onSp.compared && sha(stock).equals(onSp.referenceSha256)
+                        && l != null && l.level == UpdateCheck.Level.WARN && "Wrong sensor?".equals(l.title)
+                        && l.text.startsWith("the firmware in your backup drives the SP140A, and ")
+                        && l.text.contains(" drives the OV9732. If the backup is this camera's")
+                        && !onSp.report().contains("Nothing in the file can tell")
+                        && WriteGate.refusal(onSp, ov[i], sha(stock), false, false) == null, onSp.report());
+                UpdateCheck.Result onOv = Candidates.check(card, ov[i], factory);
+                l = sensorLine(onOv);
+                expect(names[i] + " against an OV9732 backup: no Wrong sensor? warning, and no line for no backup",
+                        onOv.ok && !onOv.compared && sha(factory).equals(onOv.referenceSha256) && l != null
+                        && "Image sensor set-up".equals(l.title) && !onOv.report().contains("Wrong sensor?")
+                        && l.text.startsWith("the firmware in your backup drives the OV9732 too, as ")
+                        && !onOv.report().contains("Nothing in the file can tell")
+                        && WriteGate.refusal(onOv, ov[i], sha(factory), false, false) == null, onOv.report());
+                UpdateCheck.Result none = Candidates.check(card, ov[i], null);
+                expect(names[i] + " with no backup keeps its own sensor line and names no backup",
+                        none.ok && none.referenceSha256 == null && !none.report().contains("Wrong sensor?"),
+                        none.report());
+            }
+            // the reverse: the v006 builds (compared with the backup) against an OV9732 backup still warn
+            byte[] restore = Recipe.build(stock, new Recipe.Selection("v006"));
+            UpdateCheck.Result back = Candidates.check(Recipe.fileNameFor(sha(restore)), restore, factory);
+            UpdateCheck.Line l = sensorLine(back);
+            expect("stock v006 against an OV9732 backup: compared, OK with a Wrong sensor? warning", back.ok
+                    && back.compared && l != null && "Wrong sensor?".equals(l.title)
+                    && WriteGate.refusal(back, restore, sha(factory), false, false) == null, back.report());
+            // a v006 build against a backup of a camera running v0.24 (the same SP140A table, but the OV9732 port
+            // in its code): the same table, another sensor, so the loud warning too
+            byte[] bringupChip = Arrays.copyOf(ov[5], 0x200000);
+            Arrays.fill(bringupChip, ov[5].length, bringupChip.length, (byte) 0xFF);
+            back = Candidates.check(Recipe.fileNameFor(sha(restore)), restore, bringupChip);
+            l = sensorLine(back);
+            expect("stock v006 against a backup of a camera running v0.24: the same table, but a Wrong sensor?"
+                    + " warning", back.ok && back.compared && l != null && "Wrong sensor?".equals(l.title)
+                    && (l.text + l.detail).contains("that firmware also carries the OV9732 driver our port adds"), back.report());
+            byte[] probe = Candidates.build(dump, Candidates.Kind.PROBE);
+            UpdateCheck.Result probeOn = Candidates.check(Candidates.Kind.PROBE.fileNameFor(sha(probe)), probe, factory);
+            expect("the sensor-ID probe works on either sensor: no Wrong sensor? warning, and it names the backup",
+                    probeOn.ok && !probeOn.compared && sha(factory).equals(probeOn.referenceSha256)
+                    && !probeOn.report().contains("Wrong sensor?"), probeOn.report());
+        }
         String v008Env = System.getenv("CHARMERA_V008_DUMP");
         if (v008Env == null || v008Env.isEmpty()) {
             v008Env = System.getenv("CHARMERA_FILM_MODS_RESTORE");
@@ -289,6 +353,16 @@ public final class WriteGateTest {
 
     static String sha(byte[] data) {
         return UpdateCheck.sha256Hex(data, 0, data.length);
+    }
+
+    /** The check's sensor-table line, or null. */
+    static UpdateCheck.Line sensorLine(UpdateCheck.Result r) {
+        for (UpdateCheck.Line l : r.lines) {
+            if ("sensor-table".equals(l.name)) {
+                return l;
+            }
+        }
+        return null;
     }
 
     static String repeat(char c, int n) {

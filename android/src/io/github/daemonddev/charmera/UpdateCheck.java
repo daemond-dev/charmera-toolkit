@@ -28,7 +28,7 @@ import java.util.zip.Inflater;
  * camera is a dump of that camera's own flash chip, read before the camera was ever flashed: given as the reference,
  * the file's image-sensor program, its software and its start-up table are compared with it. A reference whose
  * firmware is a known, public build may be a read taken after a flash with it, so a match with one is only a warning.
- * Without a reference, the sensor line is a warning that cannot be cleared: two different builds carry the same
+ * Without a reference, the sensor line is a warning that cannot be cleared: every known build carries the same
  * version stamp, and after the public build was flashed, one original-series camera could no longer take pictures.
  *
  * Result.referenceSha256 names the reference a check was made against, so the app can tell a check made against an
@@ -673,7 +673,8 @@ public final class UpdateCheck {
         }
         if (sensorStart < 0 && indexOf(data, OV9732_SCCB, VA_OFFSET, end) >= 0) {
             // v012's own OV9732 program: 4-byte entries (u16 register 0x0100..0x5FFF, u16 value) from a software reset
-            // to register 0xFFFF, at least 16 writes; the one the code points at wins, else the first one found.
+            // to register 0xFFFF, at least 16 writes; the one the code points at wins, else the first one found. Every
+            // one the code points at is kept, as the SP140A ones are, so several OV9732 programs can be told apart.
             int ctx = indexOf(data, OV9732_SCCB, VA_OFFSET, end);
             for (int at = alignedIndexOf(data, OV9732_INIT_START, VA_OFFSET, end); at >= 0;
                  at = alignedIndexOf(data, OV9732_INIT_START, at + 4, end)) {
@@ -693,6 +694,9 @@ public final class UpdateCheck {
                 int ram = at - VA_OFFSET;
                 byte[] literal = {(byte) ram, (byte) (ram >> 8), (byte) (ram >> 16), (byte) (ram >> 24)};
                 int ref = alignedIndexOf(data, literal, VA_OFFSET, end);
+                if (ref >= 0) {
+                    referenced.add(new SensorTable(at, p + 4, n, sha256Hex(data, at, p + 4), ref));
+                }
                 if (sensorStart < 0 || ref >= 0 && referencedFrom < 0) {
                     resetStart = ctx;
                     sensorStart = at;
@@ -700,9 +704,6 @@ public final class UpdateCheck {
                     pairs = n;
                     referencedFrom = ref;
                     bus = 0x6C;
-                }
-                if (ref >= 0) {
-                    break;
                 }
             }
         }
@@ -913,7 +914,7 @@ public final class UpdateCheck {
                 + " this file. " + INSTEAD,
                 magic ? "begins with SPII." : "the first 4 bytes are not SPII."));
 
-        // 3. Which build it is, read from its content. The stamp is not an identity: two builds share it.
+        // 3. Which build it is, read from its content. The stamp is not an identity: every known build shares it.
         boolean compared = false;
         if (!marks.complete()) {
             String found = "found: " + (marks.buildString == null ? "" : "build string at " + hex(marks.buildOffset) + "; ")
@@ -932,8 +933,8 @@ public final class UpdateCheck {
             out.add(new Line(Level.PASS, "series", "Build marks", "Charmera firmware: build " + marks.buildString.trim()
                     + (marks.compiled == null ? "" : ", compiled " + marks.compiled)
                     + (marks.sourceTree == null ? "" : ", source folder " + marks.sourceTree) + ", stamp " + marks.stamp
-                    + ". Two different builds carry this stamp, so it does not tell them apart; their compile dates and"
-                    + " source folders differ." + (marks.sourceTree == null ? "" : " A different source folder shows a"
+                    + ". Every known build carries this stamp, so it identifies none of them; their compile dates"
+                    + " differ, and so do their source folders." + (marks.sourceTree == null ? "" : " A different source folder shows a"
                     + " different build, the same one does not show the same build, and neither says whether the file"
                     + " fits your camera."),
                     "build string at " + hex(marks.buildOffset) + ", stamp at " + hex(marks.stampOffset)
@@ -1062,6 +1063,19 @@ public final class UpdateCheck {
                             + " its image-sensor table, while the firmware in your backup refers to its own. The file's"
                             + " program may set up the sensor from a table the app cannot see, so it cannot be compared."
                             + " Do not use this file on this camera from the app.", both));
+                } else if (ref.sensorSha256.equals(marks.sensorSha256) && drivesOv9732(reference) != drivesOv9732(data)) {
+                    // The same table, but one side also carries the OV9732 driver (our port): they drive different
+                    // sensors, as image.py's sensor_of tells them apart. A warning, as in verify.py: such a file boots
+                    // and the stock build of the right base undoes it from the card.
+                    out.add(new Line(Level.WARN, "sensor-table", "Wrong sensor?", drivesOv9732(reference)
+                            ? "the same set-up table as the firmware in your backup, but that firmware also carries the"
+                            + " OV9732 driver our port adds, so it drives the OmniVision OV9732, and this file drives the"
+                            + " SP140A-class sensor. On that camera it boots but can't take pictures. Pick firmware for"
+                            + " the OV9732 (Flash custom firmware) instead."
+                            : "the same set-up table as the firmware in your backup, but this file also carries the OV9732"
+                            + " driver our port adds, so it drives the OmniVision OV9732, and the backup is firmware for"
+                            + " the SP140A-class sensor. On that camera it isn't expected to take pictures. Pick firmware"
+                            + " for the SP140A instead.", both));
                 } else if (!ref.sensorSha256.equals(marks.sensorSha256) && drivesOv9732(reference) != drivesOv9732(data)) {
                     out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", drivesOv9732(reference)
                             ? "the backup is firmware for the OmniVision OV9732 sensor, and this file drives the"
@@ -1970,6 +1984,21 @@ public final class UpdateCheck {
             return true;
         }
         return false;
+    }
+
+    /** The start of the SP140A-class sensor's 61-write init table (page select, then register 0x2F = 0x1B). */
+    static final byte[] SP140A_INIT = {(byte) 0xFD, 0x00, 0x2F, 0x1B};
+
+    /**
+     * The sensor firmware bytes drive, as image.py's sensor_of: "OV9732" when they hold the OV9732 driver's SCCB context
+     * below the settings bank (v012, or a v006 build with our port, which keeps the SP140A table), else "SP140A" when
+     * they hold the SP140A init table's start there, else null.
+     */
+    public static String sensorOf(byte[] data) {
+        if (drivesOv9732(data)) {
+            return "OV9732";
+        }
+        return indexOf(data, SP140A_INIT, 0, Math.min(data.length, SOFTWARE_END)) >= 0 ? "SP140A" : null;
     }
 
     static String hex8(long v) {

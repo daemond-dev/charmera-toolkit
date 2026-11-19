@@ -222,8 +222,8 @@ NOT_THE_CAMERA = ("a build match says which public image the file was made from.
 
 # The way back without a backup, as verify and stage say it.
 WAY_BACK = ("A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes it "
-            "(charmera build --base v006 or --base v012). A flash that is cut off, or firmware that won't boot, needs a chip "
-            "programmer")
+            "(charmera build --base v006 --download --out out/ for an SP140A camera, charmera build --base v012 --download "
+            "--out out/ for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a chip programmer")
 
 NO_BACKUP = ("no backup of this camera was given (--stock), so nothing here compares the file with the camera's own "
              "firmware. Know what this camera runs before you flash it: read its chip (docs/01-FIRST-FLASH.md, step 1) "
@@ -504,6 +504,17 @@ def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stoc
             return [Check("sensor-table", False, f"the file's image-sensor set-up table ({table_where}) is referred to by no code, while "
                           f"--stock's is (from {ref.referenced_from:#x}): the file's code may set the sensor up from a table this check "
                           "does not see (refusing; no flag accepts it)")]
+        theirs, ours = sensor_of(stock), sensor_of(image)
+        if ref.sha256 == sensor.sha256 and ours and theirs and ours != theirs:
+            # The same table, but one side's code carries our OV9732 port: the two drive different sensors.
+            # Not a refusal: a file for the other sensor boots, and the stock build of the right base undoes it from the
+            # card. This is also what v0.24 built from the own read of an OV9732 camera that was flashed with v006 looks like.
+            return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock ({table_where}), but the "
+                          f"file is firmware for the {ours} and --stock for the {theirs}: one of them also carries the OV9732 "
+                          "driver our port adds (v0.21 to v0.24), so it drives the OV9732 whatever the table says. If --stock "
+                          f"shows the sensor this camera has, the camera boots with the file but can't take pictures until you "
+                          "flash firmware for its sensor. If --stock is a read of a camera that was flashed with firmware for the "
+                          "wrong sensor (an OV9732 camera that ran v006, for example), the file may be the fix", "warn")]
         if ref.sha256 == sensor.sha256:
             same_program = image[:CODE_AREA_END] == stock[:CODE_AREA_END]
             stock_build = match_known_build(stock)
@@ -523,7 +534,6 @@ def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stoc
             return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock: {table_where}, but the program "
                           f"around it differs from --stock's (bytes 0..{CODE_AREA_END:#x}), and a different program can drive the same "
                           "sensor differently: this does not show that the file drives the sensor as the firmware in --stock does", "warn")]
-        theirs, ours = sensor_of(stock), sensor_of(image)
         if ours and theirs and ours != theirs:
             sensors = f" The file is firmware for the {ours}, --stock for the {theirs}."
         elif ours == theirs == "OV9732" and sensor.sensor != ref.sensor:
@@ -924,7 +934,8 @@ def handler(args) -> int:
     if donor is None:
         print("        Know what that camera runs before you flash it (a backup of its chip, or `charmera identify`).")
         print("        A file for the other sensor still boots, and flashing the stock build of the right base from the")
-        print("        card undoes it (charmera build --base v006 or --base v012). A flash that is cut off, or firmware")
+        print("        card undoes it (charmera build --base v006 --download --out out/ for an SP140A camera, charmera")
+        print("        build --base v012 --download --out out/ for an OV9732 one). A flash that is cut off, or firmware")
         print("        that won't boot, needs a chip programmer.")
     return 0
 

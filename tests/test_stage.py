@@ -207,7 +207,8 @@ def test_without_a_backup_stage_warns_and_still_writes(update_file, card, confir
     assert "cannot be undone" not in out and "the only way back" not in out
     flat = " ".join(out.split())
     assert ("A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes "
-            "it (charmera build --base v006 or --base v012). A flash that is cut off, or firmware that won't boot, needs a "
+            "it (charmera build --base v006 --download --out out/ for an SP140A camera, charmera build --base v012 --download "
+            "--out out/ for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a "
             "chip programmer.") in flat
     assert "backup:       none given (--stock)" in out
     assert "No backup of this camera's own flash chip was given" in out and "stage still writes the file" in flat

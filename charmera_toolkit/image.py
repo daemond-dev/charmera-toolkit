@@ -262,6 +262,9 @@ class BuildMarks:
     compiled_offset: Optional[int] = None
     sensor: Optional[SensorTables] = None
     sensor_programs: Tuple[SensorTables, ...] = ()   # every reset and init table pair found, in file order
+    # Every OV9732 program found (ov9732_programs), in file order, when there is no SP140A program: the sensor mark is
+    # then one of them.
+    ov9732_programs: Tuple[SensorTables, ...] = ()
     stamp_conflict: Tuple[str, ...] = ()             # the different stamps that follow '*.bin', when they disagree
     # The folder the firmware was built in (source_tree_marks); not one of the marks `complete` asks for.
     source_tree: Optional[str] = None
@@ -276,8 +279,9 @@ class BuildMarks:
     @property
     def several_sensor_programs(self) -> List[SensorTables]:
         """The sensor programs the code refers to, when they are more than one with different init tables; else
-        empty. Which of them sets up the sensor cannot be told from the file."""
-        referenced = [t for t in self.sensor_programs if t.referenced_from is not None]
+        empty. Which of them sets up the sensor cannot be told from the file. The programs counted are the kind the
+        sensor mark is picked from: the SP140A ones, or the OV9732 ones when there is no SP140A program."""
+        referenced = [t for t in (self.sensor_programs or self.ov9732_programs) if t.referenced_from is not None]
         return referenced if len({t.sha256 for t in referenced}) > 1 else []
 
     @property
@@ -390,13 +394,19 @@ def sensor_of(image: bytes) -> Optional[str]:
 
 
 def ov9732_program(image: bytes) -> Optional[SensorTables]:
-    """v012's OV9732 program, or None: the bus context and an init table that starts with a software reset, both in
-    the code area. The table holds at least 16 writes to registers 0x0100..0x5FFF and ends with register 0xFFFF; the
-    one the code refers to by address wins, else the first found."""
+    """v012's OV9732 program, or None: of ov9732_programs, the one the code refers to by address wins, else the first
+    found."""
+    return _pick_sensor_program(ov9732_programs(image))
+
+
+def ov9732_programs(image: bytes) -> List[SensorTables]:
+    """Every OV9732 program of v012's kind, in file order: the bus context and an init table that starts with a
+    software reset, both in the code area. Each table holds at least 16 writes to registers 0x0100..0x5FFF and ends
+    with register 0xFFFF. Empty without the bus context."""
     end = min(len(image), CODE_AREA_END)
     ctx = image.find(OV9732_SCCB, HEADER_SIZE, end)
     if ctx < 0:
-        return None
+        return []
     found = []
     i = image.find(OV9732_INIT_START, HEADER_SIZE, end)
     while i >= 0:
@@ -413,7 +423,7 @@ def ov9732_program(image: bytes) -> Optional[SensorTables]:
                 found.append(SensorTables((ctx, ctx + len(OV9732_SCCB)), (i, e), pairs, hashlib.sha256(image[i:e]).hexdigest(),
                                           OV9732_BUS, _literal_offset(image, i - VA_OFFSET, end), "OV9732"))
         i = image.find(OV9732_INIT_START, i + 1, end)
-    return _pick_sensor_program(found)
+    return found
 
 
 def find_sensor_tables(image: bytes) -> Optional[SensorTables]:
@@ -472,12 +482,14 @@ def find_marks(image: bytes) -> BuildMarks:
     b = _BUILD_STRING_RE.search(code)
     c = _COMPILED_RE.search(code)
     programs = sensor_programs(image)
+    ov_programs = [] if programs else ov9732_programs(image)
     tree, tree_off, tree_paths = source_tree_marks(code)
     return BuildMarks(
         stamp=stamp, stamp_offset=stamp_off,
         build_string=b.group(0) if b else None, build_offset=b.start() if b else None,
         compiled=c.group(0) if c else None, compiled_offset=c.start() if c else None,
-        sensor=_pick_sensor_program(programs) or ov9732_program(image), sensor_programs=tuple(programs),
+        sensor=_pick_sensor_program(programs or ov_programs), sensor_programs=tuple(programs),
+        ov9732_programs=tuple(ov_programs),
         stamp_conflict=conflict,
         source_tree=tree, source_tree_offset=tree_off, source_tree_paths=tree_paths,
     )
@@ -655,6 +667,16 @@ def vector_table_sha256(image: bytes) -> Optional[str]:
     """SHA-256 of the ARM vector table (bytes 0x200..0x240), or None when the image ends before it."""
     lo, hi = VECTOR_TABLE
     return hashlib.sha256(image[lo:hi]).hexdigest() if len(image) >= hi else None
+
+
+def known_vector_tables() -> Dict[str, List[str]]:
+    """The SHA-256 of each known build's ARM vector table, with the builds that carry it (v006, v008_test and v012
+    share one)."""
+    out: Dict[str, List[str]] = {}
+    for b in KNOWN_BUILDS.values():
+        if b.vector_table_sha256 is not None:
+            out.setdefault(b.vector_table_sha256, []).append(b.key if b.source_tree is None else b.source_tree)
+    return out
 
 
 def updater_extra_erase(file_len: int) -> int:

@@ -8,6 +8,7 @@ this file can touch a real programmer.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -20,6 +21,7 @@ import pytest
 
 from charmera_toolkit import cli, flash, image
 from charmera_toolkit.flash import FLASH_SIZE, TAIL_START
+from test_core import SYNTHETIC_VECTORS, put_resource_pack
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -128,10 +130,31 @@ SYNTHETIC_SENSOR_TABLE = bytes(b for pair in [(0xFD, 0x00)] + [(r, (r * 3) & 0xF
                                + [(0xFD, 0x01), (0x11, 0x80)] for b in pair) + b"\xff\xff"
 
 
+# The synthetic images' ARM vector table (bytes 0x200..0x240), taken as a known build's by restore in these tests
+# (known_vectors): the real one is not kept in the repo.
+# (test_core.SYNTHETIC_VECTORS)
+
+
+@pytest.fixture(autouse=True)
+def known_vectors(monkeypatch):
+    """restore takes the synthetic vector table as a known build's, as it takes the real builds' one."""
+    real = image.known_vector_tables
+
+    def with_synthetic():
+        out = dict(real())
+        out.setdefault(hashlib.sha256(SYNTHETIC_VECTORS).hexdigest(), ["v006"])   # the builds named stay the real ones
+        return out
+
+    monkeypatch.setattr(image, "known_vector_tables", with_synthetic)
+
+
 def make_image(fill: int = 0x5A) -> bytes:
-    """A 2 MiB image shaped like a stock dump: magic, the build marks, a 0xFF tail."""
+    """A 2 MiB image shaped like a stock dump: magic, the vector table, the build marks, a resource pack, a 0xFF
+    tail."""
     body = bytearray(bytes([fill]) * TAIL_START)
     body[0:4] = b"SPII"
+    body[0x200:0x240] = SYNTHETIC_VECTORS
+    put_resource_pack(body)
     body[BUILD_OFFSET: BUILD_OFFSET + 17] = b"JH5408  20250520\x00"
     body[STAMP_OFFSET - 1: STAMP_OFFSET + 13] = b"\x00202505201029\x00"   # NUL-terminated, as in the firmware
     body[0xF5BFC: 0xF5C02] = image.SENSOR_RESET_TABLE
@@ -1315,3 +1338,111 @@ def test_the_notes_say_what_a_cleaned_copy_is():
     assert "factory build v012" in " ".join(flash.public_read_note(flash.CLEAN_V012))
     assert flash.PUBLIC_DUMPS["75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082"] == flash.CLEAN_V006
     assert flash.PUBLIC_DUMPS["63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c"] == flash.CLEAN_V012
+
+
+# ---------------------------------------------------------------------------------------------- restore: vector table and resources
+
+
+def test_restore_refuses_an_image_whose_vector_table_is_erased(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """An erased vector table is a known no-boot brick: refused before flashrom runs, unless --allow-unknown-build."""
+    data = bytearray(make_image())
+    data[0x200:0x240] = bytes([0xFF]) * 0x40
+    path = tmp_path / "erased.bin"
+    path.write_bytes(bytes(data))
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask: the image is refused"))
+    assert restore(path, tmp_path / "r") == 1
+    err = flat(capsys.readouterr().err)
+    assert ("refusing: the ARM vector table of erased.bin (0x200..0x240, where the camera starts) is erased (all 0xFF). "
+            "A camera written with a damaged vector table won't start, so the card updater can't run on it again and "
+            "only a chip programmer brings it back.") in err
+    assert "Pass --allow-unknown-build only for a read of this camera's own chip that you know is good." in err
+    assert "Nothing was written." in err
+    assert fake_flashrom.calls() == [] and not fake_flashrom.wrote_anything()
+    # a changed one names the builds that carry the known one
+    data[0x200:0x240] = SYNTHETIC_VECTORS
+    data[0x203] ^= 0x01
+    path.write_bytes(bytes(data))
+    assert restore(path, tmp_path / "r") == 1
+    err = flat(capsys.readouterr().err)
+    assert "(0x200..0x240, where the camera starts) isn't the one v006, v008_test and v012 all carry." in err
+    # with --allow-unknown-build it is a warning and restore goes on to ask
+    monkeypatch.setattr("builtins.input", lambda prompt="": "no")
+    assert restore(path, tmp_path / "r", "--allow-unknown-build") == 1
+    out = capsys.readouterr().out
+    assert "continuing because --allow-unknown-build was given" in out and "Stopped. Nothing was written." in out
+    assert not fake_flashrom.wrote_anything()
+
+
+def test_the_known_builds_share_one_vector_table():
+    known = image.known_vector_tables()
+    real = image.V012_BUILD.vector_table_sha256
+    assert real == image.PUBLIC_BUILD.vector_table_sha256 == image.FILM_MODS_BUILD.vector_table_sha256
+    assert sorted(known[real]) == ["v006", "v008_test", "v012"]
+
+
+def test_restore_asks_different_when_the_resource_pack_is_damaged(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A damaged resource pack is a warning: restore says which entries and asks DIFFERENT, then writes on that word."""
+    data = bytearray(make_image())
+    beep = image.RESOURCE_BASE + 4 * 0x200                 # BEEP.WAV's slot in the synthetic pack
+    data[beep: beep + 0x400] = bytes([0xFF]) * 0x400
+    path = tmp_path / "pack.bin"
+    path.write_bytes(bytes(data))
+    fake_flashrom.set_chip(make_image(0x00))
+    prompts = []
+    answers = ["RESTORE", "no"]
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert restore(path, tmp_path / "r") == 1
+    out = capsys.readouterr().out
+    assert "resources: 1 of 6 entries are DAMAGED:" in out and "BEEP.WAV at 0x120800: erased" in out
+    assert ("The image's resource pack is damaged (the resources lines above). The camera opens its boot logo from it "
+            "at every start, before it reads the card, so a damaged one can leave a camera that the card updater can't "
+            "reach, and only a chip programmer can write it again.") in flat(out)
+    assert len(prompts) == 2 and "DIFFERENT" in prompts[1]
+    assert not fake_flashrom.wrote_anything()
+    # DIFFERENT writes it
+    answers[:] = ["RESTORE", "DIFFERENT"]
+    prompts.clear()
+    assert restore(path, tmp_path / "r2") == 0
+    assert fake_flashrom.written() == bytes(data)
+    # no pack at all is the same kind of warning
+    data[image.RESOURCE_BASE: image.RESOURCE_BASE + 4] = b"\x00\x00\x00\x00"
+    path.write_bytes(bytes(data))
+    fake_flashrom.set_chip(make_image(0x00))
+    answers[:] = ["RESTORE", "no"]
+    assert restore(path, tmp_path / "r3") == 1
+    out = flat(capsys.readouterr().out)
+    assert "resources: NO resource pack found at 0x120000 (every known build has one)" in out
+    assert "The image has no resource pack (the resources line above)." in out
+
+
+def test_restore_takes_an_intact_image_without_a_second_word(fake_flashrom, tmp_path, monkeypatch, capsys):
+    data = make_image()
+    path = tmp_path / "stock.bin"
+    path.write_bytes(data)
+    fake_flashrom.set_chip(make_image(0x00))
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompts.append(prompt) or "RESTORE")
+    assert restore(path, tmp_path / "r") == 0
+    assert "resources: 6 entries, none damaged" in capsys.readouterr().out and len(prompts) == 1
+
+
+@pytest.mark.parametrize("env", ["CHARMERA_STOCK_IMAGE", "CHARMERA_FACTORY_DUMP"])
+def test_restore_gate_takes_the_real_dumps_and_an_own_read(env):
+    """The real dumps (originals or cleaned copies) and a stand-in for a camera's own read of them pass the vector-table
+    gate and the resource checks: restore asks only for RESTORE (and DIFFERENT only for a sensor difference)."""
+    path = Path(os.environ.get(env, ""))
+    if not path.is_file():
+        pytest.skip(f"set {env}")
+    data = path.read_bytes()
+    assert image.vector_table_sha256(data) == image.V012_BUILD.vector_table_sha256    # the real one, not the stand-in
+    own = bytearray(data)
+    own[0x170300] ^= 0x5A                                  # another setting saved
+    for d in (data, bytes(own)):
+        assert flash.vector_table_problem(d, "x.bin") is None
+        lines, ask = flash.resource_pack_check(d)
+        assert ask is None and lines[0].endswith("entries, none damaged"), lines

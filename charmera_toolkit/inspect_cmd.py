@@ -74,7 +74,7 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
             print("                 no chip ID")
         if t.referenced_from is None:
             print("                 no code refers to it by address, so the code may set the sensor up from another table (verify warns)")
-        others = [p for p in m.sensor_programs if p != t]
+        others = [p for p in (m.sensor_programs or m.ov9732_programs) if p != t]
         for p in others:
             print(f"  also found:    {_program(p)}, sha256 {p.sha256[:8]}...")
         if m.several_sensor_programs:

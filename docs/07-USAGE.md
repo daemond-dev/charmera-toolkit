@@ -362,8 +362,10 @@ still put 5 V on CS.
 differ. It keeps that read in the folder given as `--out`, which it requires, as `<label>_<UTC time>.bin` with a
 `.sha256` and a `.manifest.json` (`--label` defaults to `before-restore`). It shows the 64 KiB blocks in which the
 image differs from that read, and writes nothing when the chip already holds the image. It refuses an image without
-the Charmera build marks, one that isn't v006, v008_test or v012 or is damaged, unless `--allow-unknown-build` is
-given, which is only for a good read of this camera's own chip. The cleaned v006 and v012 copies and a read of a v006
+the Charmera build marks, one that isn't v006, v008_test or v012 or is damaged, and one whose ARM vector table
+(0x200..0x240) is erased or isn't the one those builds carry, unless `--allow-unknown-build` is given, which is only
+for a good read of this camera's own chip. It asks for `DIFFERENT` when the image's resource pack is damaged or
+missing, and names the damaged entries. The cleaned v006 and v012 copies and a read of a v006
 or v012 chip pass without it. It refuses an image with several sensor programs (more than one sensor table the code
 refers to, with different contents) whatever the flags. It shows the image's sensor table next to the chip's and asks
 for a second word, `DIFFERENT`, when they differ (naming the sensor each is for when they're for different sensors),

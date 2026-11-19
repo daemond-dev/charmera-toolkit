@@ -463,9 +463,10 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route:
         print("No backup of this camera's own flash chip was given, so nothing above compares the file with the firmware the")
         print("camera runs. Before you flash, find out what it runs: read its chip (docs/01-FIRST-FLASH.md, step 1) and pass")
         print("it as --stock, or run `charmera identify` on its photos. A file for the other sensor still boots, and")
-        print("flashing the stock build of the right base from the card undoes it (charmera build --base v006 or --base")
-        print("v012). A flash that is cut off, or firmware that won't boot, needs a chip programmer. stage still writes")
-        print("the file if you confirm below.")
+        print("flashing the stock build of the right base from the card undoes it (charmera build --base v006 --download")
+        print("--out out/ for an SP140A camera, charmera build --base v012 --download --out out/ for an OV9732 one). A")
+        print("flash that is cut off, or firmware that won't boot, needs a chip programmer. stage still writes the file")
+        print("if you confirm below.")
     else:
         print("Keep the --stock file safe. It's the way back if this flash goes wrong. Only a read made before the camera")
         print("was ever flashed says whether a firmware fits it. A read taken after a flash shows what the camera runs now,")
