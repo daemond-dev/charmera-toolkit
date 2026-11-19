@@ -192,6 +192,18 @@ final class Identify {
         }
     }
 
+    /** The kind of camera a family's stock firmware is for (identify.py's SENSOR). */
+    static String cameraName(Base b) {
+        switch (b) {
+            case V012:
+                return "an OV9732 camera";
+            case V006_FAMILY:
+                return "an SP140A camera";
+            default:
+                return "unknown";
+        }
+    }
+
     /** The stock firmware a camera of that family runs (identify.py's STOCK). */
     static String stockName(Base b) {
         switch (b) {
@@ -465,7 +477,7 @@ final class Identify {
     }
 
     /**
-     * The answer. Stock assumption: one family is "This camera runs stock ...", HIGH when the scan was not capped and
+     * The answer. Stock assumption: one family is "These photos were taken by stock ...", HIGH when the scan was not capped and
      * at least 2 camera-written photos agree, else MEDIUM. Our EXIF mod: not stock, base v012, HIGH. Two families:
      * not stock, base from the OLDEST family, LOW. No newest camera-written photo found: no answer.
      */
@@ -473,8 +485,10 @@ final class Identify {
                                  Entry firstExif, String exifSoftware, boolean v006Seen) {
         List<String> lines = new ArrayList<>();
         if (r.photos == 0) {
-            r.conclusion = "The card holds no photos, so they can't say which firmware this camera runs."
-                    + (r.videos > 0 ? " Videos don't carry the header the app reads." : "");
+            r.conclusion = "The card holds no photos. Take two or three with the camera first, then identify again."
+                    + (r.videos > 0 ? " Videos don't carry the header the app reads." : "")
+                    + " If photo mode freezes and the camera can't take any, Identify the image sensor finds the"
+                    + " sensor instead.";
             return;
         }
         if (r.newest == null) {
@@ -534,7 +548,8 @@ final class Identify {
             r.confidence = whys.isEmpty() ? Confidence.HIGH : Confidence.MEDIUM;
             r.confidenceWhy = whys.isEmpty() ? String.format(Locale.ROOT, "all %d camera-written photos read show the"
                     + " same family, oldest to newest", r.recognised) : joined(whys);
-            lines.add("This camera runs stock " + stockName(oldestFamily) + ".");
+            lines.add("These photos were taken by stock " + stockName(oldestFamily) + " (" + cameraName(oldestFamily)
+                    + "). If the camera was flashed after them, it runs something else now.");
         }
         lines.addAll(r.notStock);
         lines.add("Base to build on: " + baseName(r.base) + (r.changes.isEmpty() ? "."

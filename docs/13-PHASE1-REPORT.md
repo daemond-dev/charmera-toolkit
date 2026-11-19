@@ -23,7 +23,9 @@ timeline and the corrections. In short, this is what the report got wrong or lef
   camera. Its fingerprint over 0..0x169000 is SHA-1 `91499bd3…`, byte sum `0852C329`, against `d1f21227…`,
   `0852B369` here, so the stamp identifies no build. The toolkit now finds the build marks and the sensor table by
   content and names builds by fingerprint ([Image layout](11-FORMAT.md#build-identity)). Both known builds carry the
-  same 61-write sensor table.
+  same 61-write sensor table. (Superseded 2026-11-18: a third known build, v012, the factory build of OV9732 cameras,
+  carries the same stamp and drives the OV9732 with a 167-write table of another form. See
+  [OV9732 port, section 11](15-OV9732-AE-WB-FLASH-PORT.md#11-v025-the-factory-ov9732-build-with-the-volume-and-led-rows).)
 - The sensor is set up at boot, before the card mounts. To be more exact than section 9: after 10 failed attempts at
   one register the firmware abandons the rest of the table, and its caller ignores the error.
 - The 2 MiB file's final erase is no longer unknown. It wraps to block 1 and bricks the camera (film-mods author, on
@@ -36,7 +38,9 @@ timeline and the corrections. In short, this is what the report got wrong or lef
 Where a statement below no longer holds, it's marked "Superseded 2026-11-06" or corrected in place, and the original
 wording is kept. The rule that followed from all of it was to never flash without a backup of your own camera.
 (Superseded 2026-11-18: know what your camera runs before you flash, from a backup or `identify`. Without either the
-tools warn; they don't refuse. The backup is still the only way back.)
+tools warn; they don't refuse. A file for the other sensor still boots and is undone from the card with the stock
+build of the right base. The backup is still the only way back to exactly what the camera ran, and a flash that won't
+boot needs a chip programmer.)
 
 Each finding carries one of four labels:
 
@@ -218,7 +222,7 @@ Failure modes:
 
 ### 6.2 In-circuit SPI read and write with a 3.3 V programmer (the only path for a camera that will not boot)
 
-The chip is an SOP8 package with legs, so a SOIC-8 clip fits (REPORTED by the teardown's photos; an in-circuit read with wires on the chip and the battery off is documented by charmera-film-mods). It's a 2.3 to 3.6 V part (VERIFIED from Puya's coding), so program at 3.3 V. A 1.8 V adapter is wrong. The usual CH341A warnings apply in full. Unmodified black boards drive 5 V on the data lines (flashrom's documentation says so), which exceeds the flash's and the SoC's absolute maximum. Use a blue board set to 3.3 V, a V1.7 board switched to 3.3 V, a modified black board, a Raspberry Pi Pico with pico-serprog, or a CH347. The SoC shares the 3.3 V rail, so the clip back-powers it through the flash's VCC pin. Disconnect the battery. If the chip is not detected or reads differ between passes, back-powering is the first suspect (flashrom's in-system-programming notes; libreboot; REPORTED). Read twice, compare, hash, keep both copies before writing anything.
+The chip is an SOP8 package with legs, so a SOIC-8 clip fits (REPORTED by the teardown's photos; an in-circuit read with wires on the chip and the battery off is documented by charmera-film-mods). (Superseded 2026-11-18: the film-mods author reports there isn't much room around the chip for a clip, and soldered wires to its legs instead. Expect to solder; see [Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).) It's a 2.3 to 3.6 V part (VERIFIED from Puya's coding), so program at 3.3 V. A 1.8 V adapter is wrong. The usual CH341A warnings apply in full. Unmodified black boards drive 5 V on the data lines (flashrom's documentation says so), which exceeds the flash's and the SoC's absolute maximum. Use a blue board set to 3.3 V, a V1.7 board switched to 3.3 V, a modified black board, a Raspberry Pi Pico with pico-serprog, or a CH347. The SoC shares the 3.3 V rail, so the clip back-powers it through the flash's VCC pin. Disconnect the battery. If the chip is not detected or reads differ between passes, back-powering is the first suspect (flashrom's in-system-programming notes; libreboot; REPORTED). Read twice, compare, hash, keep both copies before writing anything.
 
 flashrom has no chip entry for it by name, and `-c "SFDP-capable chip"` worked for the community (REPORTED). Linux needs udev access to USB 1a86:5512 or root; Windows needs the libusb driver via Zadig and a Windows flashrom build. Elnec and XGecu programmers list PY25D16HB explicitly (REPORTED, vendor lists) if a dedicated programmer is preferred.
 
@@ -263,7 +267,7 @@ When this was written nothing here had been flashed, and the first mute test on 
 ## 8. Risks
 
 1. **No boot-ROM fallback is known.** A failed SD update, or a bad image, means a clip write or a dead camera. Mitigation: a verified backup first, only block-aligned 0x1E0000 files, a full battery, and never a 2 MiB file. (Superseded 2026-11-06: 0x169000-byte files too, the other size `verify` and `stage` take. `verify` takes any other size only as a WARN with `--allow-odd-size`, and `stage` never does.)
-2. **Firmware that does not fit the camera.** The original-series image boots on a Millennium or CLOT body but capture fails, and on 2026-11-06 it did the same on an original-series body. The image carries no marker the tool can read from the camera, and the body, the boot screen and the stamp prove nothing. Mitigation, since then: never flash without a backup of the owner's own camera. (Superseded 2026-11-18: know what your camera runs before you flash, from a backup or `identify`. Without either the tools warn; they don't refuse. The backup is still the only way back.) `verify --stock <that backup>` compares the sensor table, which shows what fits only for a backup read before the camera was ever flashed. The mods are built from the owner's own backup, never a public dump.
+2. **Firmware that does not fit the camera.** The original-series image boots on a Millennium or CLOT body but capture fails, and on 2026-11-06 it did the same on an original-series body. The image carries no marker the tool can read from the camera, and the body, the boot screen and the stamp prove nothing. Mitigation, since then: never flash without a backup of the owner's own camera. (Superseded 2026-11-18: know what your camera runs before you flash, from a backup or `identify`. Without either the tools warn; they don't refuse. A file for the other sensor still boots and is undone from the card with the stock build of the right base. The backup is still the only way back to exactly what the camera ran, and a flash that won't boot needs a chip programmer.) `verify --stock <that backup>` compares the sensor table, which shows what fits only for a backup read before the camera was ever flashed. The mods are built from the owner's own backup, never a public dump.
 3. **Programmer voltage.** A black CH341A at 5 V can damage the flash and the SoC. Mitigation: it's documented, and the backup tool prints the warning before every run. (Corrected 2026-11-06: until then it did not. `probe` and `backup` now print a checklist before they run: a 3.3 V programmer, never an unmodified black CH341A, the battery lead lifted, pin 1 on the dot.)
 4. **Back-powering the SoC through the flash VCC pin.** Causes unstable reads and could stress the board. Mitigation: battery disconnected, double read with compare, stop if the chip is not detected cleanly.
 5. **A public restore image is not a factory image.** It carries another owner's settings records and two photos. A blanked variant is cleaner, but its behaviour on a blank settings store is only emulation-verified.
@@ -289,7 +293,8 @@ When this was written nothing here had been flashed, and the first mute test on 
 When this was written, `charmera-toolkit` already had `inspect`, `verify`, `pack` and `sounds list/extract/mute/replace` (read-only unless a gate flag is given), and `card-check`/`card-fix`, `exif-fix` and `backup`/`restore` were being finished. These design decisions follow from the report:
 
 - Build detection was by build stamps plus the software-region hash. Since 2026-11-06 it is by fingerprint over the
-  bytes, with the marks found by content, because the stamp is shared by two builds. A known build is named, an
+  bytes, with the marks found by content, because the stamp is shared by two builds (three since v012, superseded
+  2026-11-18). A known build is named, an
   unknown one is said to be unknown, and neither is taken as proof that a file fits a camera. When another dump
   appears, it gets its own fingerprint entry.
 - Update files are always 0x1E0000 bytes, never 2 MiB or an odd size. The stamp must differ from 202505201029, and

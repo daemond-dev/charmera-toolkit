@@ -6,7 +6,7 @@ Reading order: 4 of 15 Â· previous: [Flash candidates](03-FLASH-CANDIDATES.md) Â
 and reads it back to check that the copy matches.
 
 ```
-charmera stage UPDATE.bin --card <mount point or drive letter> --stock my_backup.bin [--donor donor.bin] [--plan-only] [--i-know-what-i-am-doing]
+charmera stage UPDATE.bin --card <mount point or drive letter> [--stock my_backup.bin] [--donor donor.bin] [--plan-only] [--i-know-what-i-am-doing]
 ```
 
 ## Why a command for a file copy
@@ -32,6 +32,14 @@ bytes that passed `verify`, which a plain copy to a cheap card through a cheap r
    the same tags (PASS, FAIL, WARN, INFO). A modified software region is allowed, because that's what a mod is, and
    shows as a WARN, never a PASS.
 
+   A file `charmera build` makes from a public copy is a reviewed file (one from your own read isn't), and `verify`
+   knows it by its SHA-256. For one of those you'll see an INFO `reviewed` line that names the build, the dump it was
+   made from and whether it has been tried on a camera. Its `series`, `build`, `software-region` and `sensor-table`
+   lines are a WARN where another file would FAIL, and end "(a reviewed build: this is expected)". Without `--stock`
+   it adds a WARN `unconfirmed` (not for the sensor-ID probe), since nothing confirms what the camera runs. With a
+   `--stock` that is firmware for the other sensor it adds a WARN `wrong-sensor`. The first list below still applies
+   to it in full. The second applies to every file that isn't a reviewed one.
+
    These are a FAIL on every route, the donor route below included, and no flag of `stage` changes that:
 
    - several sensor programs that the code refers to, with different contents, in the file or in `--stock`
@@ -45,7 +53,7 @@ bytes that passed `verify`, which a plain copy to a cheap card through a cheap r
    - the withdrawn candidates A and B. (C is named in an INFO line, because its bytes are the stock restore file made
      from the cleaned stock dump.)
 
-   Outside the donor route these are a FAIL too:
+   Outside the donor route these are a FAIL too, except in a reviewed file:
 
    - missing build marks (the donor route takes a donor without a sensor table of the known kind as a WARN)
    - a sensor table that differs from `--stock`'s, or a `--stock` with no sensor table of the kind the known builds
@@ -54,26 +62,30 @@ bytes that passed `verify`, which a plain copy to a cheap card through a cheap r
 
    Any FAIL refuses with exit 1. WARN lines are shown and don't block.
 
-   Always give `--stock my_backup.bin`, a dump of the camera this card goes into, so you know what your camera runs
-   before you flash. The sensor table is compared with it, and it makes the software-region line list the 64 KiB
-   blocks that differ from your own dump. Only a dump read before the camera was ever flashed shows what fits it. When
-   the dump is itself a known build, a matching sensor table is a WARN
-   ([The first flash, After a flash](01-FIRST-FLASH.md#after-a-flash)). When it's a build nobody has published, the
-   same table is a PASS only when the program around it is the dump's too.
+   When you have a backup, give it as `--stock my_backup.bin`, a dump of the camera this card goes into, so you know
+   what your camera runs before you flash. The sensor table is compared with it, and it makes the software-region line
+   list the 64 KiB blocks that differ from your own dump. Only a dump read before the camera was ever flashed shows
+   what fits it. When the dump is itself a known build, a matching sensor table is a WARN ([The first flash, After a
+   flash](01-FIRST-FLASH.md#after-a-flash)). When it's a build nobody has published, the same table is a PASS only
+   when the program around it is the dump's too.
 
    Without `--stock`, `stage` shows a WARN line among its checks, says the same in the plan, and still writes a file
    that passes. The warning says no backup of this camera was given, so nothing compares the file with its own
-   firmware, and a file that doesn't fit can't be undone. Warning instead of refusing was a deliberate choice, made on
-   2026-11-06. With `--donor` and no `--stock` it doesn't write at all.
+   firmware, and tells you to find out what the camera runs first (its chip, or `charmera identify` on its photos).
+   A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes it
+   (`charmera build --base v006` or `--base v012`). A flash that is cut off, or firmware that won't boot, needs a chip
+   programmer. Warning instead of refusing was a deliberate choice, made on 2026-11-06.
 
-   `--donor donor.bin` is the donor route, for a camera whose own firmware is gone and doesn't fit it
-   ([Recovery, section D](02-RECOVERY.md#the-donor-route)). It needs `--stock`. The file must be the donor's
-   firmware unchanged, or a mod built on it that keeps the donor's boot header, vector table (0..0x240) and sensor
-   table, which shows as a WARN. Its sensor table may then differ from `--stock`'s, as a WARN, and a donor without a
-   sensor table of the kind the known builds use is taken with a WARN too. The vector-table check and the other checks
-   in the first list above run on this route as on every other. The output says that nothing checks whether the
-   donor's camera has the same sensor and wiring, and that only a chip programmer can put `--stock` back if the
-   donor's firmware doesn't start.
+   `--donor donor.bin` is the donor route, for a camera whose own firmware is gone and doesn't fit it ([Recovery,
+   section D](02-RECOVERY.md#the-donor-route)). `--stock` is optional there. Without it a WARN `backup` says nothing
+   compares the file with what the camera runs now, and that the way back is the update file the camera was last
+   flashed with, from a card, as long as the new firmware starts far enough to run the updater. The file must be the
+   donor's firmware unchanged, or a mod built on it that keeps the donor's boot header, vector table (0..0x240) and
+   sensor table, which shows as a WARN. Its sensor table may then differ from `--stock`'s, as a WARN, and a donor
+   without a sensor table of the kind the known builds use is taken with a WARN too. The vector-table check and the
+   other checks in the first list above run on this route as on every other. The output says that nothing checks
+   whether the donor's camera has the same sensor and wiring, and that only a chip programmer can bring the camera
+   back if the donor's firmware doesn't start.
 2. The card. `--card` must exist, be a directory, and be a mount point (Linux) or a drive root (Windows: `E:` or
    `E:\`). On Linux the device behind the mount and its filesystem type are read from `/proc/mounts`, and the whole
    disk's removable flag from sysfs. A card in a built-in slot counts as removable, the same rule `card-check --list`
@@ -152,7 +164,7 @@ Switch the camera off, take the card out, look at the card root on a computer, a
 card that holds another update file.
 
 The stamp isn't the cause for a file `verify` passed, unless the camera runs a build whose stamp isn't known. No
-toolkit command changes the stamp compiled into the firmware, so a camera running either known build, or flashed with
+toolkit command changes the stamp compiled into the firmware, so a camera running any known build, or flashed with
 a toolkit-built file, still runs `202505201029`, and `verify` refuses that stamp in a name. With `--stock`, it also
 refuses the stamp found in your backup (`stamp-camera`), which covers a camera that runs another build.
 
@@ -160,17 +172,21 @@ refuses the stamp found in your backup (`stamp-camera`), which covers a camera t
 
 | Message | Meaning | What to do |
 |---|---|---|
-| `FAIL ...` then `RESULT: verify failed` | The file itself is wrong: name checksum, stamp, size (only 0x1E0000 and 0x169000 bytes are taken), build. | Rebuild it with `pack`. Never rename an update file by hand. |
-| `WARN ...` no backup of this camera was given | Not a refusal. `--stock` is missing, so nothing compared the file with this camera's own firmware, and `stage` writes after it. | Stop and run it again with `--stock <your backup>`. |
+| `FAIL ...` then `RESULT: verify failed` | The file itself is wrong: name checksum, stamp, size (only 0x1E0000 and 0x169000 bytes are taken), build. | Rebuild it with `build` or `pack`. Never rename an update file by hand. |
+| `INFO reviewed` | Not a refusal. The file is a reviewed file from `charmera build`, named with its base, mods and dump, and whether it has been tried on a camera. | Read the WARN lines that follow it. |
+| `WARN ...` no backup of this camera was given | Not a refusal. `--stock` is missing, so nothing compared the file with this camera's own firmware, and `stage` writes after it. | If you have a backup, run it again with `--stock <your backup>`. If not, know what the camera runs (`charmera identify` on its photos) before you confirm. |
+| `WARN unconfirmed` | Not a refusal. A reviewed file and no `--stock`: the line names the sensor the build drives, and on a camera with the other sensor it boots but can't take pictures until it's flashed with firmware that fits. | The same as the line above. |
+| `WARN wrong-sensor` | Not a refusal. A reviewed file, and `--stock` (or `--donor`) is firmware for the other sensor. If that read is the camera as it left the factory, the file can't take pictures on it. If it was read after a flash with the wrong firmware, it says nothing about the sensor. | Check the sensor with `charmera identify` on photos from before any flash, or with the sensor-ID probe, and build for that sensor. |
 | `FAIL ...` `--stock` is not a complete read of a chip | `--stock` isn't a read of exactly 2 MiB that starts with `SPII` and carries the build string and the stamp. It's an update file, a cut-off read, or something else. | Give the `<label>_<UTC time>.bin` that `backup` wrote when its reads agreed, not an update file made from it. |
 | `WARN ...` `--stock` is byte-identical to a public dump | It's the public dump, or this camera's read after a flash with the public restore file. Either way it shows only what the camera runs now. | Read [Recovery, section D](02-RECOVERY.md#after-a-flash) before you flash. |
 | `WARN stock-read` or `WARN donor-read` | `--stock` or `--donor` is named like a read that no second read confirmed (`<label>_<UTC time>.unverified-read<n>.bin`): a single read, or reads that didn't agree. Such a read isn't a backup. A poor clip contact can leave wrong bytes in it that nothing here can see. | Read that chip again until two reads agree (`backup`), and give the `<label>_<UTC time>.bin` it then keeps. |
-| `FAIL sensor-table` | The image-sensor set-up table differs from your `--stock` dump's, the file has none of the kind the known builds use while `--stock` has one, or `--stock` has none (without `--stock`: the file's table isn't the known builds'). No toolkit mod changes the table, and that difference is what leaves a camera unable to take pictures. No flag clears it outside the donor route. | Don't use the file on this camera. If you left out `--stock`, add it. Your backup is the only reference that says anything about your camera. If `--stock` has no table of that kind, keep it and look at it with `inspect`, because nothing here can compare a file with it. If your backup was read after the camera was flashed, the table in it is the flashed firmware's. If the camera's own firmware is already gone and the file is another, working camera's, see the donor route ([Recovery, section D](02-RECOVERY.md#the-donor-route)). |
+| `FAIL sensor-table` | The image-sensor set-up table differs from your `--stock` dump's, the file has none of the kind the known builds use while `--stock` has one, or `--stock` has none (without `--stock`: the file's table isn't the known builds'). No toolkit mod changes the table, and that difference is what leaves a camera unable to take pictures. The line names the sensor each side is for when it can tell. No flag clears it outside the donor route. A reviewed file from `build` gets a WARN here instead, with `wrong-sensor` when the sensors differ. | Don't use the file on this camera. If you left out `--stock`, add it. Your backup is the only reference that says anything about your camera. If `--stock` has no table of that kind, keep it and look at it with `inspect`, because nothing here can compare a file with it. If your backup was read after the camera was flashed, the table in it is the flashed firmware's. If the camera's own firmware is already gone and the file is another, working camera's, see the donor route ([Recovery, section D](02-RECOVERY.md#the-donor-route)). |
 | `WARN sensor-table` with a match | The table is the same as in `--stock`, and `--stock` is one of the known builds. Or `--stock` is a build nobody has published and the program around the table (bytes 0..0x120000) differs from `--stock`'s, and a different program can drive the same sensor differently. | A match with a known build proves a fit only if your backup was read before the camera was ever flashed ([The first flash, After a flash](01-FIRST-FLASH.md#after-a-flash)). For a different program, check that the `software-region` line lists only the blocks your mod was meant to change. |
+| `WARN sensor-table` without `--stock` | The file carries a known build's table: the SP140A one that v006 and v008_test carry, or v012's for the OmniVision OV9732. Nothing in the file says whether the camera has that sensor. | Run `charmera identify` on the camera's photos, or give `--stock` with a backup read before the camera was ever flashed. |
 | `FAIL ...` several sensor programs | The file, or `--stock`, holds more than one sensor table the code refers to, with different contents, so nothing can tell which one the camera would run, or which one to compare with. | Don't use the file. Rebuild it from your backup. If `--stock` holds them, look at it with `inspect`. |
 | `FAIL ...` ARM vector table | Bytes 0x200..0x240, where the camera starts, differ from `--stock`'s in a file laid out like it, or from those of the known build whose layout the file has. A camera flashed with it may not start far enough to run the card updater again. | Don't use the file. No flag of `stage` accepts it, on any route. Rebuild it from your backup. |
 | `FAIL stamp-camera` | The stamp in the name is the one found in `--stock`, so the camera would ignore the file. | Rebuild it with `pack`, which gives it a fresh stamp. |
-| `FAIL ...` candidate A or B | The file is one of the withdrawn [flash candidates](03-FLASH-CANDIDATES.md), known by its SHA-256. | Don't flash it. Make a file from your own backup instead. |
+| `FAIL ...` candidate A or B | The file is one of the withdrawn [flash candidates](03-FLASH-CANDIDATES.md), known by its SHA-256. | Don't flash it. Make a file with `build`, or from your own backup, instead. |
 | `INFO withdrawn` candidate C | The file is candidate C's bytes, which are also the stock restore file made from the cleaned stock dump. | Treat it as the stock restore file: only for a camera whose own firmware is the public build. |
 | `FAIL from-donor` | The file isn't the donor's firmware unchanged, or it's a mod of it that changes the donor's boot header, vector table or sensor table. | Build it from `--donor` with `pack`. A mod built on it must keep those three. |
 | `FAIL series` | The build marks (build string, stamp, sensor table) weren't found. | Not Charmera firmware, or a damaged copy. Rebuild from a complete dump. |
@@ -195,6 +211,14 @@ charmera verify out\JH_5408202611041200_0F065D55.bin --stock backups\my_backup.b
 charmera stage  out\JH_5408202611041200_0F065D55.bin --card E: --stock backups\my_backup.bin
 ```
 
+With no backup, leave out `--stock`. Both commands then warn that nothing compares the file with the camera, and
+`stage` still writes when you confirm:
+
+```
+charmera verify out\JH_5408202611041200_0F065D55.bin
+charmera stage  out\JH_5408202611041200_0F065D55.bin --card E:
+```
+
 `E:` and `E:\` both work. The plan names the volume (`exFAT, label CHARMERA, 29.7 GiB free of 29.7 GiB, DCIM
 present`) and the destination `E:\JH_5408202611041200_0F065D55.bin`. To confirm, type `E:` back (letter case doesn't
 matter). Windows can't sync a directory the way Linux does, and the read-back may be served from the cache, so even
@@ -206,6 +230,7 @@ an administrator prompt, since this is an ordinary file write.
 ```
 lsblk -o NAME,SIZE,RM,FSTYPE,LABEL,MOUNTPOINTS          # find the card and where it is mounted
 charmera stage out/JH_5408202611041200_0F065D55.bin --card /media/$USER/CHARMERA --stock backups/my_backup.bin
+charmera stage out/JH_5408202611041200_0F065D55.bin --card /media/$USER/CHARMERA   # no backup: warns, still writes
 udisksctl unmount -b /dev/sdb1                           # or the file manager's eject
 ```
 
@@ -224,6 +249,8 @@ mounts under `/run/media/deck/<label>` as well. In Konsole:
 ls /run/media/deck/
 python -m charmera_toolkit stage out/JH_5408202611041200_0F065D55.bin --card /run/media/deck/0123-4567 --stock backups/my_backup.bin
 ```
+
+Without a backup, the same line without `--stock` warns and still writes when you confirm.
 
 The Deck's slot reports the card as `mmcblk0`, which sysfs marks as not removable. `stage` goes by the mmc type
 instead (an SD card is removable), the same rule as `card-check --list`, so the Deck's own slot is accepted. Eject

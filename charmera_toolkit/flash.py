@@ -56,8 +56,9 @@ from .checksum import BLOCK_SIZE, FLASH_SIZE
 MAGIC = b"SPII"
 
 # The marks every Charmera build carries, found by content (they sit at different offsets in different
-# builds): the build string, the 12-digit stamp and the sensor init table. The stamp is the same in both
-# known builds and identifies neither; see charmera_toolkit/image.py.
+# builds): the build string, the 12-digit stamp and the sensor init table (the SP140A one of v006 and v008_test, or
+# v012's OV9732 one). The stamp is the same in every known build and identifies none of them; see
+# charmera_toolkit/image.py.
 BUILD_MARKS = ("build_string", "stamp", "sensor_table")
 
 # 0x1E0000..0x200000 is 0xFF in every known dump.
@@ -80,6 +81,8 @@ CHECKLIST = (
     "  - the camera's battery lead is lifted from its pad and taped, so that the battery and the programmer",
     "    do not both power the board.",
     "  - the clip's pin 1 (red stripe or \"1\") sits on the chip's dot.",
+    "  - you measured the clip with a multimeter, with the programmer plugged in alone and the clip on nothing:",
+    "    pin 8 (VCC) and pin 1 (CS) against pin 4 (GND) both read about 3.3 V. If either reads near 5 V, stop.",
     "If any of these is not so, press Ctrl+C and unplug the programmer: stopping a read harms nothing.",
 )
 
@@ -385,7 +388,10 @@ def build_marks_found(data: bytes) -> Dict[str, Optional[dict]]:
                                                                "value": m.build_string.decode("ascii", "replace")},
         "stamp": None if m.stamp is None else {"offset": f"0x{m.stamp_offset:X}", "value": m.stamp},
         "sensor_table": None if m.sensor is None else {"offset": f"0x{m.sensor.init[0]:X}", "writes": m.sensor.pairs,
-                                                       "sha256": m.sensor.sha256},
+                                                       "sha256": m.sensor.sha256, "sensor": m.sensor.sensor,
+                                                       # what the code drives: OV9732 for a v006 build with our port
+                                                       # (v0.21 to v0.24), which keeps the SP140A table
+                                                       "drives": image_mod.sensor_of(data) or m.sensor.sensor},
     }
 
 
@@ -539,10 +545,9 @@ def public_image_note(source: str) -> List[str]:
         ]
     if source == CLEAN_V006:
         return [
-            f"this image is byte-identical to {source}: the public dump's build v006, with only its",
-            "factory settings record and no stored photos. It is not firmware known to fit this camera: after it",
-            "was flashed, one camera could no longer take pictures; the likely cause is a sensor it does not drive",
-            "(INFERRED).",
+            f"this image is byte-identical to {source}: the public build v006, which drives the SP140A,",
+            "with only its factory settings record and no stored photos. It fits a camera with that sensor. On an",
+            "OV9732 camera it boots but can't take pictures (one camera, 2026-11-06).",
         ]
     return [
         f"this image is byte-identical to the public dump from {source}. It is that dump, or the read",
@@ -799,9 +804,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
             print("Be sure this image is a dump of this camera's own chip.")
         else:
             refusals.append(
-                text + ". After a flash, one camera started but froze in photo and video mode; the likely\n"
-                "cause is a sensor the firmware does not drive (INFERRED). Pass --allow-unknown-build only if you\n"
-                "know this image is this camera's own."
+                text + ". It is not v006, v008_test or v012 (the builds this toolkit knows), or it is damaged.\n"
+                "Pass --allow-unknown-build only for a read of this camera's own chip that you know is good."
             )
     if refusals:
         for r in refusals:
@@ -826,13 +830,15 @@ def cmd_restore(args: argparse.Namespace) -> int:
     print(f"sha256:   {info['sha256']}")
     print("magic:    SPII")
     print(f"build:    {info['build']} ({info['build_label']})")
-    print("          a build match says which public image this is, not whether it fits this camera; two builds share the stamp")
+    print("          a build match says which public image this is, not whether it fits this camera; the known builds share the stamp")
     for k in BUILD_MARKS:
         v = info["build_marks"][k]
         if v is None:
             print(f"mark:     {k.replace('_', ' ')} (missing)")
         elif k == "sensor_table":
-            print(f"mark:     sensor table at {v['offset']}, {v['writes']} writes, sha256 {v['sha256'][:16]}...")
+            print(f"mark:     sensor table at {v['offset']}, {v['writes']} writes" + (" (v012's OV9732 table)" if v.get("sensor") == "OV9732" else "")
+                  + (" (SP140A table with our OV9732 port: drives an OV9732)" if _ported(v) else "")
+                  + f", sha256 {v['sha256'][:16]}...")
         else:
             print(f"mark:     {k.replace('_', ' ')} {v['value']!r} at {v['offset']}")
     print(f"tail:     {'all 0xFF' if info['tail_blank'] else 'NOT all 0xFF (every known dump is)'}")
@@ -874,7 +880,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
         print("The chip already holds this image, byte for byte: nothing to write.")
         return 0
     second_word = print_sensor_comparison(info["build_marks"]["sensor_table"], kept.info["build_marks"]["sensor_table"],
-                                          kept.info["several_sensor_programs"])
+                                          kept.info["several_sensor_programs"], info["public_dump"])
 
     work = Path(tempfile.mkdtemp(prefix="charmera-restore-"))
     copy_path = work / "image.bin"
@@ -892,19 +898,31 @@ def cmd_restore(args: argparse.Namespace) -> int:
             pass
 
 
+def _drives(table: dict) -> str:
+    """The sensor the firmware drives: its table's, unless the code carries our OV9732 port."""
+    return table.get("drives") or table.get("sensor", "SP140A")
+
+
+def _ported(table: dict) -> bool:
+    """An SP140A table in code that carries our OV9732 port (v0.21 to v0.24): that firmware drives an OV9732."""
+    return table.get("sensor", "SP140A") == "SP140A" and _drives(table) == "OV9732"
+
+
 def _table_text(table: Optional[dict]) -> str:
     if table is None:
         return "none of the kind the known builds use"
-    return f"{table['writes']} writes at {table['offset']}, sha256 {table['sha256'][:16]}..."
+    return (f"{table['writes']} writes at {table['offset']}" + (" (OV9732)" if table.get("sensor") == "OV9732" else "")
+            + (" (OV9732 port)" if _ported(table) else "") + f", sha256 {table['sha256'][:16]}...")
 
 
 def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[dict],
-                            chip_several: Sequence[dict] = ()) -> Optional[List[str]]:
+                            chip_several: Sequence[dict] = (), image_source: Optional[str] = None) -> Optional[List[str]]:
     """The image's sensor table against the one on the chip now (build_marks_found's entries; chip_several is
     analyze_image's several_sensor_programs of the chip). When the two are not the same, one of them missing included,
     and when the chip's code refers to several programs with different tables, restore asks a second word before it
     writes: the lines it prints then are returned. None when the tables are the same, or when neither side has one and
-    nothing can be compared."""
+    nothing can be compared. image_source is the image's public dump name (PUBLIC_DUMPS), if it is one: a cleaned stock
+    copy written over firmware for the other sensor is the expected case, not a donor's image."""
     print(f"sensor:   image {_table_text(image_table)}")
     if chip_several:
         print(f"          chip  {len(chip_several)} sensor programs the code refers to, with different tables:")
@@ -913,6 +931,9 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
     else:
         print(f"          chip  {_table_text(chip_table)}")
     indent = " " * 10
+    names = {"OV9732": "the OmniVision OV9732", "SP140A": "the SP140A-class sensor"}
+    other_sensor = (image_table is not None and chip_table is not None and not chip_several
+                    and _drives(image_table) != _drives(chip_table))
     if chip_several:
         # Which of them sets up the sensor cannot be told, so the image's table is not the same as the chip's, whichever
         # it is (verify refuses such a --stock).
@@ -925,6 +946,10 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
         _note(["Neither the image nor the chip holds a sensor table of the kind the known builds use, so nothing",
                "here can compare the two."], indent)
         return None
+    elif other_sensor:
+        first = [f"DIFFERENT: the image drives {names[_drives(image_table)]}, the firmware on the chip drives",
+                 f"{names[_drives(chip_table)]}."]
+        ask = ["The image and the firmware on the chip drive different image sensors (the sensor lines above)."]
     elif image_table is not None and chip_table is not None and image_table["sha256"] == chip_table["sha256"]:
         _note(["The same table: the image sets up the image sensor as the firmware on the chip does. That",
                "firmware fits this camera only if it is the one the camera came with, not one flashed onto it since."],
@@ -944,6 +969,15 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
         first = ["DIFFERENT: the image sets up the image sensor differently from the firmware on the chip."]
         ask = ["The image sets up the image sensor differently from the firmware on the chip (the sensor lines",
                "above): nothing here can tell whether that firmware fits this camera."]
+    if other_sensor and image_source in (CLEAN_V006, CLEAN_V012):
+        sensor = names[_drives(image_table)]
+        _note(first + [
+               "Expected when you're writing the stock build for this camera's sensor over firmware for the other",
+               f"one. Write it only if this camera has {sensor}.",
+               "Recovery, section B, says how to tell. The read kept above is the way back."], indent)
+        return ask + [f"Write it if this camera has {sensor}."]
+    if other_sensor:
+        ask = ask + ["Nothing here can tell whether that firmware fits this camera."]
     _note(first + [
            "Nothing here can tell whether that firmware fits this camera: compare the marking on this camera's",
            "sensor module with the one in the camera the image was read from, and even matching markings leave",
@@ -1081,7 +1115,8 @@ def register(subparsers) -> None:
     probe = subparsers.add_parser(
         "probe",
         help="detect the flash chip through flashrom (read-only)",
-        description="Print the checklist (3.3 V programmer, battery lead lifted, pin 1 on the dot), show flashrom's "
+        description="Print the checklist (3.3 V programmer, the multimeter check that pin 8 and pin 1 to pin 4 read "
+        "about 3.3 V, battery lead lifted, pin 1 on the dot), show flashrom's "
         "version and ask it to detect the chip on the programmer. Never reads or writes the chip contents.",
     )
     _add_common(probe)

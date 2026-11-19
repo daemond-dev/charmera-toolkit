@@ -1,8 +1,10 @@
 """charmera build: make a firmware update file from a base (the stock firmware of one build) and the mods chosen.
 
-The same recipes the Android app builds from (recipes.json). The result is written only when it is the reviewed file
-listed for that combination, so a file this command writes is byte for byte one the project generated and published
-by SHA-256. It is then checked with verify, as any update file is.
+The same recipes the Android app builds from (recipes.json). From a public copy (--download, or --dump with one of the
+listed dumps) the result is written only when it is the reviewed file listed for that combination, so it is byte for
+byte one the project generated and published by SHA-256. --dump also takes your own read of a v006 or v012 chip: the
+mods still check the bytes they replace, but the file carries your camera's own settings, so no published hash matches
+it and it is labelled as not a reviewed file. Either way it is then checked with verify, as any update file is.
 
   charmera build --list
   charmera build --base v012 --mods volume-led,exif --download --out DIR
@@ -79,11 +81,15 @@ def handler(args) -> int:
     try:
         if args.dump:
             dump = Path(args.dump).read_bytes()
-            entry = R.dump_for(dump, doc)
+            try:
+                entry = R.dump_for(dump, doc)
+            except R.RecipeError:
+                entry = R.own_read(dump, doc)
             if args.base and args.base != entry["build"]:
                 print(f"error: --dump is base {entry['build']}, not {args.base}")
                 return 2
-            got = f"{args.dump} ({entry['id']})"
+            got = (f"{args.dump} (your own read of a {entry['build']} chip)" if entry["copy"] == "own"
+                   else f"{args.dump} ({entry['id']})")
         elif args.download:
             if not args.base:
                 print("error: --download needs --base (v006, v008_test or v012)")
@@ -99,7 +105,7 @@ def handler(args) -> int:
         else:
             print("error: give --dump FILE or --download (with --base), or --list")
             return 2
-        made = R.make(dump, (args.mods or "").split(","), doc)
+        made = R.make(dump, (args.mods or "").split(","), doc, own=bool(args.dump))
     except R.RecipeError as exc:
         print(f"error: {exc}")
         return 1
@@ -117,14 +123,22 @@ def handler(args) -> int:
     print(f"built  {made.label}")
     print(f"from   {got}")
     print(f"file   {dest}")
-    print(f"sha256 {made.sha256}  (the reviewed file: recipes.json)")
+    if made.reviewed:
+        print(f"sha256 {made.sha256}  (the reviewed file: recipes.json)")
+    else:
+        print(f"sha256 {made.sha256}  (NOT a reviewed file)")
+        print("WARN   built from your own read, so it carries your camera's settings and no published hash matches it. "
+              + ("The mods checked the bytes they replace. " if made.mods else "")
+              + "verify, stage and the app check it as they check any file you made yourself.")
     if made.status != "tested":
-        print("WARN   this combination is experimental: built and checked, but not yet tried on a camera. Keep the file "
-              "the camera runs now, to flash it back if something is wrong.")
+        print("WARN   this combination is experimental: built and checked, but not yet tried on a camera. If something is "
+              f"wrong, flash the stock build of the same base back from the card (`charmera build --base {made.base} "
+              "--download`), or the file the camera ran before.")
     if args.no_verify:
         return 0
     from . import verify
-    checks = verify.verify_update(dest, made.data)
+    # A file from an own read with mods differs from its base's software on purpose, as any mod does.
+    checks = verify.verify_update(dest, made.data, allow_modified=not made.reviewed)
     failed = [c for c in checks if not c.ok and c.severity == "fail"]
     warned = [c for c in checks if c.severity == "warn"]
     print(f"verify {len(failed)} failure(s), {len(warned)} warning(s)" + ("" if not failed else ":"))
@@ -133,8 +147,16 @@ def handler(args) -> int:
     if failed:
         return 1
     shown = quote(str(dest))
-    print(f"next   charmera verify {shown} --stock <your backup>   (all the lines; a backup compares it with your camera)")
+    if not made.reviewed:
+        stock = quote(str(args.dump))
+        mod = " --allow-modified" if made.mods else ""
+        print(f"next   charmera verify {shown} --stock {stock}{mod}   (all the lines, compared with your read)")
+        print(f"       charmera stage {shown} --card <the camera's card> --stock {stock}")
+        return 0
+    print(f"next   charmera verify {shown} --stock <your backup>   (compares it with your camera's backup)")
     print(f"       charmera stage {shown} --card <the camera's card> --stock <your backup>")
+    print(f"       no backup: charmera verify {shown}   (it warns that nothing confirms what the camera runs)")
+    print(f"                  charmera stage {shown} --card <the camera's card>")
     return 0
 
 
@@ -145,17 +167,18 @@ def register(subparsers) -> None:
         description=(
             "Make a firmware update file from a base, the stock firmware of one build (v006 and v008_test for SP140A "
             "cameras, v012 for OV9732 cameras: charmera identify says which a camera runs), and the mods chosen. "
-            "The file is written only when it is the reviewed one listed for that combination."),
+            "From a public copy the file is written only when it is the reviewed one listed for that combination. "
+            "From your own read it is written and labelled as not a reviewed file."),
         epilog=("charmera build --list shows every base, mod and combination. --download fetches the base's public "
                 "cleaned copy from the-dumping-grounds' repositories at a fixed commit and checks its SHA-256; "
-                "--dump takes a dump you have (your own read, or a public copy). Experimental combinations are built "
-                "with a warning."),
+                "--dump takes a dump you have: a public copy, or your own read of a v006 or v012 chip (the file made from "
+                "that is not a reviewed file, and says so). Experimental combinations are built with a warning."),
     )
     p.add_argument("--list", action="store_true", help="show the bases, mods and combinations, and exit")
     p.add_argument("--base", choices=("v006", "v008_test", "v012"), help="the base (needed with --download)")
     p.add_argument("--mods", default="", help="comma-separated mod names, e.g. volume-led,exif (none: stock)")
     src = p.add_mutually_exclusive_group()
-    src.add_argument("--dump", help="the dump to build from")
+    src.add_argument("--dump", help="the dump to build from: a public copy, or your own read of a v006 or v012 chip")
     src.add_argument("--download", action="store_true", help="download the base's public dump")
     p.add_argument("--out", default=".", help="folder to write the update file to (default: here)")
     p.add_argument("--no-verify", action="store_true", help="do not run verify on the result")

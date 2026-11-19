@@ -70,6 +70,12 @@ public final class UpdateCheck {
     /** The sensor's reset table: page select 0, register 0x20 = 0, end marker. The init table follows it. */
     public static final byte[] SENSOR_RESET_TABLE = {(byte) 0xFD, 0, 0x20, 0, (byte) 0xFF, (byte) 0xFF};
     static final int SENSOR_PAGE_REGISTER = 0xFD;
+    /**
+     * v012's OV9732 init table starts with this entry, the software reset (u16 register 0x0103, u16 value 1, little
+     * endian), and ends with register 0xFFFF; it is used only with the OV9732 bus context (OV9732_SCCB) in the code
+     * area, and only when there is no SP140A table. As image.py's ov9732_program.
+     */
+    static final byte[] OV9732_INIT_START = {0x03, 0x01, 0x01, 0x00};
 
     /** sha256 of bytes 0..0x120000 (CODE_AREA_END) of the public dump; tests/test_android.py checks it. */
     static final String PUBLIC_CODE_AREA_SHA256 = "a96b29c21a6c20d66df4636797cb13224e06cdb223c3cf6a7ef06dde6a9c0dc7";
@@ -188,8 +194,26 @@ public final class UpdateCheck {
             "v008_test",
             0x218D0, 0x1897C, 0xF5D34);
 
+    /**
+     * The factory build of OV9732 cameras, hashed from the cleaned public copy (charmera_toolkit/image.py V012_BUILD; its
+     * bytes 0..0x170000 are a never-flashed camera's read). Same stamp, compiled Jan 12 2026, source folder v012. It has
+     * no SP140A-style sensor table: it drives the OV9732 through its own driver, whose 167-write init table findMarks
+     * finds as the sensor table (OV9732_INIT_START).
+     */
+    public static final Build V012_BUILD = new Build(
+            "the factory build v012 of OV9732 cameras (same stamp, compiled Jan 12 2026)",
+            SHARED_STAMP,
+            "c93c7b80a0c20b5ec1ec36c415b830172008b9a04b0253563e41c87ebaed3d66",
+            "5c155b9d696230be82d9f612e301500800818eeae60a3f6d5ae0e12d39534629",
+            "5c08c0e1ac6a6c458c7d071e39dbc667867310f6c9611f91919ae2ab8fc12a6f",
+            "718cf3a161fc9961fc79a1c8b5a1ba7016973818c6d634c9a0eef309265361d6",
+            "cf38b73deaf45d2c525aeba7778cae7d7924baed925fa535c2923f132eb659cd",
+            "Jan 12 2026",
+            "v012",
+            0x218D0, 0x1897C, 0xF5D3C);
+
     /** Known builds other than the one a check is run against, named when a file is one of them unchanged. */
-    static final Build[] OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD};
+    static final Build[] OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD, V012_BUILD};
 
     /** JH_ + 4-digit product + 12-digit stamp + _ + 8 hex digits, anywhere in the name (copies get " (1)" added). */
     static final Pattern NAME = Pattern.compile("JH_(\\d{4})(\\d{12})_([0-9A-Fa-f]{8})");
@@ -214,6 +238,8 @@ public final class UpdateCheck {
     /** What a build match does and does not prove. Every build line carries it. */
     static final String NOT_THE_CAMERA = "A build match only says which known build the file was made from. Whether it fits"
             + " your camera shows only in a dump of your camera's own chip, read before it was ever flashed.";
+    /** The route that names a camera's firmware from its photos, as MainActivity titles it. */
+    static final String IDENTIFY_ROUTE = "Identify this camera's firmware";
     /** How the backup gets into the app; the button is named as MainActivity labels it. */
     static final String BACKUP_STEP = "Choose that dump with \"Choose this camera's backup\" and the app compares them.";
     /** The verdict's first sentence for a file that passed its own checks but was compared with no backup. */
@@ -645,6 +671,41 @@ public final class UpdateCheck {
                 break;
             }
         }
+        if (sensorStart < 0 && indexOf(data, OV9732_SCCB, VA_OFFSET, end) >= 0) {
+            // v012's own OV9732 program: 4-byte entries (u16 register 0x0100..0x5FFF, u16 value) from a software reset
+            // to register 0xFFFF, at least 16 writes; the one the code points at wins, else the first one found.
+            int ctx = indexOf(data, OV9732_SCCB, VA_OFFSET, end);
+            for (int at = alignedIndexOf(data, OV9732_INIT_START, VA_OFFSET, end); at >= 0;
+                 at = alignedIndexOf(data, OV9732_INIT_START, at + 4, end)) {
+                int p = at;
+                int n = 0;
+                while (p + 4 <= end) {
+                    int reg = (data[p] & 0xFF) | (data[p + 1] & 0xFF) << 8;
+                    if (reg == 0xFFFF || reg < 0x0100 || reg > 0x5FFF) {
+                        break;
+                    }
+                    n++;
+                    p += 4;
+                }
+                if (p + 4 > end || n < 16 || ((data[p] & 0xFF) | (data[p + 1] & 0xFF) << 8) != 0xFFFF) {
+                    continue;
+                }
+                int ram = at - VA_OFFSET;
+                byte[] literal = {(byte) ram, (byte) (ram >> 8), (byte) (ram >> 16), (byte) (ram >> 24)};
+                int ref = alignedIndexOf(data, literal, VA_OFFSET, end);
+                if (sensorStart < 0 || ref >= 0 && referencedFrom < 0) {
+                    resetStart = ctx;
+                    sensorStart = at;
+                    sensorEnd = p + 4;
+                    pairs = n;
+                    referencedFrom = ref;
+                    bus = 0x6C;
+                }
+                if (ref >= 0) {
+                    break;
+                }
+            }
+        }
         String compiled = null;
         int compiledOffset = -1;
         for (int i = 0; i + 12 <= end && compiled == null; i++) {
@@ -1001,6 +1062,14 @@ public final class UpdateCheck {
                             + " its image-sensor table, while the firmware in your backup refers to its own. The file's"
                             + " program may set up the sensor from a table the app cannot see, so it cannot be compared."
                             + " Do not use this file on this camera from the app.", both));
+                } else if (!ref.sensorSha256.equals(marks.sensorSha256) && drivesOv9732(reference) != drivesOv9732(data)) {
+                    out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", drivesOv9732(reference)
+                            ? "the backup is firmware for the OmniVision OV9732 sensor, and this file drives the"
+                            + " SP140A-class sensor: on that camera it boots but cannot take pictures. Pick firmware for"
+                            + " the OV9732 (Flash custom firmware) instead."
+                            : "the backup is firmware for the SP140A-class sensor, and this file drives the OmniVision"
+                            + " OV9732: on that camera it isn't expected to take pictures. Pick firmware for the SP140A"
+                            + " instead.", both));
                 } else if (!ref.sensorSha256.equals(marks.sensorSha256)) {
                     out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "different from the firmware in"
                             + " your backup: the file drives the image sensor another way. A firmware that drives a"
@@ -1027,6 +1096,10 @@ public final class UpdateCheck {
                             + " that firmware does. That is your camera's own way only if the backup was read before any"
                             + " flash.", both));
                 }
+            } else if (marks.sensorSha256.equals(V012_BUILD.sensorSha256)) {
+                out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "v012's program for the OmniVision"
+                        + " OV9732 sensor. Nothing in the file can tell whether your camera has that sensor. The camera's"
+                        + " photos can (" + IDENTIFY_ROUTE + ")." + unreferenced, fileTable + "."));
             } else if (knownTable) {
                 out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "the same program as the public"
                         + " build's: it drives one image sensor and never checks which one is fitted. Nothing in the"
@@ -1882,7 +1955,7 @@ public final class UpdateCheck {
     }
 
     /** The SCCB context of the OV9732 driver (bus 0x6C, 16-bit registers), in v012 and in our OV9732 port. */
-    static final byte[] OV9732_SCCB = {0x11, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x10, 0x08, 0x6C};
+    public static final byte[] OV9732_SCCB = {0x11, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x10, 0x08, 0x6C};
 
     /** Whether firmware bytes hold the OV9732 driver's SCCB context below the settings bank. */
     static boolean drivesOv9732(byte[] data) {

@@ -36,7 +36,8 @@ public final class IdentifyTest {
         // an empty card: no verdict, the caveats all the same
         Identify.Result r = Identify.identify(new ArrayList<>(), UTC);
         expect("an empty card has no base", r.base == Identify.Base.UNKNOWN && r.confidence == Identify.Confidence.LOW
-                && r.photos == 0 && r.oldest == null && r.conclusion.contains("no photos"));
+                && r.photos == 0 && r.oldest == null && r.conclusion.contains("no photos")
+                && r.conclusion.contains("Take two or three with the camera first"));
         expect("the two caveats are always there", r.caveats.contains(Identify.CAVEAT_V008)
                 && r.caveats.contains(Identify.CAVEAT_AFTER_FLASH));
         expect("the v008 caveat says both are stock SP140A builds and either base works",
@@ -57,7 +58,7 @@ public final class IdentifyTest {
                 && "DCIM/PICT0003.jpg".equals(r.newest.path));
         expect("bare everywhere is stock v012, high", r.base == Identify.Base.V012
                 && r.family == Identify.Base.V012 && r.confidence == Identify.Confidence.HIGH && r.changes.isEmpty()
-                && r.conclusion.startsWith("This camera runs stock v012.") && r.notStock.isEmpty()
+                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If the camera was flashed after them, it runs something else now.") && r.notStock.isEmpty()
                 && !r.conclusion.contains("does not look stock") && !r.conclusion.contains("v0.21-v0.24"));
         expect("the evidence names both ends", any(r.evidence, "Oldest camera-written: DCIM/PICT0001.jpg")
                 && any(r.evidence, "Newest camera-written: DCIM/PICT0003.jpg"));
@@ -82,7 +83,7 @@ public final class IdentifyTest {
                 && any(r.evidence, "DCIM/PICT0005.jpg: could not be read."));
         expect("the v006 family is stock v006 or v008_test, high", r.base == Identify.Base.V006_FAMILY
                 && r.confidence == Identify.Confidence.HIGH && r.notStock.isEmpty()
-                && r.conclusion.startsWith("This camera runs stock v006 or v008_test."));
+                && r.conclusion.startsWith("These photos were taken by stock v006 or v008_test (an SP140A camera)."));
         expect("the v006 family's base is v006, as identify.py's", r.conclusion.contains("\nBase to build on: v006.")
                 && Identify.baseName(Identify.Base.V006_FAMILY).equals("v006")
                 && Identify.stockName(Identify.Base.V006_FAMILY).equals("v006 or v008_test"));
@@ -99,7 +100,7 @@ public final class IdentifyTest {
         expect("one photo is both the oldest and the newest", r.oldest == r.newest && r.evidence.size() >= 2
                 && !any(r.evidence, "Newest camera-written"));
         expect("a single photo is medium", r.base == Identify.Base.V012 && r.confidence == Identify.Confidence.MEDIUM
-                && r.conclusion.startsWith("This camera runs stock v012."));
+                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If the camera was flashed after them, it runs something else now."));
 
         // only OTHER photos: no verdict
         card = new ArrayList<>();
@@ -120,7 +121,7 @@ public final class IdentifyTest {
         expect("the EXIF mod is not stock, base v012, high", r.base == Identify.Base.V012
                 && r.confidence == Identify.Confidence.HIGH && r.notStock.size() == 1
                 && r.notStock.get(0).startsWith("This camera does not look stock: our EXIF mod (v0.26 or later,"
-                + " Software 'v0.26') is installed") && !r.conclusion.contains("runs stock"));
+                + " Software 'v0.26') is installed") && !r.conclusion.contains("taken by stock"));
         expect("the EXIF mod's install falls between the last bare and the first EXIF photo",
                 r.notStock.get(0).contains("installed between " + Identify.date(card.get(1), UTC) + " and "
                         + Identify.date(card.get(2), UTC)));
@@ -381,14 +382,14 @@ public final class IdentifyTest {
         }
     }
 
-    /** The conclusion, the base line and the base field agree; a "runs stock" line names that same base. */
+    /** The conclusion, the base line and the base field agree; a "taken by stock" line names that same base. */
     static void consistent(String what, Identify.Result r) {
         String name = Identify.baseName(r.base);
         boolean ok = r.base != Identify.Base.UNKNOWN && r.family == r.base
                 && r.conclusion.contains("Base to build on: " + name);
         for (Identify.Base b : Identify.Base.values()) {
             if (b != r.base && b != Identify.Base.UNKNOWN) {
-                ok &= !r.conclusion.contains("runs stock " + Identify.stockName(b))
+                ok &= !r.conclusion.contains("taken by stock " + Identify.stockName(b))
                         && !r.conclusion.contains("show stock " + Identify.stockName(b))
                         && !r.conclusion.contains("Base to build on: " + Identify.baseName(b));
             }

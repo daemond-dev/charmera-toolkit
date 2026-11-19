@@ -15,8 +15,9 @@ fsyncs, renames to the final name, reads the copy back and compares hashes. With
 confirmation nothing is written. `--plan-only` stops after the plan.
 
 --stock is a read of this camera's own chip, the backup the file is compared with. Without it stage still
-writes once the card path is typed back, and says plainly, among the checks and in the plan, that nothing
-compares the file with the camera's own firmware and that a file that does not fit cannot be undone.
+writes once the card path is typed back, and says, among the checks and in the plan, that nothing compares the file
+with the camera's own firmware. A file for the other sensor still boots and is undone from the card (the stock build
+of the right base). A cut-off or non-booting flash needs a chip programmer.
 """
 from __future__ import annotations
 
@@ -461,8 +462,10 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route:
     if stock is None:
         print("No backup of this camera's own flash chip was given, so nothing above compares the file with the firmware the")
         print("camera runs. Before you flash, find out what it runs: read its chip (docs/01-FIRST-FLASH.md, step 1) and pass")
-        print("it as --stock, or run `charmera identify` on its photos. If the flash goes wrong, a backup is the only way")
-        print("back. stage still writes the file if you confirm below.")
+        print("it as --stock, or run `charmera identify` on its photos. A file for the other sensor still boots, and")
+        print("flashing the stock build of the right base from the card undoes it (charmera build --base v006 or --base")
+        print("v012). A flash that is cut off, or firmware that won't boot, needs a chip programmer. stage still writes")
+        print("the file if you confirm below.")
     else:
         print("Keep the --stock file safe. It's the way back if this flash goes wrong. Only a read made before the camera")
         print("was ever flashed says whether a firmware fits it. A read taken after a flash shows what the camera runs now,")
@@ -476,8 +479,8 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route:
               + " puts it back from a card.")
     print("A file made from a public dump is never for a Millennium or CLOT edition, and on an original 2025 series camera")
     print("(matte body, yellow Kodak boot screen) it fits only one whose image sensor its table drives. The body alone")
-    print("proves nothing. A backup of a camera read before it was ever flashed, packed with pack, fits that camera")
-    print("whatever its edition.")
+    print("proves nothing. A backup of a camera read before it was ever flashed fits that camera whatever its edition,")
+    print("made into a file with pack or with charmera build --dump.")
     print("Charge the camera first: a power loss during programming leaves a camera that only a chip programmer can")
     print("recover (docs/02-RECOVERY.md). A 0x1E0000-byte file replaces everything in the camera's own memory, including the")
     print("photos it stored there without a card; a 0x169000-byte file leaves them but the camera empties its photo list.")
@@ -532,8 +535,8 @@ def handler(args) -> int:
     # 1. verify, exactly as the verify command would, with modified software allowed (that is what mods are; the
     # software line is then a WARN, and a changed vector table still fails). Never --allow-unknown-build or
     # --allow-odd-size: an unknown build, a changed image-sensor table or a size other than the two the camera takes
-    # is refused here, and no flag accepts a damaged resource entry. The one exception is the donor route, which needs
-    # --stock and a file that is the donor's firmware unchanged, and says that the fit to this camera is unknown.
+    # is refused here, and no flag accepts a damaged resource entry. The one exception is the donor route: a file that is
+    # the donor's firmware unchanged, with a note that the fit to this camera is unknown (--stock is optional there).
     # Without --stock verify adds its WARN that nothing compares the file with this camera, and stage still writes.
     print(f"verify {src.name}:")
     checks = verify_update(src, image, stock=stock, allow_modified=True, allow_unknown_build=False, allow_odd_size=False, donor=donor,
@@ -628,7 +631,7 @@ def handler(args) -> int:
 
 def register(subparsers) -> None:
     p = subparsers.add_parser("stage", help="copy a verified update file to the root of the camera's SD card (asks before writing)")
-    p.add_argument("file", help="the JH_5408<stamp>_<sum>.bin update file, as written by pack")
+    p.add_argument("file", help="the JH_5408<stamp>_<sum>.bin update file, as written by build or pack")
     p.add_argument("--card", required=True,
                    help="the card's mount point (Linux: /run/media/deck/<label>, /media/<user>/<label>) or drive (Windows: E: or E:\\)")
     p.add_argument("--stock", help="a complete 2 MiB read of this camera's own flash chip (your backup): the file's sensor table, vector "

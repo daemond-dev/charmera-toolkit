@@ -70,7 +70,7 @@ def test_app_names_the_film_mods_build_as_image_py_does():
     for number in (b.stamp_offset, b.build_offset, b.sensor_table_offset):
         assert re.search(rf"0x{number:X}\b", block, re.I), hex(number)
     assert f"compiled {b.compiled}" in block and b.compiled == "Nov 19 2025"
-    assert "OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD}" in java
+    assert "OTHER_KNOWN_BUILDS = {FILM_MODS_BUILD, V012_BUILD}" in java
     restore = Path(os.environ.get("CHARMERA_FILM_MODS_RESTORE", ""))
     if restore.is_file():
         data = restore.read_bytes()
@@ -158,6 +158,30 @@ def _source_tree(data: bytes):
     names = collections.Counter(name for name, _ in found)
     folder = names.most_common(1)[0][0]
     return folder, next(at for name, at in found if name == folder), names[folder]
+
+
+def test_app_names_v012_as_image_py_does():
+    """The third known build, v012 of OV9732 cameras: the same fingerprints, offsets, compile date and source folder as
+    image.V012_BUILD, and the OV9732 init table found the way image.py's ov9732_program finds it."""
+    java = SRC.read_text(encoding="utf-8")
+    block = _build_block(java, "V012_BUILD")
+    b = image.V012_BUILD
+    for text in (b.software_sha256, b.official_sha256, b.sensor_table_sha256, b.vector_table_sha256):
+        assert f'"{text}"' in block, text
+    for number in (b.stamp_offset, b.build_offset, b.sensor_table_offset):
+        assert re.search(rf"0x{number:X}\b", block, re.I), hex(number)
+    assert f'"{b.compiled}",' in block and f'"{b.source_tree}",' in block and b.sensor == "OV9732"
+    assert "OV9732_INIT_START = {0x03, 0x01, 0x01, 0x00};" in java and image.OV9732_INIT_START == bytes.fromhex("03010100")
+    assert "OV9732_SCCB = {0x11, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x10, 0x08, 0x6C};" in java
+    assert image.OV9732_SCCB == bytes.fromhex("1100120000000010086c")
+    find = _bodies(java, "public static Marks findMarks(byte[] data)")[0]
+    assert "if (sensorStart < 0 && indexOf(data, OV9732_SCCB, VA_OFFSET, end) >= 0) {" in find
+    assert "reg == 0xFFFF || reg < 0x0100 || reg > 0x5FFF" in find and "n < 16" in find and "bus = 0x6C;" in find
+    factory = Path(os.environ.get("CHARMERA_FACTORY_DUMP", ""))
+    if factory.is_file():
+        data = factory.read_bytes()
+        assert f'"{hashlib.sha256(data[:0x120000]).hexdigest()}"' in block      # the code area
+        assert hashlib.sha256(data[:0x169000]).hexdigest() == b.official_sha256
 
 
 def test_app_records_each_known_builds_source_folder():

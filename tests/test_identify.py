@@ -57,8 +57,10 @@ def test_one_family_oldest_and_newest(tmp_path, capsys):
     assert f"{first}, {date(T0)}, 0x270-byte header (bare)" in line(out, "oldest:")
     assert f"{last}, {date(T0 + 2 * DAY)}" in line(out, "newest:")
     assert line(out, "photos:").startswith("3 found")
-    assert line(out, "conclusion:") == "This camera runs stock v012: base v012"
+    assert line(out, "conclusion:") == ("The photos were taken by stock v012 (an OV9732 camera): base v012. If the camera was flashed after these photos, it runs something else now")
     assert line(out, "base:") == "v012 (stock firmware of OV9732 cameras)"
+    assert line(out, "next:") == ("charmera build --list, then charmera build --base v012 --mods <mods> --download "
+                                  "--out out/")
     assert line(out, "confidence:").startswith("high:")
     caveats_ok(out)
     assert "not stock:" not in out and "v0.21-v0.24" not in out
@@ -72,7 +74,9 @@ def test_the_v006_family_alone_is_high(tmp_path, capsys):
     put(root, "DCIM/100MEDIA/PICT0002.JPG", still_header(), T0 + DAY)
     code, out = run(capsys, root / "DCIM")
     assert code == 0
-    assert line(out, "conclusion:") == "This camera runs stock v006 or v008_test: base v006"
+    assert line(out, "conclusion:") == ("The photos were taken by stock v006 or v008_test (an SP140A camera): base v006. "
+                                        "If the camera was flashed after these photos, it runs something else now")
+    assert "--base v006 --mods <mods> --download" in line(out, "next:")
     assert line(out, "base:") == "v006 (stock firmware of SP140A cameras)"
     assert line(out, "confidence:").startswith("high:")
     assert line(out, "note:") == identify.OUR_V021_V024
@@ -158,17 +162,22 @@ def test_files_other_software_saved_are_skipped(tmp_path, capsys):
     assert any("PICT0003.JPG" in x and "exif-fix made" in x for x in skipped)
     assert "PICT0001.JPG" in line(out, "oldest:") and "PICT0002.JPG" in line(out, "newest:")
     assert line(out, "confidence:").startswith("high:")          # skipped files do not weaken the stock answer
-    assert "the newest 2 photo file(s) were not the camera's own" in line(out, "note:")
+    assert ("3 photo(s) read say nothing about the camera and were left out: 1 saved again by another program (a phone or "
+            "editor), 1 copies exif-fix made, 1 unreadable or not the camera's own") in line(out, "note:")
 
 
 def test_nothing_usable(tmp_path, capsys):
     root = card(tmp_path)
     code, out = run(capsys, root)
-    assert code == 1 and line(out, "conclusion:") == "no photos found: nothing to conclude"
-    assert "caveat:" not in out
+    assert code == 1 and line(out, "conclusion:") == ("no photos found: nothing to conclude. Take two or three photos with "
+                                                      "the camera on this card first, then run identify again. "
+                                                      + identify.NO_PHOTOS_PROBE)
+    assert "sensor-probe" in identify.NO_PHOTOS_PROBE
+    assert "caveat:" not in out and "next:" not in out
     put(root, "DCIM/100MEDIA/PICT0001.JPG", b"\xff\xd8" + seg(0xE2, b"ICC_PROFILE\x00") + bare_header()[2:], T0)
     code, out = run(capsys, root)
     assert code == 1 and "no dated photo the camera wrote as it is" in line(out, "conclusion:")
+    assert "Take two or three photos with the camera on this card" in line(out, "conclusion:")
     code, out = run(capsys, tmp_path / "missing")
     assert code == 1 and "no such file or folder" in line(out, "problem:")
 
@@ -224,11 +233,12 @@ def test_photos_with_no_file_time_are_left_out_of_the_dating(tmp_path, capsys):
     assert code == 0
     assert line(out, "undated:") == "2 photos have no file time and were left out of the dating"
     assert str(z1) in out and str(z2) in out
-    assert line(out, "conclusion:") == "This camera runs stock v012: base v012"
+    assert line(out, "conclusion:") == ("The photos were taken by stock v012 (an OV9732 camera): base v012. If the camera was flashed after these photos, it runs something else now")
     assert "not stock:" not in out and "PICT0001.JPG" in line(out, "oldest:")
     assert line(out, "photos:").startswith("4 found, 2 headers read")
     data = json.loads(run(capsys, root, "--json")[1])
     assert data["undated"] == [str(z1), str(z2)] and data["stock"] is True
+    assert data["next"] == identify.NEXT.format(base="v012")
     # only undated photos: nothing to date, nothing to conclude
     only = card(tmp_path / "only")
     put(only, "DCIM/100MEDIA/PICT0001.JPG", bare_header(), 0)

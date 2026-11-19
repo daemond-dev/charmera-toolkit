@@ -5,7 +5,7 @@ Read these in order. The first one walks through a flash and links to each of th
 ## Before and during a flash
 
 1. [The first flash](01-FIRST-FLASH.md): start here. The whole path from knowing what the camera runs (a backup, or Identify) to a flashed camera, with the point of no return marked.
-2. [Recovery](02-RECOVERY.md): read it before you flash. How to get a camera back through the SD updater or a CH341A clip, firmware that doesn't fit the camera, and the donor route.
+2. [Recovery](02-RECOVERY.md): read it before you flash, and go there if a flash went wrong. How to get a camera back through the SD updater or a chip programmer, how to fix firmware for the other sensor from the card, and the donor route.
 3. [Flash candidates](03-FLASH-CANDIDATES.md): the three withdrawn files, what each changed, their hashes, and what the flashes on one camera showed.
 4. [Putting the file on the card](04-STAGE.md): how the `stage` command copies an update file to the card, and what each refusal means.
 5. [SD card problems](05-CARDS.md): why Android phones reject a card the camera has used, and the fix.
@@ -26,7 +26,7 @@ Read these in order. The first one walks through a flash and links to each of th
 
 ## Repairing a camera flashed with firmware for the other sensor
 
-14. [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md): why the public firmware can't drive an OV9732 camera, and the plan the bring-up follows.
+14. [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md): why v006 can't drive an OV9732 camera, and the plan the bring-up follows.
 15. [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md): the bring-up firmware versions, what each changes, and what each measured on camera.
 
 ## Also

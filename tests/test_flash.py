@@ -645,10 +645,10 @@ def test_restore_refuses_missing_build_marks_without_flag(fake_flashrom, tmp_pat
     err = capsys.readouterr().err
     assert "no Charmera build marks" in err and "stamp missing" in err
     assert "--allow-unknown-build" in err
-    # the freeze was seen on one camera; its cause is inferred, as public_image_note says
-    assert ("After a flash, one camera started but froze in photo and video mode; the likely cause is a sensor the firmware "
-            "does not drive (INFERRED)") in flat(err)
-    assert "seen on hardware" not in err
+    # it names the builds the toolkit knows, and no longer says "only if this image is this camera's own"
+    assert "It is not v006, v008_test or v012 (the builds this toolkit knows), or it is damaged." in flat(err)
+    assert "only for a read of this camera's own chip that you know is good" in flat(err)
+    assert "only if you know this image is this camera's own" not in flat(err)
     assert not fake_flashrom.wrote_anything()
     # another stamp at the same place is still a Charmera build mark: the stamp is not an identity
     data = bytearray(make_image())
@@ -825,6 +825,62 @@ def test_restore_asks_a_second_time_when_the_sensor_tables_differ(fake_flashrom,
     answers[:] = ["DIFFERENT", "DIFFERENT"]
     assert restore(image, tmp_path / "r3") == 1
     assert not fake_flashrom.wrote_anything()
+
+
+def with_our_ov9732_port(data: bytes) -> bytes:
+    """A v006-style image that also carries our OV9732 port's SCCB context, as v0.21 to v0.24 do: the SP140A table stays."""
+    out = bytearray(data)
+    out[0x40000: 0x40000 + len(image.OV9732_SCCB)] = image.OV9732_SCCB
+    return bytes(out)
+
+
+def test_restore_of_v006_over_a_v024_chip_asks_different(fake_flashrom, tmp_path, monkeypatch, capsys):
+    """A chip running our OV9732 port keeps v006's SP140A table: the same table hash, but it drives an OV9732, so a v006
+    image over it is DIFFERENT, never "The same table"."""
+    data = make_image()
+    image_path = tmp_path / "v006.bin"
+    image_path.write_bytes(data)
+    chip = with_our_ov9732_port(make_image(0x00))
+    marks = flash.analyze_image(chip)["build_marks"]["sensor_table"]
+    assert marks["sensor"] == "SP140A" and marks["drives"] == "OV9732"
+    assert marks["sha256"] == flash.analyze_image(data)["build_marks"]["sensor_table"]["sha256"]
+    fake_flashrom.set_chip(chip)
+    prompts, answers = [], ["RESTORE", "no"]
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert restore(image_path, tmp_path / "r") == 1
+    text = flat(capsys.readouterr().out)
+    assert "The same table" not in text
+    assert "(OV9732 port)" in text
+    assert ("DIFFERENT: the image drives the SP140A-class sensor, the firmware on the chip drives the OmniVision OV9732"
+            in text)
+    assert len(prompts) == 2 and "Type DIFFERENT" in prompts[1] and not fake_flashrom.wrote_anything()
+
+
+def test_a_clean_copy_over_the_other_sensor_is_called_expected(capsys):
+    """The cleaned stock copy written over the other sensor's firmware is the case Recovery B expects: no donor advice."""
+    v006 = flash.analyze_image(make_image())["build_marks"]["sensor_table"]
+    ported = flash.analyze_image(with_our_ov9732_port(make_image(0x00)))["build_marks"]["sensor_table"]
+    ask = flash.print_sensor_comparison(v006, ported, (), flash.CLEAN_V006)
+    text = flat(capsys.readouterr().out)
+    assert "Expected when you're writing the stock build for this camera's sensor" in text
+    assert "sensor module" not in text
+    assert ask and "Write it if this camera has the SP140A-class sensor." in ask
+    flash.print_sensor_comparison(v006, ported)
+    assert "sensor module" in flat(capsys.readouterr().out)
+
+
+def test_inspect_names_our_ov9732_port(tmp_path, capsys):
+    from charmera_toolkit import inspect_cmd
+    path = tmp_path / "v024.bin"
+    data = with_our_ov9732_port(make_image())
+    path.write_bytes(data)
+    inspect_cmd.print_report(path, data)
+    assert "OV9732 port (v0.21 to v0.24): this firmware drives an OV9732" in flat(capsys.readouterr().out)
 
 
 def test_restore_on_a_chip_without_a_sensor_table_asks_a_second_time(fake_flashrom, tmp_path, monkeypatch, capsys):
@@ -1215,7 +1271,7 @@ def test_restore_wrappers_say_restore_reads_the_chip_first(name):
 @pytest.mark.parametrize("name", ["backup.sh", "backup.ps1", "restore.sh", "restore.ps1"])
 def test_wrappers_carry_the_checklist(name):
     comments = wrapper_comments(name)
-    for words in ("a 3.3 V programmer", "Never an unmodified black CH341A board: its data lines run at 5 V",
+    for words in ("a 3.3 V programmer", "Never an unmodified black CH341A board: its data lines run at 5 V", "the multimeter check",
                   "the camera's battery lead lifted from its pad", "the clip's pin 1", "on the chip's dot"):
         assert words in comments, (name, words)
     if name.startswith("backup"):

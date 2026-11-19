@@ -2186,7 +2186,7 @@ public class MainActivity extends Activity {
         if (sel.stock() && Recipe.V006.equals(sel.base)) {
             return "No mods ticked. This is the stock restore file (build v006, unchanged). Write it on "
                     + q(routeTitle(Route.RESTORE)) + ", which compares it with your backup. Without a backup, use"
-                    + " Advanced.";
+                    + " Advanced (" + q(DOWNLOAD) + ").";
         }
         if (Recipe.drivesOv9732(sel)) {
             return "";
@@ -2518,7 +2518,7 @@ public class MainActivity extends Activity {
         tile(routeTitle(Route.REPAIR), repairCustom ? "Custom: " + repairSel.label() + "."
                 : repairSel.name() + " for the OV9732 sensor.", Route.REPAIR);
         tile(routeTitle(Route.PROBE), "Diagnostic only.", Route.PROBE);
-        tile(routeTitle(Route.RESTORE), "Needs this camera's backup.", Route.RESTORE);
+        tile(routeTitle(Route.RESTORE), "Needs this camera's backup. Without one, use Advanced.", Route.RESTORE);
         tile("Test shots", "Shoot the colour card and save the shots.", Route.TEST_SHOTS);
         LinearLayout links = new LinearLayout(this);
         links.setOrientation(LinearLayout.HORIZONTAL);
@@ -2614,8 +2614,8 @@ public class MainActivity extends Activity {
     }
 
     private void renderRepair() {
-        header(routeTitle(Route.REPAIR), "Firmware for cameras with an OmniVision OV9732 sensor. Pick a"
-                + " preset, or Custom to choose a base and mods.");
+        header(routeTitle(Route.REPAIR), "The presets are for OV9732 cameras. Custom has a base and mods for"
+                + " either sensor (SP140A: base v006).");
         // Each step is numbered and shown as the route's flash run says (FlashFlow; refreshSteps).
         Step intro = flowStep(FlashFlow.Step.INTRO, "Before you start", "Flashing replaces the photos kept in the"
                 + " camera's own memory. Photos on the SD card stay.");
@@ -2624,11 +2624,12 @@ public class MainActivity extends Activity {
             repairStarted = true;
             updateButtons();
         }));
-        intro.more("For an original 2025-series camera (matte body, yellow Kodak boot screen) whose sensor is an"
-                        + " OmniVision OV9732. Not sure? Identify the image sensor first.",
+        intro.more("The presets are for an original 2025-series camera (matte body, yellow Kodak boot screen) with an"
+                        + " OmniVision OV9732 sensor. Not sure? Run " + q(routeTitle(Route.IDENTIFY)) + " first. Use "
+                        + q(routeTitle(Route.PROBE)) + " only when the card has no photos from before a flash.",
                 Recipe.V006.equals(repairSel.base) && repairSel.mods.isEmpty()
                         ? repairSel.name() + " is the stock restore file. Write it on " + q(routeTitle(Route.RESTORE))
-                        + ", which compares it with your backup, or on Advanced."
+                        + ", which compares it with your backup, or without a backup on Advanced (" + q(DOWNLOAD) + ")."
                         : "You don't need a backup. The app writes only a reviewed file, checked byte for byte. If"
                         + " nothing confirms which firmware the camera runs (a backup, or Identify), it says so before"
                         + " it writes.",
@@ -2704,8 +2705,8 @@ public class MainActivity extends Activity {
         if (sel.has(Recipe.OV9732_PORT)) {
             return "To go back from " + sel.name() + ", pick another OV9732 version in " + step + " and write it.";
         }
-        return "To go back from " + sel.name() + ", write the stock restore file (" + q(routeTitle(Route.RESTORE))
-                + "), with this camera's backup.";
+        return "To go back from " + sel.name() + ", write the stock restore file: " + q(routeTitle(Route.RESTORE))
+                + " with this camera's backup, or Advanced > " + q(DOWNLOAD) + " without one.";
     }
 
     private void renderProbe() {
@@ -2723,7 +2724,9 @@ public class MainActivity extends Activity {
         write.more("When the camera next opens photo mode, the probe scans the sensor bus, writes SENSOR.TXT to the"
                         + " card, and stops as it does now.",
                 "You don't need a backup. The app writes only the reviewed file, checked byte for byte.",
-                "It changes no boot or update code, and the stock restore file reverses it.");
+                "It changes no boot or update code. On an SP140A camera the stock restore file reverses it. On an OV9732"
+                        + " camera, undo it with stock v012 or v0.25 or later (" + q(routeTitle(Route.REPAIR)) + "), not the"
+                        + " stock restore file.");
         foldWrite(write);
         flashStep();
         removeStep();
@@ -2752,8 +2755,11 @@ public class MainActivity extends Activity {
         backupStep.more("The stock restore file is only for a camera whose backup, read before the camera was ever"
                         + " flashed, shows the public build.",
                 "Several owners report working cameras after flashing it, but what their cameras ran before isn't known.",
-                "The app refuses the public dumps and any read named unverified-read. A camera that stopped taking"
-                        + " pictures after a flash needs the donor route on a computer (docs/02-RECOVERY.md, section D).",
+                "The app refuses the public dumps and any read named unverified-read.",
+                "A camera that stopped taking pictures after a flash has firmware for the other sensor. Flash one that"
+                        + " fits from the card: on an OV9732 camera, stock v012 or v0.25 to v0.27 in "
+                        + q(routeTitle(Route.REPAIR)) + ". Only a camera with a sensor no reviewed build drives needs"
+                        + " the donor route on a computer (docs/02-RECOVERY.md, section D).",
                 "The app can't tell which camera a backup came from, and a backup read after a flash only shows"
                         + " what was flashed. Use one read before this camera was first flashed.",
                 "Keep the backup file somewhere safe. It's the only way back to what the camera runs now.");
@@ -7303,7 +7309,7 @@ public class MainActivity extends Activity {
               .append("The camera has a different sensor from the one this firmware drives. It answers, just at"
                       + " another address, so firmware built for it can fix this.");
         }
-        sb.append("\n\nRegister fingerprint (send SENSOR.TXT so the exact part can be named):");
+        sb.append("\n\nRegister fingerprint (keep SENSOR.TXT: a datasheet can name the exact part from these bytes):");
         for (int i = 0; i < count; i++) {
             int off = 3 + i * REC;
             int a = b[off] & 0xFF;
@@ -7344,7 +7350,15 @@ public class MainActivity extends Activity {
             int off = 3 + i * REC;
             sb.append(hexAddr(b[off] & 0xFF)).append(": ").append(identify16(b, off)).append('\n');
         }
-        sb.append("\nSend SENSOR.TXT so the fingerprint can be confirmed against a datasheet.");
+        boolean ov9732 = false;
+        for (int i = 0; i < count; i++) {
+            int off = 3 + i * REC;
+            if ((b[off + 1 + 0x0A] & 0xFF) == 0x97 && (b[off + 1 + 0x0B] & 0xFF) == 0x32) ov9732 = true;
+        }
+        sb.append(ov9732
+                ? "\nThat's the sensor the factory build v012 drives. Flash stock v012 or v0.25 to v0.27 from the card"
+                  + " (" + q(routeTitle(Route.REPAIR)) + "). The stock restore file can't take pictures on it."
+                : "\nKeep SENSOR.TXT: the fingerprint below is what naming the part from a datasheet needs.");
         sb.append("\n\nRegister fingerprint (16-bit reads; FF = no answer):");
         for (int i = 0; i < count; i++) {
             int off = 3 + i * REC;
@@ -7397,7 +7411,8 @@ public class MainActivity extends Activity {
             return String.format(java.util.Locale.ROOT, "all registers read %02X, likely the wrong sub-address"
                     + " width for this part.", first);
         }
-        return "ID not recognized at 0x300A/0x300B (OmniVision) or 0x3107/0x3108 (SmartSens). Send the file.";
+        return "ID not recognized at 0x300A/0x300B (OmniVision) or 0x3107/0x3108 (SmartSens). Keep SENSOR.TXT: its"
+                + " bytes are what a datasheet comparison needs.";
     }
 
     /** Known OmniVision chip IDs (0x300A/0x300B, or 0x300B/0x300C when 0x300A reads 0), small point-and-shoot parts. */

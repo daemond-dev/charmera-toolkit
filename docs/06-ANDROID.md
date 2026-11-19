@@ -2,15 +2,12 @@
 
 Reading order: 6 of 15 · previous: [SD card problems](05-CARDS.md) · next: [Command reference](07-USAGE.md) · [all docs](README.md)
 
-A phone can do the SD-card route, which covers every normal flash. It can't do the chip-level route
-(CH341A), which you need for the backup (the only way back if a flash goes wrong) and for a camera that no longer
-boots.
-
-On 2026-11-06 the app wrote two files to one camera's card over the camera's own USB-C cable: candidate C (app version
-0.3), then the stock restore file (version 0.4). The camera flashed each one, and flashed C a second time when the
-cable was plugged into it while it was switched off. The writes, the flashes and the cleanup worked as described here.
-Neither file fitted the camera, which is why the first rule below is to know what the camera runs. The parts that are
-still inference are marked.
+A phone can do the SD-card route, which covers every normal flash, and undoes a flash that left the camera booting
+but unable to take pictures. It can't do the chip-level route (a 3.3 V chip programmer such as a CH341A board), which
+you need for the backup and for a camera that no longer boots. The backup is the only way back to exactly what the
+camera ran, settings included. Without one, a camera that won't boot can still take the public stock file for its
+sensor through a chip programmer ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)).
+The parts that are still inference are marked.
 
 ## Before you flash from a phone
 
@@ -18,9 +15,9 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 
 - Know what your camera runs before you flash: a backup of its chip, or **Identify this camera's firmware** (`charmera
   identify` on a computer). Without either, the app warns but doesn't refuse. The backup is a dump of this camera's
-  flash chip, read with a CH341A clip on a computer ([step 1 of The first
-  flash](01-FIRST-FLASH.md#1-know-what-your-camera-runs-back-up-its-chip)). It's the only way back if a flash goes
-  wrong, and the app compares the update file's image-sensor set-up with it (`verify --stock <backup>` does the same
+  flash chip, read with a 3.3 V chip programmer on a computer ([step 1 of The first
+  flash](01-FIRST-FLASH.md#1-know-what-your-camera-runs-identify-or-a-backup-of-its-chip)). It's the only way back to exactly
+  what the camera ran, settings included, and the app compares the update file's image-sensor set-up with it (`verify --stock <backup>` does the same
   on a computer). Only a dump read before the camera was ever flashed can tell you whether a firmware fits it. After a
   flash the dump holds the flashed firmware, so when that's one of the known builds the app shows a matching sensor
   set-up as a warning ([After a flash](01-FIRST-FLASH.md#after-a-flash)). The app can't tell whose chip a dump came
@@ -41,13 +38,14 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 
 ## The app
 
-[Charmera Card](../android/README.md) does the card part on the phone. It downloads the public stock dump and makes
-the published stock restore file from it, plus two reviewed patches of that same file: the sensor-ID probe and the
-OV9732 bring-up v0.24. From the factory build v012 (its public cleaned copy, which it downloads, or your own read,
-picked on the phone) it makes firmware v0.25, v0.26 and v0.27. With **Custom** it makes any other reviewed combination
-of a base and its mods ([Custom build](#custom-build-pick-a-base-and-mods)). It builds nothing else.
+[Charmera Card](../android/README.md) does the card part on the phone. It identifies the firmware a camera runs from
+the photos on its card. It downloads the stock dump's cleaned copy and makes the stock restore file from it, plus
+reviewed patches of that file: the sensor-ID probe and the OV9732 bring-up v0.23 and v0.24. From the factory build v012
+(its public cleaned copy, which it downloads, or the private read that copy was cleaned from) it makes firmware v0.25,
+v0.26 and v0.27, and stock v012 itself. With **Custom** it makes any other reviewed combination of a base and its mods
+([Custom build](#custom-build-pick-a-base-and-mods)). It builds nothing else.
 
-It compares the restore file with your backup, writes the file to the camera's card over the camera's USB-C cable,
+It compares the file with your backup if you've chosen one, writes the file to the camera's card over the camera's USB-C cable,
 reads it back, and walks you through the flash and the cleanup. Any reviewed file can go to the card without a backup.
 The app warns when nothing confirms which firmware the camera runs, or when your backup's firmware drives the other
 sensor, and leaves the decision to you. A file it doesn't know can go without a backup too, with a loud warning that
@@ -56,8 +54,8 @@ file is checked against it. The app still refuses a file that fails its checks, 
 B, a backup or dump given as the update file, and a write while a backup is still being read or a check is still
 running (wait, and it checks again). It also saves the camera's photos and videos as a zip.
 
-The current version is 0.30. On 2026-11-11 the app wrote the OV9732 bring-up v0.24 (Flash custom firmware) to the
-owner's camera over the camera's USB-C cable, and the camera flashed it. What the camera showed afterwards is in
+The current version is 0.31. On 2026-11-11 the app wrote the OV9732 bring-up v0.24 (Flash custom firmware) to an
+OV9732 camera over the camera's USB-C cable, and the camera flashed it. What the camera showed afterwards is in
 [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md).
 
 Download
@@ -78,12 +76,15 @@ with each result shown right under its button ([the app's routes](../android/REA
   A preset's file (v0.24 to v0.27) loaded with **Use a file on the phone** becomes the pick, so the step and the file
   always name the same version. The menu's last row, **Custom: pick base and mods**, builds any other reviewed
   combination ([below](#custom-build-pick-a-base-and-mods)). A factory dump you pick on another route is kept, but
-  only this route (and Advanced) makes firmware from it.
+  only this route (and Advanced) makes firmware from it. Not sure which version? v0.26 is Volume/LED plus EXIF dates,
+  and v0.27 adds boot to the last mode and capture flash. The way back to stock is stock v012 (Custom, base v012, no
+  mods).
 - **Identify this camera's firmware** reads the headers of the photos on the card and says which firmware family took
   them, with what to check on the camera ([below](#identify-this-cameras-firmware)). It writes nothing.
 - **Identify the image sensor** writes the sensor-ID probe ([below](#identify-the-image-sensor-the-sensor-id-probe))
   and reads its result.
-- **Restore stock firmware** compares the stock restore file with this camera's backup, then writes it.
+- **Restore stock firmware** compares the stock restore file (v006, SP140A firmware) with this camera's backup, then
+  writes it. It needs the backup. Without one, Advanced writes the same file.
 - **Test shots** shows a colour card on the phone and saves the shots taken of it as a zip with a manifest.
 - **Flash log** lists what was written, flashed, removed and saved, on this phone. **Advanced** has the old all-in-one
   steps: any update file, **Use a file on the phone**, save a copy, write, remove, read the sensor result.
@@ -97,8 +98,8 @@ down on 2026-11-06. If you still have it installed, don't flash with it.
 How the card reaches the app depends on the Android version:
 
 - Android 11 and later: Android doesn't let an app pick the top level of a card in the phone's own SD slot ("Use this
-  folder" is greyed out there). Leave the card in the camera and connect the camera with its USB-C cable. The owner
-  has confirmed that the camera shows its card as a drive on the phone ([below](#through-the-cameras-own-usb-port)). A
+  folder" is greyed out there). Leave the card in the camera and connect the camera with its USB-C cable. The camera
+  shows its card as a drive on the phone ([below](#through-the-cameras-own-usb-port)). A
   USB card reader works too. Both can be picked at their top level.
 - Android 7 to 10: the phone's own SD slot works as well.
 - Only the slot, on Android 11 or later: copy the update file to the card's top level with the Files app
@@ -110,7 +111,14 @@ How the card reaches the app depends on the Android version:
 ## Identify this camera's firmware
 
 This route needs no flash, no backup and no update file, and it writes nothing (not to the card, the flash log or a
-flash run). Choose the camera's drive, then tap **Identify from the photos on the card**.
+flash run). Choose the camera's drive, then tap **Identify from the photos on the card**. Card empty or new? Take two
+or three photos with the camera first. With no photos it says "The card holds no photos. Take two or three with the
+camera first, then identify again. If photo mode freezes and the camera can't take any, Identify the image sensor
+finds the sensor instead."
+
+Photos moved off the card? Copy the camera's originals (the zip's `originals/` folder when delete was on, or the files
+as they came off the card) back into `DCIM`, or run `charmera identify <folder>` on a computer. Date-fixed copies don't
+count.
 
 The app reads the start of the photos in `DCIM`, only up to the start of the picture (videos are only counted), and
 sorts them by file time, as the toolkit's `identify` does. Photos with no file time are left out of the dating. The
@@ -128,9 +136,11 @@ change of family:
 Photos it doesn't recognise (from another camera, edited, or an `exif-fix` copy) are counted and left out. When the
 newest files on the card are such photos, a note says how many were skipped.
 
-The route answers "which stock firmware does this camera run?", assuming a stock camera, so you can pick the base to
-build on. When every dated camera-written photo is one family, it says "This camera runs stock v012" (or "stock v006 or
-v008_test"), with that base (v012, or v006 for the v006 family). Confidence is high when every dated photo was read and
+The route answers "which stock firmware took these photos?", so you can pick the base to build on. When every dated
+camera-written photo is one family, it says "These photos were taken by stock v012 (an OV9732 camera). If the camera
+was flashed after them, it runs something else now." (or "stock v006 or v008_test (an SP140A camera)"), with that
+base (v012, or v006 for the v006 family). Photos taken before a bad flash still say which sensor the camera has, so
+this works on a camera that can't take pictures any more. Confidence is high when every dated photo was read and
 at least 2 camera-written photos agree, and medium for a single photo or a capped read. A v006-family answer adds one
 line: our v0.21-v0.24 write the same header.
 
@@ -160,14 +170,17 @@ base, and **Custom** on Flash custom firmware starts on it (v012 for the factory
 
 If a camera boots to its menu but freezes when it enters photo or video mode, the cause may be an image sensor the
 firmware doesn't drive. The app can build a **sensor-ID probe** (the "Identify the image sensor" route) to find out
-which sensor is fitted. It's a diagnostic and doesn't make the camera take pictures.
+which sensor is fitted. It's a diagnostic and doesn't make the camera take pictures. If the card has photos the camera
+took before any flash, [Identify](#identify-this-cameras-firmware) already tells you: photos taken by stock v012 mean
+an OV9732 camera, and you don't need the probe.
 
 The probe is the stock restore file with a small reviewed patch. Its boot code, update code and image-sensor table are
 the stock restore file's, byte for byte. Only a dead debug routine and the one call that writes the sensor set-up are
 changed. When the camera next enters photo mode, the patch walks the sensor bus across every device address
 (0x08..0x77) with the firmware's own read routine. For each address that answers, it reads the 16-bit chip-ID registers
 (0x3000..0x301F and 0x3100..0x310F) and writes the result to `SENSOR.TXT` in the card's root, then stops as the camera
-does now. The stock restore file puts it back. It's one of the reviewed files the app writes without a backup, like the
+does now. On an SP140A camera the stock restore file puts it back. On an OV9732 camera, undo it with stock v012 or
+v0.25 or later (Flash custom firmware), not the stock restore file. It's one of the reviewed files the app writes without a backup, like the
 presets v0.24 to v0.27.
 
 After flashing it, take the update file off the card first, or the camera re-flashes it on every boot instead of
@@ -198,15 +211,19 @@ no stored photos:
 - file name: `JH_5408202611082300_0FB74B1C.bin`
 - SHA-256: `02e2729cffa4dd835f2b138b4ff4df9be89baecfb96f473665dc4b3411e7d2d5`
 
-To undo it, flash the stock restore file, which the app also makes: `JH_5408202610261427_0F065D55.bin` from the original
-dump, or `JH_5408202610261427_0FB74C24.bin` (SHA-256
+To undo it on an SP140A camera, flash the stock restore file, which the app also makes:
+`JH_5408202610261427_0F065D55.bin` from the original dump, or `JH_5408202610261427_0FB74C24.bin` (SHA-256
 `9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec`) from the cleaned copy. The second has the same bytes
-as the withdrawn candidate C, which was the stock software with factory settings and no photos.
+as the withdrawn candidate C, which was the stock software with factory settings and no photos. If the probe names an
+OV9732, skip the stock restore file, which can't take pictures on that camera, and flash stock v012 or v0.25 to v0.27
+(below), or the bring-up.
 
 ## Repair an OV9732 camera (the OV9732 bring-up)
 
-This is for a camera whose image sensor is an OmniVision OV9732 (the probe above names it) and which was flashed with
-the public build, made for a SuperPix SP140A, so photo and video mode no longer work. The bring-up is the public build
+This is for a camera whose image sensor is an OmniVision OV9732 (Identify on photos from before the flash, or the
+probe above, names it) and which was flashed with the public build, made for a SuperPix SP140A, so photo and video
+mode no longer work. Such a camera can also take the v012 builds below (stock v012, v0.25 to v0.27), since v012 is
+the factory firmware of OV9732 cameras. v0.25 went onto a camera running v0.24 and works. The bring-up is the public build
 with the OV9732 driven in place of the SP140A: its start-up table, its exposure and gain, its black level, and image
 tuning fitted on a colour card against a working camera. From v0.24 it also adds two setup-menu rows after FORMAT:
 **Volume** (system sounds, 0 to 8; it also sets playback volume, and 0 mutes) and **LED** (the automatic flash light,
@@ -226,8 +243,8 @@ Made from the cleaned copy of the stock dump, it's the same code with the factor
 - SHA-256: `8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b`
 
 The stock restore file (`JH_5408202610261427_0F065D55.bin`) is no way back for this camera. It doesn't drive the
-OV9732, so with it photo and video stop working again. The way back from v0.24 is the previous version's file, firmware
-v0.23:
+OV9732, so with it photo and video stop working again. The way back to stock is stock v012 (Custom, base v012, no
+mods), the factory firmware of OV9732 cameras. The way back from v0.24 to the version before is firmware v0.23:
 
 - file name: `JH_5408202611110023_0F061F28.bin`
 - SHA-256: `f0cced2e9cb2c1925d6d20bc54c8002c1543f9710bf5ab90032db316572507b2`
@@ -240,8 +257,8 @@ flash a newer version, you can also keep a copy of the file that works: make it 
 
 ### Firmware v0.25 (the camera's own factory firmware)
 
-v0.25 is the owner's camera's own factory firmware (build v012, read off its chip on 2026-11-13), which drives the
-OV9732 natively, with v0.24's **Volume** and **LED** rows moved over to it. None of the v0.21..v0.24 sensor work is
+v0.25 is the factory firmware of OV9732 cameras (build v012, from a private read of a v012 camera's chip taken on
+2026-11-13), which drives the OV9732 natively, with v0.24's **Volume** and **LED** rows moved over to it. None of the v0.21..v0.24 sensor work is
 carried over, since the factory build has its own start-up table, exposure, white balance and colour. The camera
 starts with Volume 5 and LED On, and photos carry no EXIF date.
 
@@ -253,15 +270,17 @@ storage that it checks again on each use:
   [the-dumping-grounds/charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012) at a
   fixed commit, and uses it only if its SHA-256 is
   `63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c`.
-- Your own read. Pick it with **Use a file on the phone** (for this camera's owner,
-  `charmera_flash_20261113T193627Z.bin`, SHA-256 `08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce`).
-  It replaces the downloaded copy and is used from then on. The cleaned copy, downloaded in a browser, can be picked
-  the same way when the phone can't reach GitHub.
+- A file on the phone. **Use a file on the phone** takes the cleaned copy, downloaded in a browser, when the phone
+  can't reach GitHub, or the private read it was cleaned from (SHA-256
+  `08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce`). It takes no other file as the factory dump,
+  by SHA-256. The file picked replaces the downloaded copy and is used from then on. A read of your own v012 camera
+  goes in as a backup (**Choose this camera's backup**), and the app compares the file with it.
 
 The app makes v0.25 from it the same way the computer build does: the dump's first 0x1E0000 bytes, the internal photo
-slots (0x180000..0x1CB000) blanked, and 172 authored bytes (the source holds only those). The checker doesn't know the
-factory build (it has no SP140A-style sensor table), so for these exact bytes it shows that as a warning instead of a
-failure. Every other check stands. The exact artifact:
+slots (0x180000..0x1CB000) blanked, and 172 authored bytes (the source holds only those). The checker knows the
+factory build v012 and finds its OV9732 set-up table (v012 has its own OV9732 driver, with no SP140A-style table).
+With no backup chosen, the sensor line is a warning that nothing in the file can tell whether your camera has an
+OV9732, and that its photos can (Identify). The exact artifact:
 
 - file name: `JH_5408202611130025_0FA3BF37.bin`
 - SHA-256: `a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0`
@@ -271,8 +290,8 @@ Made from the cleaned copy, it's the same code with the factory settings record:
 - file name: `JH_5408202611130025_0FB76FE9.bin`
 - SHA-256: `bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a`
 
-The way back from v0.25 is v0.24's file, which the app makes: pick v0.24 in the menu. After a v0.25 flash, the flash
-check expects the factory header (no EXIF block).
+The way back to stock is stock v012 (Custom, base v012, no mods). v0.24's file works too: pick v0.24 in the menu.
+After a v0.25 flash, the flash check expects the factory header (no EXIF block).
 
 ### Firmware v0.26 (EXIF dates)
 
@@ -295,7 +314,8 @@ Made from the cleaned copy:
 - file name: `JH_5408202611130026_0FB73D2E.bin`
 - SHA-256: `be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738`
 
-The way back from v0.26 is v0.25's or v0.24's file, both in the menu. After a v0.26 flash, the flash check expects the
+The way back to stock is stock v012 (Custom, base v012, no mods). v0.25's or v0.24's file, both in the menu, work too.
+After a v0.26 flash, the flash check expects the
 0x340-byte header with its APP1 EXIF block (Make Kodak, Model Charmera).
 
 ### Firmware v0.27 (boot to the last mode, capture flash)
@@ -312,9 +332,10 @@ v0.27 is v0.26 plus two changes. Both were tested in an emulator first, then on 
 
 The app makes it the way it makes v0.26, then adds one more layer of 202 authored bytes (build-v027/build_v027.py).
 Photos keep v0.26's EXIF header (Software `v0.26`), so the photo check can't tell v0.26 from v0.27. Check v0.27 on the
-camera. The way back is v0.26's file, in the menu. The exact artifacts:
+camera. The way back to stock is stock v012 (Custom, base v012, no mods). v0.26's file, in the menu, works too. The
+exact artifacts:
 
-- from the owner's read: `JH_5408202611170027_0FA38996.bin`, SHA-256
+- from a private read of a v012 camera: `JH_5408202611170027_0FA38996.bin`, SHA-256
   `108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968`
 - from the cleaned copy: `JH_5408202611170027_0FB73A48.bin`, SHA-256
   `89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639`
@@ -329,8 +350,8 @@ but is never blocked. A mod that can't go with one already ticked is greyed out,
 sensor-ID probe with the OV9732 port or with the Volume and LED rows).
 
 The app makes the pick exactly as `charmera build` does on a computer (charmera_toolkit/recipes.py, from the same
-recipes.json). v012 comes from the factory dump (your own read when the phone keeps one, otherwise the public cleaned
-copy), v006 from the public stock dump, and v008_test from its public file
+recipes.json). v012 comes from the factory dump (the private read when the phone keeps it, otherwise the public
+cleaned copy), v006 from the public stock dump, and v008_test from its public file
 ([the-dumping-grounds/charmera-firmware-v008_test](https://github.com/the-dumping-grounds/charmera-firmware-v008_test),
 at a fixed commit, checked by SHA-256). Each mod is applied only over the bytes it was written for. The result is kept
 only when it's the reviewed file the recipes list for that base, those mods and that dump, under that file's name, and
@@ -345,8 +366,9 @@ drives. With a backup chosen whose firmware drives the other sensor (an SP140A p
 the sensor line becomes a "Wrong sensor?" warning. A wrong-sensor flash boots but can't take pictures. The card updater
 still works, so flashing a file that fits undoes it.
 
-Stock v006 is the stock restore file itself, written on **Restore stock firmware** (which compares the file with your
-backup) or on **Advanced**. A combination the recipes mark experimental says so in the warning line and in the write
+Stock v012 (base v012, no mods) is the factory firmware of OV9732 cameras, unchanged. It's written here like any other
+pick, and it's the way back to stock from every v012 version. Stock v006 is the stock restore file itself, made here
+but written on **Restore stock firmware** (which compares the file with your backup) or on **Advanced**. A combination the recipes mark experimental says so in the warning line and in the write
 confirmation, even when each of its mods has been tested alone. The pick (base and mods) is remembered, and a version
 picked in an older app is moved to its base and mods.
 
@@ -360,8 +382,8 @@ exact files (by SHA-256). Custom's v008_test base comes from its own public file
 | --- | --- | --- |
 | Stock (build v006, SP140A) | [the-dumping-grounds/charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006), `charmera-v006-2025-10-14-clean.bin`: what **Download** fetches, at a fixed commit | `75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082` |
 | Stock, original | benbadio/keychain-camera-plus `dumps/charmera_stock_latest.bin` (commit 209c25a), picked by hand or kept by an older app | `cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f` |
-| Factory (build v012, OV9732) | [the-dumping-grounds/charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012), `charmera-v012-2026-01-12-clean.bin`: what **Make firmware v0.25/v0.26** fetches when the phone has no factory dump, at a fixed commit | `63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c` |
-| Factory, original | the owner's own read, `charmera_flash_20261113T193627Z.bin`, private | `08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce` |
+| Factory (build v012, OV9732) | [the-dumping-grounds/charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012), `charmera-v012-2026-01-12-clean.bin`: what **Make firmware v0.25 to v0.27** fetches when the phone has no factory dump, at a fixed commit | `63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c` |
+| Factory, original | a private read of a v012 camera, the one the cleaned copy was made from | `08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce` |
 
 A cleaned copy has the original's bytes up to 0x170000 (boot header, code, data, resources) unchanged. Only its factory
 settings record is kept, and its stored photos are erased. So each file made from it is the same firmware as the one
@@ -369,19 +391,28 @@ made from the original, under its own name and SHA-256 (both are listed above), 
 settings. The candidates C, A and B are the same file from either copy. The app recognises both files of each version,
 so a copy saved by an older app still counts as that version.
 
-## What the phone has to do
+## Without the app
+
+Everything above is the app's route, and its presets and Custom picks need nothing from this section. This is the
+route without it: a file made with the toolkit on a computer or in Termux, then copied to the card by hand (or picked
+in the app's Advanced page to be checked and written).
 
 The camera flashes itself. On power-on it looks in the card root for a file named `JH_5408<stamp>_<sum>.bin`, checks the
 sum in the name, and writes the file to its own flash ([Image layout](11-FORMAT.md)). So all the phone has to do is put
 the right file, with its name unchanged, in the top folder of the card.
 
-## 1. Get the update file
+### 1. Get the update file
 
-Build it from your own backup, the dump of this camera's chip from
-[step 1 of The first flash](01-FIRST-FLASH.md#1-know-what-your-camera-runs-back-up-its-chip), and check it against that
-backup. This route needs the backup, because it's both the file's input and its `--stock`. Never build the file from
-the public dump, and never give the public dump as `--stock`. Compared with itself, a file always matches, and then
-nothing is compared with your camera.
+There are two kinds of file:
+
+- A reviewed build, the same files the app makes: `charmera build --list`, then for example `charmera build --base
+  v012 --mods volume-led,exif --download --out out/` (the base Identify named; `--base v012` with no `--mods` is stock
+  v012). Check it with `charmera verify <the file>`, with `--stock <your backup>.bin` if you have one. Without a
+  backup, verify warns that nothing confirms what the camera runs.
+- A file from your own backup, the dump of this camera's chip from
+  [step 1 of The first flash](01-FIRST-FLASH.md#1-know-what-your-camera-runs-identify-or-a-backup-of-its-chip), checked against that
+  backup. Here the backup is both the file's input and its `--stock`. Never give the public dump as `--stock`.
+  Compared with itself, a file always matches, and then nothing is compared with your camera.
 
 Either build it on a computer or the Steam Deck and copy it to the phone, or build it on the phone in Termux (from
 F-Droid). The toolkit is plain Python with no extra packages, so it should run there, but that's untested.
@@ -393,6 +424,10 @@ charmera pack --input <your backup>.bin --out out/restore/ --i-understand-this-f
 charmera verify out/restore/JH_5408<stamp>_<sum>.bin --stock <your backup>.bin
 ```
 
+`charmera build --dump <your backup>.bin --mods ... --out out/` builds the same mods from your own read of a v006 or v012
+chip, if its firmware is still stock v006 or v012 byte for byte (a read taken before the camera was ever flashed).
+The file keeps your camera's settings, isn't a reviewed file, and says so.
+
 Without git, download the repository as a ZIP in the phone's browser and run
 `pip install ~/storage/downloads/charmera-toolkit-main.zip` instead.
 
@@ -403,16 +438,13 @@ is intended ([The first flash, step 3](01-FIRST-FLASH.md#3-verify)).
 Run `termux-setup-storage` once if you want Termux to read files from the phone's Downloads folder
 (`~/storage/downloads`).
 
-## 2. Get the card readable by the phone
+### 2. Get the card readable by the phone
 
-This is the real obstacle. A card the camera has used is exFAT with its "volume dirty" flag set, because the camera
-never clears it, and Android refuses to mount such a card ([SD card problems](05-CARDS.md)). There are two ways round
-it:
+This is the real obstacle for a card in a reader or the phone's slot. A card the camera has used is exFAT with its
+"volume dirty" flag set, because the camera never clears it, and Android refuses to mount such a card ([SD card
+problems](05-CARDS.md)). There are two ways round it:
 
-- Format the card in the phone (Settings, Storage, the SD card, Format, as portable storage). This erases the card, so
-  copy its photos off first. Android writes a clean exFAT or FAT32 volume. The camera reads both file systems, so it
-  should read a phone-formatted card, but that's inference, not tested.
-- Or, on a computer or the Steam Deck, clear the flag without erasing anything:
+- On a computer or the Steam Deck, clear the flag without erasing anything:
 
   ```
   charmera card-fix /dev/sdX --clear-dirty     # Linux, the whole card; on Windows the card's drive letter, e.g. E:
@@ -421,10 +453,14 @@ it:
   `card-check` first tells you which disk is the card and prints this command for it. Finding the right disk and
   unmounting it are covered in [SD card problems](05-CARDS.md#find-the-right-disk-first). Don't use `--format-fat32`
   for this, because it erases the card.
+- Or format the card in the phone (Settings, Storage, the SD card, Format, as portable storage). This erases the card,
+  photos included, and Identify needs those photos. Copy them off first, and run Identify on them before you format if
+  you haven't. Android writes a clean exFAT or FAT32 volume. The camera reads both file systems, so it should read a
+  phone-formatted card, but that's inference, not tested.
 
 The flag comes back once the camera has written to the card again.
 
-## 3. Copy the file to the card root
+### 3. Copy the file to the card root
 
 Use the phone's Files app to copy the `.bin` file to the top level of the SD card, not into `DCIM` or any other folder.
 Then check that the name is exactly what `pack` printed, including the 8-character sum after the underscore. Some apps
@@ -443,7 +479,7 @@ everything written has reached the card.
 write to its own folder on a removable card (`Android/data/com.termux/files`), not to the root, which is where the
 camera looks.
 
-## 4. Flash
+### 4. Flash
 
 Go through the list in [Before you flash from a phone](#before-you-flash-from-a-phone) once more: you know what the
 camera runs, your backup (if you made one) is kept somewhere safe, it's an original 2025 series body, the battery is
@@ -464,15 +500,19 @@ flash](01-FIRST-FLASH.md#5-flash-the-point-of-no-return):
 ## Through the camera's own USB port
 
 When it's connected by USB, the camera presents its card as a storage device (USB ID 1B3F:8301, "GENPLUS USB-MSDC DISK
-A"), so the card can stay in the camera. On 2026-11-06 the drive appeared on an Android phone connected over USB-C, the
-app wrote an update file to it, and the camera flashed that file at its next power-on. The cleanup over the same cable
-worked too.
+A"), so the card can stay in the camera. On 2026-11-06 the drive appeared on an Android phone connected over USB-C, and
+the app wrote two files to it: candidate C (app version 0.3), then the stock restore file (version 0.4). The camera
+flashed each one at its next power-on, and flashed C a second time when the cable was plugged into it while it was
+switched off. The cleanup over the same cable worked too. Neither file fitted that camera, which is why the first rule
+is to know what the camera runs.
 
 The same run showed two things. Plugging the cable into a switched-off camera switches it on and runs the updater from
 the card, so never connect a camera with an update file on its card unless you want that flash. And the camera looks
-for the file only in the first five seconds after power-on, so it doesn't notice a file added while it runs. The same
-dirty-flag problem applies. The app's screens for this route are in its README:
-[the app's steps](../android/README.md#use).
+for the file only in the first five seconds after power-on, so it doesn't notice a file added while it runs. In that
+run the camera's drive mounted and took the writes. Whether Android can refuse the camera's drive for the dirty flag,
+as it refuses the same card in a reader, hasn't been tested. If it ever offers to format it, don't: that erases the
+photos Identify reads. Clear the flag with `card-fix` on a computer instead ([section 2](#2-get-the-card-readable-by-the-phone)).
+The app's screens for this route are in its README: [the app's steps](../android/README.md#use).
 
 1. Connect the camera the way the app's Camera drive step says: switch it off if it's on, take the card out, switch it
    on with its power key, wait 10 seconds, put the card back in, then connect it to the phone with a USB-C data cable.
@@ -498,9 +538,11 @@ Never switch the camera on with the update file on its card except to flash.
   untested guesswork. The Steam Deck runs flashrom and the toolkit's backup and restore scripts like any Linux machine
   ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)).
 - `card-check` and `card-fix`, which open the raw card device. Android doesn't give apps that access without root.
-- The donor route, for a camera whose own firmware is gone and doesn't fit it
-  ([Recovery, section D](02-RECOVERY.md#the-donor-route)). The app has no donor route. It builds only the reviewed
-  files, and with a backup chosen it refuses a file of your own whose image-sensor set-up differs from that backup.
+- The donor route, for a camera whose own firmware is gone and whose sensor no reviewed build drives
+  ([Recovery, section D](02-RECOVERY.md#the-donor-route)). The app has no donor route for an unreviewed dump from
+  another camera. The v012 builds are reviewed builds for OV9732 cameras, and an OV9732 or SP140A camera that boots
+  but can't take pictures is fixed from the card with a build for its sensor. With a backup chosen, the app refuses a
+  file of your own whose image-sensor set-up differs from that backup.
 
 ---
 

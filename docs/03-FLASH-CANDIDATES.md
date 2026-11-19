@@ -61,9 +61,10 @@ so C, A and B come out byte-identical from the keychain dump and from the cleane
 hashes below may differ.
 
 Before any update file goes on a card, know what your camera runs. That comes from a verified full-flash backup made
-with `backup`, as in [The first flash, step 1](01-FIRST-FLASH.md#1-know-what-your-camera-runs-back-up-its-chip), or
-from `identify`. The backup is also the only way back. You also need an original 2025 series body (matte, yellow Kodak
-boot screen) and a fully charged battery. A Millennium or CLOT body must never receive a file made from this dump.
+with `backup`, as in [The first flash, step 1](01-FIRST-FLASH.md#1-know-what-your-camera-runs-identify-or-a-backup-of-its-chip), or
+from `identify`. The backup is also the only way back to exactly what the camera ran. You also need an original 2025
+series body (matte, yellow Kodak boot screen) and a fully charged battery. A Millennium or CLOT body must never
+receive a file made from this dump.
 
 All three erase the photos the camera stores in its own memory (up to two, taken with no card in), because they're
 packed with `--blank-photos`. Any file you pack with that option does the same. Only your own backup, packed without
@@ -133,8 +134,8 @@ instead, as the stock restore file made from the cleaned copy. The other lines s
 pack) unless it is told the change is intended, and B changes three resource blocks. A and C leave that region
 byte-identical to stock and don't need the flag.
 
-The stamps are fixed so the names reproduce. Any other stamp works too on a camera that runs either known build,
-except `202505201029`, the stamp both builds carry. (With `--stock`, `verify` also refuses the stamp found in your
+The stamps are fixed so the names reproduce. Any other stamp works too on a camera that runs any known build,
+except `202505201029`, the stamp every known build carries. (With `--stock`, `verify` also refuses the stamp found in your
 backup.) The stamp is only in the name. The file's bytes, and so its hash and the checksum part of the name, stay the
 same, and `pack` writes the name.
 

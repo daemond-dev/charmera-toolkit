@@ -7,6 +7,8 @@
 #   - a 3.3 V programmer: a blue CH341A jumpered to 3.3 V, a V1.7 CH341A switched to 3.3 V, a Pico
 #     running pico-serprog or a CH347. Never an unmodified black CH341A board: its data lines run
 #     at 5 V, which can damage the flash chip and the processor that shares its bus.
+#   - the multimeter check: with the programmer plugged in alone and the clip on nothing, pin 8
+#     (VCC) and pin 1 (CS) against pin 4 (GND) both read about 3.3 V. Near 5 V, stop.
 #   - the camera's battery lead lifted from its pad and taped.
 #   - the clip's pin 1 (red stripe or "1") on the chip's dot.
 #

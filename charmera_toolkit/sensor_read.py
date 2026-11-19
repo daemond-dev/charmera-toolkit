@@ -40,7 +40,8 @@ NOTHING_ANSWERED = ("The probe scanned every address on the sensor bus and nothi
                     "its wiring is a hardware fault no firmware can fix.")
 NO_FILE = ("No SENSOR.TXT on the card yet.\n\nFlash the sensor-ID probe and remove the update file, then open Photo "
            "mode on the camera: it stops there as before, but writes the file first. Then bring the card back and "
-           "run sensor-read again.")
+           "run sensor-read again.\n\nTo make the probe: charmera build --base v006 --mods sensor-probe --download "
+           "--out out/, then verify and stage it as any update file.")
 
 
 def ov_name(chip_id: int) -> Optional[str]:
@@ -92,7 +93,13 @@ def identify16(b: bytes, off: int) -> str:
                 "is at a register other than 0x300A/0x3107.")
     if all(v == regs[0] for v in regs):
         return f"all registers read {regs[0]:02X}: likely the wrong sub-address width for this part."
-    return "ID not recognised at 0x300A/0x300B (OmniVision) or 0x3107/0x3108 (SmartSens): send the file."
+    return ("ID not recognised at 0x300A/0x300B (OmniVision) or 0x3107/0x3108 (SmartSens). Keep SENSOR.TXT: its bytes "
+            "are what a datasheet comparison needs.")
+
+
+OV9732_NEXT = ("That's the sensor the factory build v012 drives. Flash stock v012 or v0.25 to v0.27 from the card "
+               "(`charmera build --base v012 --download --out out/`, or Flash custom firmware in the app). The stock "
+               "restore file can't take pictures on it.")
 
 
 def decode_fingerprint16(b: bytes) -> str:
@@ -106,7 +113,10 @@ def decode_fingerprint16(b: bytes) -> str:
         out = (f"A sensor answered at {hex_addr(addrs[0])}, not the 0x3C (bus 0x78) the firmware drives: alive, just "
                "at another address.\n\n")
     out += "".join(f"{hex_addr(b[o])}: {identify16(b, o)}\n" for o in offs)
-    out += "\nSend SENSOR.TXT so the fingerprint can be confirmed against a datasheet."
+    if any((b[o + 1 + 0x0A], b[o + 1 + 0x0B]) == (0x97, 0x32) for o in offs):
+        out += "\n" + OV9732_NEXT
+    else:
+        out += "\nKeep SENSOR.TXT: the fingerprint below is what naming the part from a datasheet needs."
     out += "\n\nRegister fingerprint (16-bit reads; FF = no answer):"
     for o in offs:
         out += (f"\n\n{hex_addr(b[o])}\n  3000-301F: {hex_range(b, o + 1, 32)}"
@@ -131,7 +141,7 @@ def decode_fingerprint(b: bytes) -> str:
         out = (f"A sensor answered at {hex_addr(addrs[0])}, not the 0x3C (bus 0x78) the firmware drives.\n\n"
                "The camera has a different sensor than the firmware targets: it is alive, just at another address. "
                "That is the fixable case: a firmware built for this sensor could work.")
-    out += "\n\nRegister fingerprint (send SENSOR.TXT so the exact part can be named):"
+    out += "\n\nRegister fingerprint (keep SENSOR.TXT: a datasheet can name the exact part from these bytes):"
     for o in offs:
         out += f"\n\n{hex_addr(b[o])}\n  00-1F: {hex_range(b, o + 1, 32)}\n  F0-FF: {hex_range(b, o + 1 + 32, 16)}"
     return out

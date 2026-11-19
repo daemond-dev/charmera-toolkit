@@ -173,7 +173,7 @@ def intro(path: Path) -> str:
     return " ".join(" ".join(lines[:end]).split())
 
 
-@pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "1. Know what your camera runs (back up its chip)"),
+@pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "1. Know what your camera runs (Identify, or a backup of its chip)"),
                                           ("02-RECOVERY.md", "A. The camera boots and the updater runs: restore through the SD card"),
                                           ("03-FLASH-CANDIDATES.md", CANDIDATES_STEPS),
                                           ("06-ANDROID.md", "Before you flash from a phone"),
@@ -205,7 +205,7 @@ def test_the_docs_say_what_stage_does_without_a_backup():
         for wrong in ("nothing in this toolkit or its app will write to a card without", "baked in everywhere",
                       "baked into the commands"):
             assert wrong not in t, f"{rel(path)}: {wrong!r}"
-    for name, heading in (("01-FIRST-FLASH.md", "1. Know what your camera runs (back up its chip)"),
+    for name, heading in (("01-FIRST-FLASH.md", "1. Know what your camera runs (Identify, or a backup of its chip)"),
                           ("04-STAGE.md", "What it does, in order")):
         s = section(name, heading)
         assert re.search(r"without `--stock`,? (?:`stage` |it )shows a WARN line", s, re.I), name
@@ -217,12 +217,16 @@ STAGE_EXAMPLE = re.compile(r"\b(?:charmera|charmera_toolkit)\s+stage\s+[^`\s]")
 
 
 def test_every_stage_example_gives_the_backup():
-    """Every `charmera stage FILE ...` line, in a code block or inline, carries --stock."""
+    """Every `charmera stage FILE ...` line carries --stock, or says it is the no-backup form (on the line or in the
+    five lines before it). Staging without a backup is supported (it warns and still writes), but an example that
+    leaves --stock out has to say so."""
     missing = []
     for path in every_doc():
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for number, line in enumerate(lines, 1):
             if STAGE_EXAMPLE.search(line) and "--stock" not in line:
-                missing.append(f"{rel(path)}:{number}: {line.strip()}")
+                if "no backup" not in " ".join(lines[max(0, number - 6):number]).lower():
+                    missing.append(f"{rel(path)}:{number}: {line.strip()}")
     assert not missing, "\n".join(missing)
 
 

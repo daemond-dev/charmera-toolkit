@@ -206,6 +206,16 @@ public final class CandidatesTest {
             expect("the cleaned v012 copy is refused as a backup and named; the owner's own read is not refused for being"
                     + " public", Candidates.isClean(factory) ? asBackup != null && asBackup.contains("factory build v012")
                     : asBackup == null || !asBackup.contains("public"));
+            // an owner's own read of a v012 chip (other settings, another photo): v012's OV9732 table is its sensor
+            // table, so it is taken as a backup
+            byte[] own = factory.clone();
+            own[0x170300] ^= 0x5A;
+            own[0x1A0000] ^= 0x5A;
+            UpdateCheck.Marks ownMarks = UpdateCheck.findMarks(own);
+            expect("an own read of a v012 chip has v012's 167-write OV9732 table and is taken as a backup",
+                    ownMarks.complete() && ownMarks.sensorStart == 0xF5D3C && ownMarks.sensorPairs == 167
+                    && "718cf3a161fc9961fc79a1c8b5a1ba7016973818c6d634c9a0eef309265361d6".equals(ownMarks.sensorSha256)
+                    && UpdateCheck.backupProblem(own, Candidates.PUBLIC_DUMP_SHA256S) == null);
             byte[] v025 = Candidates.build(factory, Candidates.Kind.V025);   // throws unless it is the reference file
             expect("the factory dump makes the v0.25 reference file", Candidates.Kind.V025.shaFrom(factory).equals(
                     UpdateCheck.sha256Hex(v025, 0, v025.length)) && v025.length == UpdateCheck.UPDATE_SIZE
@@ -222,22 +232,26 @@ public final class CandidatesTest {
                     differ == 172 && allEqual(v025, Candidates.FACTORY_PHOTOS_START, Candidates.FACTORY_PHOTOS_END, 0xFF));
             UpdateCheck.Result withBackup = Candidates.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025, factory);
             UpdateCheck.Result plain = Candidates.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025, null);
-            expect("v0.25 passes with its unknown build marks as a warning, never a failure, and no backup comparison",
+            expect("v0.25 passes with v012's build marks found (its OV9732 table included), and no backup comparison",
                     withBackup.ok && plain.ok && !withBackup.compared && withBackup.referenceSha256 == null
-                    && level(plain, "series") == UpdateCheck.Level.WARN
+                    && level(plain, "series") == UpdateCheck.Level.PASS && level(plain, "sensor-table") == UpdateCheck.Level.WARN
                     && Candidates.Kind.V025.fileNameFor(plain.sha256).equals(plain.cardName));
             expect("every other line UpdateCheck gives v0.25 is unchanged", level(plain, "checksum") == UpdateCheck.Level.PASS
                     && level(plain, "magic") == UpdateCheck.Level.PASS && level(plain, "name") == UpdateCheck.Level.PASS
                     && level(plain, "size") == UpdateCheck.Level.PASS);
-            expect("UpdateCheck alone still refuses v0.25 for its build marks (the warning is Candidates.check's)",
-                    !UpdateCheck.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025).ok);
+            expect("UpdateCheck alone takes v0.25 too: v012 is a build it knows, so nothing is refused for the build marks",
+                    UpdateCheck.check(Candidates.Kind.V025.fileNameFor(UpdateCheck.sha256Hex(v025, 0, v025.length)), v025).ok);
             expect("v0.25 is a reviewed patch and the Repair version it says", Candidates.isReviewedPatch(v025)
                     && Candidates.repairVersion(plain.sha256) == Candidates.Kind.V025);
             byte[] other = v025.clone();
             other[0x62390] ^= 1;
             UpdateCheck.Result changed = Candidates.check(named(other), other, null);
-            expect("a v0.25 with one byte changed is not v0.25: its build marks fail again", !changed.ok
-                    && level(changed, "series") == UpdateCheck.Level.FAIL);
+            expect("a v0.25 with one byte changed is not v0.25, but an unknown v012 file: warned about, not refused",
+                    changed.ok && !Candidates.isReviewedPatch(other) && level(changed, "series") == UpdateCheck.Level.PASS
+                    && level(changed, "build") == UpdateCheck.Level.WARN && level(changed, "software") == UpdateCheck.Level.WARN
+                    && level(changed, "vector-table") == UpdateCheck.Level.PASS
+                    && level(changed, "sensor-table") == UpdateCheck.Level.WARN
+                    && changed.report().contains("v012's program for the OmniVision OV9732 sensor"));
             expect("the factory dump never makes a stock kind", refused(() -> Candidates.build(factory,
                     Candidates.Kind.BRINGUP), "is not exactly firmware v0.24"));
             // v0.26: v0.25 plus the EXIF header, its vendor template part copied from the dump at run time.

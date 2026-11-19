@@ -14,8 +14,9 @@ Families: the "v006 family" is the 0x590-byte Generalplus header (stock v006 or 
 "v012 family" the bare 0x270-byte one (stock v012; OV9732 cameras). The 0x340-byte EXIF-mod header is ours (v0.26 and
 later, built on v012): the camera is not stock, and it is of the v012 family.
 
-- all dated camera-written photos one family: "This camera runs stock v012" (or "v006 or v008_test"), base v012 (or
-  v006); confidence high when the scan was not capped and at least 2 camera-written photos agree, else medium;
+- all dated camera-written photos one family: "The photos were taken by stock v012 (an OV9732 camera)" (or "v006 or
+  v008_test (an SP140A camera)"), base v012 (or v006), and that a flash after these photos leaves the camera running
+  something else; confidence high when the scan was not capped and at least 2 camera-written photos agree, else medium;
 - any EXIF-mod photo: not stock, our EXIF mod is installed, base v012 (the mod is built on it), confidence high; bare
   photos before them date the install. Bare and EXIF-mod photos are one family;
 - two families on the card: not stock (a flash in between, or photos from two cameras), base that of the OLDEST
@@ -55,6 +56,12 @@ CAMERA = {
     photo_id.FAMILY_SP140A: "stock firmware of SP140A cameras",
     photo_id.FAMILY_OV9732: "stock firmware of OV9732 cameras",
 }
+SENSOR = {
+    photo_id.FAMILY_SP140A: "an SP140A camera",
+    photo_id.FAMILY_OV9732: "an OV9732 camera",
+}
+# What to run next with the base identify found.
+NEXT = "charmera build --list, then charmera build --base {base} --mods <mods> --download --out out/"
 SHORT_FAMILY = {
     photo_id.FAMILY_SP140A: "the v006 family (stock v006 or v008_test)",
     photo_id.FAMILY_OV9732: "the v012 family (stock v012)",
@@ -280,6 +287,27 @@ def _families_text(family_runs: List[Dict]) -> str:
             + "): the camera was flashed more than once, or the card holds photos from more than one camera")
 
 
+NO_PHOTOS_PROBE = ("If photo mode freezes and the camera can't take any, the sensor-ID probe finds the sensor instead "
+                   "(Identify the image sensor in the app, or `charmera build --base v006 --mods sensor-probe --download "
+                   "--out out/`)")
+
+
+def _left_out_text(left_out: List[Media]) -> str:
+    """Why the photos read that the camera did not write as they are were left out."""
+    kinds = []
+    resaved = sum(1 for m in left_out if m.kind == "resave")
+    fixed = sum(1 for m in left_out if m.kind == "exif-fix")
+    other = len(left_out) - resaved - fixed
+    if resaved:
+        kinds.append(f"{resaved} saved again by another program (a phone or editor)")
+    if fixed:
+        kinds.append(f"{fixed} copies exif-fix made")
+    if other:
+        kinds.append(f"{other} unreadable or not the camera's own")
+    return (f"{len(left_out)} photo(s) read say nothing about the camera and were left out: " + ", ".join(kinds)
+            + ". `charmera photo-id <file>` says why for one file")
+
+
 def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
     photos, videos, problems = find_media(paths)
     r = Report(photos=len(photos), videos=len(videos), problems=problems)
@@ -296,8 +324,10 @@ def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
     r.scanned = len(scanned)
     r.family_runs = runs(scanned)
     if r.newest is None:
-        r.conclusion = ("no dated photo the camera wrote as it is was found: nothing to conclude"
-                        if photos else "no photos found: nothing to conclude")
+        r.conclusion = (("no dated photo the camera wrote as it is was found: nothing to conclude. Take two or three "
+                         "photos with the camera on this card, then run identify again"
+                         if photos else "no photos found: nothing to conclude. Take two or three photos with the camera on "
+                         "this card first, then run identify again") + ". " + NO_PHOTOS_PROBE)
         return r
     cam = [m for m in scanned if m.camera]
     r.camera_count = len(cam)
@@ -337,7 +367,8 @@ def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
         r.confidence_why = "the EXIF mod's header is ours alone, and the mod is built on v012"
     else:
         r.stock = True
-        r.conclusion = f"This camera runs stock {STOCK[oldest_family]}: base {r.base}"
+        r.conclusion = (f"The photos were taken by stock {STOCK[oldest_family]} ({SENSOR[oldest_family]}): base {r.base}. "
+                        "If the camera was flashed after these photos, it runs something else now")
         whys = []
         if r.camera_count < 2:
             whys.append("only one camera-written photo was found")
@@ -348,7 +379,10 @@ def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
         else:
             r.confidence = "high"
             r.confidence_why = f"all {r.camera_count} camera-written photos read show the same family, oldest to newest"
-    if r.skipped_newest:
+    left_out = [m for m in scanned if not m.camera]
+    if left_out:
+        r.notes.append(_left_out_text(left_out))
+    elif r.skipped_newest:
         r.notes.append(f"the newest {len(r.skipped_newest)} photo file(s) were not the camera's own and were skipped")
     if photo_id.FAMILY_SP140A in families:
         r.notes.append(OUR_V021_V024)
@@ -394,6 +428,7 @@ def report_lines(r: Report) -> List[str]:
             lines.append(f"note:        {n}")
         for c in CAVEATS:
             lines.append(f"caveat:      {c}")
+        lines.append(f"next:        {NEXT.format(base=r.base)}")
     return lines
 
 
@@ -418,6 +453,7 @@ def report_json(r: Report) -> Dict:
         "family": r.family, "family_text": photo_id.FAMILIES.get(r.family) if r.family else None,
         "base": r.base, "confidence": r.confidence, "confidence_why": r.confidence_why or None,
         "conclusion": r.conclusion,
+        "next": NEXT.format(base=r.base) if r.reached else None,
         "notes": r.notes,
         "caveats": CAVEATS if r.reached else [],
         "problems": r.problems,
@@ -446,8 +482,8 @@ def register(subparsers) -> None:
             "the dating and counted. It picks the oldest and the newest dated photo the camera wrote as it is, "
             "skipping files another program saved again and exif-fix copies, and reads the kind of every dated photo "
             "(up to --cap, the oldest and newest always among them). When every photo is from one family it says "
-            "'This camera runs stock v012' (the bare 0x270-byte header; base v012) or 'stock v006 or v008_test' (the "
-            "0x590-byte header; base v006). It also says when the camera doesn't look stock: when it finds our EXIF "
+            "'The photos were taken by stock v012' (the bare 0x270-byte header; base v012) or 'stock v006 or v008_test' "
+            "(the 0x590-byte header; base v006), and prints the build command to run next. It also says when the camera doesn't look stock: when it finds our EXIF "
             "mod's header (v0.26 or later, base v012, the mod's own base), or photos from two families (a flash in "
             "between, or two cameras). With two families, the base follows the oldest, since photos from before a "
             "flash show the stock firmware, and the confidence is low."
@@ -455,8 +491,8 @@ def register(subparsers) -> None:
         epilog=(
             "A photo cannot tell v006 from v008_test (both stock builds for SP140A cameras; either base works the "
             "same for our purposes). Photos show the firmware that took them. The dates are the files' modification "
-            "times, which the camera's clock set. Exit code 0 when a conclusion was reached, 1 when no usable photo "
-            "was found."
+            "times, which the camera's clock set. It needs photos the camera took on this card: take two or three first. "
+            "Exit code 0 when a conclusion was reached, 1 when no usable photo was found."
         ),
     )
     p.add_argument("paths", nargs="+", metavar="PATH", help="a card root, a DCIM folder, another folder or photo/video files")

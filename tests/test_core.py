@@ -874,7 +874,7 @@ def test_verify_names_the_build_and_says_what_a_match_proves(tmp_path, synthetic
     payload = pack.prepare_payload(synthetic_image([make_record()]))
     p = _named(tmp_path, payload)
     by = {c.name: c for c in verify.verify_update(p, payload, allow_modified=True)}
-    assert by["series"].ok and "identifies neither" in by["series"].detail
+    assert by["series"].ok and "identifies none of them" in by["series"].detail
     assert by["build"].ok and "the public dump's build" in by["build"].detail and "says whether it fits" in by["build"].detail
     assert by["stamp-in-file"].severity == "info" and "flashes it again at every power-on" in by["stamp-in-file"].detail
     # a file whose marks sit elsewhere is Charmera firmware of an unknown build: a warning, never a stamp-based pass
@@ -935,7 +935,8 @@ def test_the_source_tree_folder_is_a_build_mark_and_is_shown(tmp_path, capsys, s
     assert "source tree v006 at 0x3a512" in series and "so do their source trees" in series
     assert "the same one does not show the same build" in series and "says whether the file fits a camera" in series
     text = pack.describe(payload, "202611061431")
-    assert "source tree:     v006 at 0x3a512, named by 2 source paths (public-dump: v006, film-mods: v008_test)" in text
+    assert ("source tree:     v006 at 0x3a512, named by 2 source paths (public-dump: v006, film-mods: v008_test, v012: v012)"
+            in text)
     assert image.SOURCE_TREE_PROVES in text
     (tmp_path / "tree.bin").write_bytes(payload)
     assert cli.main(["inspect", str(tmp_path / "tree.bin")]) == 0
@@ -1348,7 +1349,9 @@ def test_without_stock_a_warning_says_nothing_compares_the_file_with_the_camera(
     p = _named(tmp_path, payload)
     by = _checks(p, payload, allow_modified=True)
     assert by["backup"].severity == "warn" and "nothing here compares the file with the camera's own firmware" in by["backup"].detail
-    assert "cannot be undone" in by["backup"].detail and "A backup is the only way back" in by["backup"].detail
+    # the way back without a backup is said as it is: a wrong-sensor flash boots and is undone from the card
+    assert "cannot be undone" not in by["backup"].detail and "the only way back" not in by["backup"].detail
+    assert verify.WAY_BACK in by["backup"].detail and "needs a chip programmer" in verify.WAY_BACK
     # the known table without --stock is a WARN, as in the app, never INFO
     assert by["sensor-table"].severity == "warn"
     backup = tmp_path / "backup.bin"
