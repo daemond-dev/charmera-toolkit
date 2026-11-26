@@ -67,8 +67,8 @@ public class RecipeTest {
         // the selection value: table order, labels and statuses from SETS, serialized and read back
         Recipe.Selection v026 = new Recipe.Selection("v012", "v012/exif", "v012/volume-led");
         expect("mods are kept in the table's order", v026.csv().equals("v012/volume-led,v012/exif"));
-        expect("a set's label and status come from SETS", v026.label().startsWith("v0.26:")
-                && "tested".equals(v026.status()));
+        expect("a set's label and status come from SETS", v026.label().equals(v026.set()[4])
+                && v026.label().equals("v012 with Volume and LED rows and EXIF dates") && "tested".equals(v026.status()));
         expect("an experimental set says so", "experimental".equals(
                 new Recipe.Selection("v012", "v012/capture-flash").status()));
         expect("serialize and parse are inverse", v026.equals(Recipe.parse(v026.serialize()))
@@ -168,16 +168,56 @@ public class RecipeTest {
         boolean presetsOk = presets.length == Candidates.repairVersions().length;
         for (int i = 0; i < presets.length && presetsOk; i++) {
             Candidates.Kind k = Candidates.repairVersions()[i];
-            presetsOk = presets[i].kind() == k && k.version.equals(presets[i].version()) && presets[i].matches(k.sha256)
-                    && presets[i].matches(k.cleanSha256);
+            presetsOk = presets[i].kind() == k && k.firmwareName().equals(presets[i].label())
+                    && presets[i].matches(k.sha256) && presets[i].matches(k.cleanSha256);
         }
         expect("each preset is the set of its version, both copies", presetsOk);
         expect("the legacy kinds are sets", Recipe.of(Candidates.Kind.RESTORE).serialize().equals("v006|")
                 && Recipe.of(Candidates.Kind.PROBE).serialize().equals("v006|v006/sensor-probe")
                 && Recipe.of(Candidates.Kind.BRINGUP).serialize().equals("v006|v006/ov9732-port,v006/volume-led"));
-        expect("a custom set has no version and is named by its label",
-                new Recipe.Selection("v012", "v012/exif").version() == null
-                        && new Recipe.Selection("v012", "v012/exif").name().equals("v012 + EXIF dates"));
+        // names: the base and its mods, never a number (charmera_toolkit/recipes.py firmware_name, same rule)
+        boolean labels = true;
+        for (String[] s : Recipes.SETS) {
+            Recipe.Selection sel = new Recipe.Selection(s[0], s[1].isEmpty() ? new String[0] : s[1].split(","));
+            labels &= s[4].equals(sel.label()) && !s[4].contains("v0.");
+        }
+        expect("every set's label is its name from base and mods", labels);
+        expect("a name lists its mods in the table's order, joined a, b and c",
+                new Recipe.Selection("v012", "v012/capture-flash", "v012/exif", "v012/volume-led", "v012/boot-last-mode")
+                        .label().equals("v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash")
+                && new Recipe.Selection("v012", "v012/exif", "v012/volume-led").label()
+                        .equals("v012 with Volume and LED rows and EXIF dates")
+                && new Recipe.Selection("v012", "v012/exif").label().equals("v012 with EXIF dates")
+                && new Recipe.Selection("v006", "v006/ov9732-port").label().equals("v006 with the OV9732 port")
+                && new Recipe.Selection("v006", "v006/volume-led", "v006/ov9732-port").label()
+                        .equals("v006 with the OV9732 port and Volume and LED rows")
+                && new Recipe.Selection("v006", "v006/sensor-probe").label().equals("v006 with the sensor-ID probe"));
+        expect("a stock pick says what the base's stock firmware is",
+                new Recipe.Selection("v012").label().equals("stock v012 (the factory firmware, unchanged)")
+                && new Recipe.Selection("v006").label().equals("stock v006 (the stock restore file)")
+                && new Recipe.Selection("v008_test").label().equals(
+                        "stock v008_test (the charmera-film-mods restore file, unchanged under a new file name)")
+                && Recipe.firmwareName("v099", java.util.Collections.<String>emptyList()).equals("stock v099"));
+        expect("an unknown mod is named by its id, at the end", new Recipe.Selection("v012", "v012/nope", "v012/exif")
+                .label().equals("v012 with EXIF dates and v012/nope"));
+        expect("the five builds that had a number keep it as their old name, and only they",
+                "v0.23".equals(new Recipe.Selection("v006", "v006/ov9732-port").oldName())
+                && "v0.24".equals(Recipe.of(Candidates.Kind.BRINGUP).oldName())
+                && "v0.25".equals(Recipe.of(Candidates.Kind.V025).oldName())
+                && "v0.26".equals(Recipe.of(Candidates.Kind.V026).oldName())
+                && "v0.27".equals(Recipe.of(Candidates.Kind.V027).oldName())
+                && new Recipe.Selection("v012", "v012/exif").oldName() == null
+                && Recipe.of(Candidates.Kind.RESTORE).oldName() == null);
+        expect("the file check's older-name line", ("Older versions of the app called this v0.27.").equals(
+                Recipe.olderNameNote(Candidates.Kind.V027.sha256)) && ("Older versions of the app called this v0.27.")
+                .equals(Recipe.olderNameNote(Candidates.Kind.V027.cleanSha256))
+                && Recipe.olderNameNote(Candidates.Kind.RESTORE.sha256) == null && Recipe.olderNameNote("ab") == null);
+        expect("the test-shot zip's short tag, from the logged SHA-256 prefix",
+                "v012-volume-led-exif-boot-last-mode-capture-flash".equals(Recipe.fileTag(
+                        Recipe.selectionOfPrefix(Candidates.Kind.V027.sha256.substring(0, 12))))
+                && "v012-stock".equals(Recipe.fileTag(new Recipe.Selection("v012")))
+                && "v006-ov9732-port".equals(Recipe.fileTag(new Recipe.Selection("v006", "v006/ov9732-port")))
+                && Recipe.selectionOfPrefix("ab") == null && Recipe.selectionOfPrefix(null) == null);
         expect("a remembered set is used", Recipe.remembered("v012|v012/exif", "V025")
                 .equals(new Recipe.Selection("v012", "v012/exif")));
         expect("old Kind names migrate to their sets", Recipe.remembered(null, "V026").equals(Recipe.of(Candidates.Kind.V026))

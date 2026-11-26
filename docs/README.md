@@ -27,7 +27,7 @@ Read these in order. The first one walks through a flash and links to each of th
 ## Repairing a camera flashed with firmware for the other sensor
 
 14. [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md): why v006 can't drive an OV9732 camera, and the plan the bring-up follows.
-15. [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md): the bring-up firmware versions, what each changes, and what each measured on camera.
+15. [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md): the bring-up builds, what each changes, and what each measured on camera.
 
 ## Also
 

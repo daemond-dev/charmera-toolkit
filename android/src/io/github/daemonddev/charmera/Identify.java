@@ -20,7 +20,7 @@ import java.util.TreeSet;
  * charmera_toolkit/identify.py.
  *
  * Families: the "v006 family" is the 0x590 Generalplus header (stock v006 or v008_test, SP140A cameras); the "v012
- * family" is the bare 0x270 header (stock v012, OV9732 cameras). The 0x340 EXIF-mod header is ours (v0.26 and later,
+ * family" is the bare 0x270 header (stock v012, OV9732 cameras). The 0x340 EXIF-mod header is ours (every build with EXIF dates,
  * built on v012): the camera is not stock, and it is v012 family. Bare and EXIF-mod photos are one family.
  *
  * Photos with no file time (mtime 0) are left out of the dating: they are counted and named, never read. Among the
@@ -47,8 +47,8 @@ final class Identify {
     static final String CAVEAT_AFTER_FLASH = "Photos show the firmware that took them. On a camera that was flashed,"
             + " or that freezes in Photo mode, only photos from before the flash say what fits.";
     static final String CAVEAT_CLOCK = "Dates and order come from the file times, which come from the camera's clock.";
-    static final String OUR_V021_V024 = "If this camera was ever flashed with our v0.21-v0.24, its photos look like"
-            + " this too.";
+    static final String OUR_OV9732_PORT = "If this camera was ever flashed with our OV9732 port on v006, its photos"
+            + " look like this too.";
     static final String NOT_STOCK = "This camera does not look stock: ";
 
     /** The start of one file (PhotoId.HEADER_LIMIT + 16 bytes, fewer at its end), read only when it is needed. */
@@ -161,7 +161,7 @@ final class Identify {
             case ORIGINAL_BARE:
                 return "v012 family (stock v012, OV9732 cameras)";
             case FACTORY_EXIF:
-                return "our EXIF mod (v0.26 or later), v012 family";
+                return "our EXIF mod, v012 family";
             default:
                 return "not a header a known Charmera build writes";
         }
@@ -516,8 +516,8 @@ final class Identify {
         r.family = oldestFamily;
         r.base = oldestFamily;
         if (r.exifMod) {
-            r.notStock.add(NOT_STOCK + "our EXIF mod (v0.26 or later" + (exifSoftware == null || exifSoftware.isEmpty()
-                    ? "" : ", Software '" + exifSoftware + "'") + ") is installed" + (bareBeforeExif == null ? ""
+            r.notStock.add(NOT_STOCK + "our EXIF mod" + (exifSoftware == null || exifSoftware.isEmpty()
+                    ? "" : " (Software '" + exifSoftware + "')") + " is installed" + (bareBeforeExif == null ? ""
                     : ", installed between " + date(bareBeforeExif, tz) + " and " + date(firstExif, tz)) + ".");
         }
         if (!r.changes.isEmpty()) {
@@ -560,7 +560,7 @@ final class Identify {
                     + " skipped.", r.skippedNewest));
         }
         if (v006Seen) {
-            r.notes.add(OUR_V021_V024);
+            r.notes.add(OUR_OV9732_PORT);
         }
         lines.addAll(r.notes);
         if (r.undated > 0) {

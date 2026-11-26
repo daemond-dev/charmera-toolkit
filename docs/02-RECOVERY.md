@@ -344,12 +344,14 @@ Without a backup of this camera, write the cleaned public copy of the stock buil
 
 | What you have | Sensor | File to write |
 | --- | --- | --- |
-| Photos the camera took before the bad flash with the bare 0x270-byte (624-byte) header or the 0x340-byte (832-byte) EXIF-mod header (our v0.26 and later), or `charmera identify` on them says stock v012 or our EXIF mod | OmniVision OV9732 | `charmera-v012-2026-01-12-clean.bin` from [charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012) |
-| Photos from before the bad flash with the 0x590-byte (1,424-byte) EXIF header, or `identify` says stock v006 or v008_test, unless the camera ever ran our v0.21 to v0.24, which write the same header on OV9732 cameras (then it's OV9732) | SP140A | `charmera-v006-2025-10-14-clean.bin` from [charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006) |
+| Photos the camera took before the bad flash with the bare 0x270-byte (624-byte) header or the 0x340-byte (832-byte) EXIF-mod header (any of our builds with EXIF dates), or `charmera identify` on them says stock v012 or our EXIF mod | OmniVision OV9732 | `charmera-v012-2026-01-12-clean.bin` from [charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012) |
+| Photos from before the bad flash with the 0x590-byte (1,424-byte) EXIF header, or `identify` says stock v006 or v008_test, unless the camera ever ran our OV9732 port on v006, which writes the same header on OV9732 cameras (then it's OV9732) | SP140A | `charmera-v006-2025-10-14-clean.bin` from [charmera-firmware-v006](https://github.com/the-dumping-grounds/charmera-firmware-v006) |
 | No such photos, but `inspect` on the read of the broken chip finds v012's OV9732 table (`718cf3a1…`) or the SP140A table (`aea3976b…`) | the one that table drives (an SP140A table with our OV9732 port, which `inspect` names, means OV9732), with the caveat in item 3 below | the file for that sensor |
 | None of these | unknown | read [section D](#d-firmware-that-does-not-fit-the-camera) before you write anything |
 
-If you flashed our builds before, go by the last one that took good photos: v0.21 to v0.27 all mean OV9732.
+If you flashed our builds before, go by the last one that took good photos. Every build with the OV9732 port and every
+v012 build means OV9732. So does every older numbered build, v0.21 to v0.27
+([Older build names](06-ANDROID.md#older-build-names)).
 
 The microSD card comes out of a dead camera, so read its photos in a computer with `charmera identify <the card>`
 (or the app's Identify route). The header families are listed under [the donor route](#the-donor-route). Once the
@@ -415,7 +417,7 @@ order:
    `RESTORE` when the tables differ, when the chip holds no table of the kind the known builds use (it's blank or
    damaged, or holds another kind of firmware), or when the chip holds several sensor programs. When the two tables
    drive different sensors it names both, for example the v012 copy going onto a chip that a wrong flash left
-   holding v006. It counts our OV9732 port (v0.21 to v0.24) as OV9732, though the port keeps the SP140A table. When
+   holding v006. It counts our OV9732 port (built on v006) as OV9732, though the port keeps the SP140A table. When
    the image is one of the cleaned copies, it says that's expected when you're putting back the build for the camera's
    sensor over a wrong one. Otherwise it says that nothing here can tell whether that firmware fits this camera.
 5. It writes the bytes it checked to a private copy in a temporary folder, prints the exact flashrom command and the
@@ -485,24 +487,25 @@ need to open the camera or have a backup.
 1. Find the sensor, one of two ways.
    - Photos the camera took before the flash. Use the app's "Identify this camera's firmware", or
      `charmera identify <the card>` on a computer (`photo-id` reads single files). "Stock v012" (the bare
-     0x270-byte header) or our EXIF mod (v0.26 and later) means an OV9732 camera, and "stock v006 or v008_test" (the
-     0x590-byte EXIF header) means an SP140A camera, unless the camera ran our v0.21 to v0.24, which write that header
-     too. Photos taken after the flash show the flashed firmware, so only the older ones count.
+     0x270-byte header) or our EXIF mod means an OV9732 camera, and "stock v006 or v008_test" (the 0x590-byte EXIF
+     header) means an SP140A camera, unless the camera ran our OV9732 port on v006, which writes that header too.
+     Photos taken after the flash show the flashed firmware, so only the older ones count.
    - No such photos? Flash the sensor-ID probe. In the app it's "Identify the image sensor". On a computer, make it
      with `charmera build --base v006 --mods sensor-probe --download --out out/`, verify and stage it like any update
      file, open photo mode once, then read the result with `charmera sensor-read <the card>`
      ([the sensor-ID probe](06-ANDROID.md#identify-the-image-sensor-the-sensor-id-probe)). The probe doesn't make
      photo mode work, and the flash in step 2 replaces it.
 2. Flash the build that fits, from the app's "Flash custom firmware" or with `charmera build` (`charmera build
-   --list` shows every version and its `--mods`). This is for the original 2025 series only. For a Millennium or
+   --list` shows every build and its `--mods`). This is for the original 2025 series only. For a Millennium or
    CLOT edition, whether any public build fits is unknown; see [the donor route](#the-donor-route).
    - OV9732: stock v012, the factory firmware of OV9732 cameras (in the app, base v012 with no mods ticked; on a
-     computer, `charmera build --base v012 --download --out out/`), or v0.25 to v0.27, built on it. v0.23 and v0.24,
-     the v006 build changed to drive the OV9732 (`--base v006 --mods ov9732-port`, plus `volume-led` for v0.24),
-     work too. The stock restore file is no way back for this camera. An OV9732 camera that ran v0.24 took
-     v0.25, and both work on it ([OV9732 exposure, colour and white
-     balance](15-OV9732-AE-WB-FLASH-PORT.md#11-v025-the-factory-ov9732-build-with-the-volume-and-led-rows)). v0.24
-     keeps v006's boot and update code byte for byte, so that flash ran v006's own updater. A v012 build flashed over
+     computer, `charmera build --base v012 --download --out out/`), or v012 with any of its mods. v006 with the
+     OV9732 port (`--base v006 --mods ov9732-port`), the v006 build changed to drive the OV9732, works too, with or
+     without the Volume and LED rows (`volume-led`). The stock restore file is no way back for this camera. An OV9732
+     camera that ran v006 with the OV9732 port and Volume and LED rows took v012 with Volume and LED rows, and both
+     work on it ([OV9732 exposure, colour and white
+     balance](15-OV9732-AE-WB-FLASH-PORT.md#11-v025-the-factory-ov9732-build-with-the-volume-and-led-rows)). The v006
+     port keeps v006's boot and update code byte for byte, so that flash ran v006's own updater. A v012 build flashed over
      stock v006 itself hasn't been tried, but the same updater does the work (INFERRED).
    - SP140A: the stock restore file (v006). On a computer, `charmera build --base v006 --download --out out/`. In the
      app, "Restore stock firmware" needs a backup. Without one, use Advanced > Download the stock restore file.
@@ -594,14 +597,14 @@ header, the size, the colour sampling, the JPEG quality on the IJG scale, the co
 and Software, then gives its conclusion ([Command reference](07-USAGE.md#read-only-commands)). The conclusion names
 one of three still-photo headers:
 
-- The v006 / v008_test family (the SP140A builds, and our v0.21 to v0.24): 1,424 bytes, an EXIF block (Make
+- The v006 / v008_test family (the SP140A builds, and our OV9732 port on v006): 1,424 bytes, an EXIF block (Make
   `Generalplus`, Model `CBB3`, Software `20150615`) and the comment `GPEncoder` padded with spaces. VERIFIED from its
   header template, the code that fills it and the two photos stored in the v006 dump. v008_test holds the same,
   VERIFIED by comparing the bytes. A photo can't tell v006 from v008_test.
-- The factory build v012 (OV9732 cameras, and our v0.25): a bare 624-byte header, no EXIF block, and the comment
-  `GPEncoder` alone (VERIFIED: v012 holds only this template).
-- Our EXIF mod (v0.26 and later): 832 bytes, one EXIF block with Make `Kodak` and Model `Charmera` right after the
-  start marker, then v012's bare header.
+- The factory build v012 (OV9732 cameras, and our v012 builds without EXIF dates): a bare 624-byte header, no EXIF
+  block, and the comment `GPEncoder` alone (VERIFIED: v012 holds only this template).
+- Our EXIF mod (any of our v012 builds with EXIF dates): 832 bytes, one EXIF block with Make `Kodak` and Model
+  `Charmera` right after the start marker, then v012's bare header.
 
 A photo the 2026-11-06 camera took on its original firmware has the bare 624-byte header, 1440x1080, IJG quality 80
 (VERIFIED from that photo's first 624 bytes). That's the kind the factory build v012 writes. The v006 family keeps

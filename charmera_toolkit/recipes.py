@@ -7,7 +7,10 @@ android/.../Recipes.java, is generated from it by tools/gen_recipes.py). It list
            (the-dumping-grounds repositories), with the fixed-commit address of the public ones.
   mods     per base: patches ({file_offset, new bytes, SHA-256 of the bytes they replace}) and copies ({from, to, len}:
            vendor bytes taken from the dump at build time, so none are stored here). Every new byte is ours.
-  sets     the combinations offered, each with the stamp its file name carries and whether it was tested on a camera.
+  bases    what each base's stock firmware is, for its name ("stock v012 (the factory firmware, unchanged)").
+  sets     the combinations offered, each with the stamp its file name carries, whether it was tested on a camera, its
+           name (label: firmware_name of its base and mods) and, for the five that had one, the number older versions
+           of the app and the docs called it (old_name, e.g. "v0.27"). The camera never shows either.
   builds   every set made from every dump: the file name and SHA-256 of the result. make() refuses a result that is not
            listed here, so a file it writes is always one this project generated, reviewed and published by hash.
 
@@ -125,10 +128,20 @@ def resolve(base: str, names: Iterable[str], recipes: Optional[dict] = None) -> 
     return tuple(m["id"] for m in chosen)
 
 
+def in_table_order(mod_ids: Sequence[str], recipes: Optional[dict] = None) -> Tuple[str, ...]:
+    """The mods in the table's order, each once, whatever order they were given in; an unknown id is kept at the end
+    (the app's Recipe.Selection orders them the same way)."""
+    recipes = recipes or load()
+    order = [m["id"] for m in recipes["mods"]]
+    known = [i for i in order if i in mod_ids]
+    return tuple(known + [i for i in dict.fromkeys(mod_ids) if i not in order])
+
+
 def set_for(base: str, mod_ids: Sequence[str], recipes: Optional[dict] = None) -> dict:
     recipes = recipes or load()
+    ids = in_table_order(mod_ids, recipes)
     for s in recipes["sets"]:
-        if s["base"] == base and tuple(s["mods"]) == tuple(mod_ids):
+        if s["base"] == base and tuple(s["mods"]) == ids:
             return s
     raise RecipeError(f"base {base} with {', '.join(i.split('/')[-1] for i in mod_ids) or 'no mods'} is not one of "
                       "the reviewed combinations (charmera build --list shows them)")
@@ -221,6 +234,40 @@ def reviewed(sha: str, recipes: Optional[dict] = None) -> Optional[dict]:
     for b in recipes["builds"]:
         if b["sha256"] == sha:
             return b
+    return None
+
+
+def join_and(parts: Sequence[str]) -> str:
+    """"a", "a and b", "a, b and c"."""
+    parts = list(parts)
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def firmware_name(base: str, mod_ids: Sequence[str], recipes: Optional[dict] = None) -> str:
+    """What a build is called: its base and the mods on it, e.g. "v012 with Volume and LED rows and EXIF dates", or
+    "stock v012 (the factory firmware, unchanged)" with no mods. Each mod is named by its phrase in recipes.json, in the
+    table's order whatever order they were given in; an unknown id is named by itself, at the end. The app's
+    Recipe.firmwareName follows the same rule, and every set's label is this name (tests check both)."""
+    recipes = recipes or load()
+    if not mod_ids:
+        stock = next((b["stock"] for b in recipes.get("bases", []) if b["id"] == base), None)
+        return f"stock {base}" + (f" ({stock})" if stock else "")
+    order = [m["id"] for m in recipes["mods"]]
+    phrase = {m["id"]: m["phrase"] for m in recipes["mods"]}
+    known = [i for i in order if i in mod_ids]
+    unknown = [i for i in dict.fromkeys(mod_ids) if i not in phrase]
+    return f"{base} with " + join_and([phrase[i] for i in known] + unknown)
+
+
+def old_name(base: str, mod_ids: Sequence[str], recipes: Optional[dict] = None) -> Optional[str]:
+    """The number an older app and older notes used for this build ("v0.27"), or None. Only five builds had one."""
+    recipes = recipes or load()
+    ids = in_table_order(mod_ids, recipes)
+    for s in recipes["sets"]:
+        if s["base"] == base and tuple(s["mods"]) == ids:
+            return s.get("old_name")
     return None
 
 

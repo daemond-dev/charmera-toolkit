@@ -46,7 +46,10 @@ final class FlashLog {
     static final class Entry {
         final long timeMs;
         final Event event;
-        /** The firmware it concerns, as the app names it ("v0.23", "stock restore", "probe"); "" when none. */
+        /**
+         * The firmware it concerns, as the app named it when it logged it ("v006 with the OV9732 port", "stock
+         * restore", "probe"; an older app wrote numbers such as "v0.23", kept as they are); "" when none.
+         */
         final String firmware;
         /** The start of the file's SHA-256 in lowercase hex; "" when none. */
         final String sha256Prefix;
@@ -206,8 +209,8 @@ final class FlashLog {
     }
 
     /**
-     * The latest camera firmware state the log knows, in one short line, e.g. "v0.23, flash seen 11 Nov 13:02",
-     * or "unknown". Removing the update file and saving a backup say nothing about the firmware and are passed over.
+     * The latest camera firmware state the log knows, in one short line, e.g. "v006 with the OV9732 port, flash seen
+     * 11 Nov 13:02", or "unknown". Removing the update file and saving a backup say nothing about the firmware and are passed over.
      */
     String summary(TimeZone tz) {
         for (int i = 0; i < entries.size(); i++) {
@@ -241,15 +244,25 @@ final class FlashLog {
      * check that follows a write or a flash not seen. Removing the update file and saving a backup are passed over.
      */
     String confirmedFirmware() {
+        Entry e = confirmed();
+        return e == null ? null : e.firmware;
+    }
+
+    /**
+     * The flash seen entry confirmedFirmware() names, so a caller can also read its SHA-256 prefix; null when it names
+     * none. A passed check and the flash seen before it are the same file when their SHA-256 prefixes match, or, when
+     * either has none, when they name the same firmware. So a check this app logged as "v012 with ..." still follows a
+     * flash seen an older app logged as "v0.27".
+     */
+    Entry confirmed() {
         for (int i = 0; i < entries.size(); i++) {
             Entry e = entries.get(i);
             switch (e.event) {
                 case FLASH_SEEN:
-                    return e.firmware.isEmpty() ? null : e.firmware;
+                    return e.firmware.isEmpty() ? null : e;
                 case CHECK_OK:
                     Entry before = olderNaming(i);
-                    return before != null && before.event == Event.FLASH_SEEN
-                            && (e.firmware.isEmpty() || e.firmware.equals(before.firmware)) ? before.firmware : null;
+                    return before != null && before.event == Event.FLASH_SEEN && sameFile(e, before) ? before : null;
                 case FLASH_NOT_SEEN:
                 case WRITTEN:
                 case CHECK_FAILED:
@@ -259,6 +272,17 @@ final class FlashLog {
             }
         }
         return null;
+    }
+
+    /** Whether a passed check is of the file in the flash seen before it (confirmed()). */
+    private static boolean sameFile(Entry check, Entry seen) {
+        if (check.firmware.isEmpty()) {
+            return true;        // a check that names no firmware (the public family's header) takes the one before it
+        }
+        if (!check.sha256Prefix.isEmpty() && !seen.sha256Prefix.isEmpty()) {
+            return check.sha256Prefix.equals(seen.sha256Prefix);
+        }
+        return check.firmware.equals(seen.firmware);
     }
 
     /**

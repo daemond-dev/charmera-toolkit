@@ -294,7 +294,7 @@ def test_release_notes_say_what_the_app_does_now():
     notes = next(line for line in wf.splitlines() if line.strip().startswith('NOTES="'))
     assert "writes nothing without a backup" not in notes
     for part in ("It identifies the firmware the camera runs from its photos",
-                 "(the stock restore file, the sensor-ID probe, v0.23 to v0.27, or Custom)",
+                 "(the stock restore file, the sensor-ID probe, or a base with the mods you tick)",
                  "writes it to the card over the camera's USB-C cable", "It works without a backup",
                  "warns when nothing confirms what the camera runs",
                  "A backup is the only way back to exactly what the camera ran",

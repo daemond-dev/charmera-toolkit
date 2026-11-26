@@ -204,6 +204,8 @@ public class MainActivity extends Activity {
     private LinearLayout customPanel;
     private LinearLayout modBoxes;
     private TextView customWarning;
+    /** The Repair pick's full name ("v012 with Volume and LED rows"), the first line of the write step. */
+    private TextView repairName;
     /** Shown in the Repair write step while the version picked needs the factory dump and none is kept. */
     private TextView factoryHint;
     private Button factoryFileButton;
@@ -1745,23 +1747,20 @@ public class MainActivity extends Activity {
 
     // --- the flash log --------------------------------------------------------------------------------------------
 
-    /** How the log names the firmware a file carries, by its SHA-256. */
+    /**
+     * How the log names the firmware a file carries, by its SHA-256: the probe and the stock restore file by their
+     * routes, any other reviewed build by its name ("v012 with Volume and LED rows"). Entries an older app logged keep
+     * the words it used ("v0.27"): the log is never rewritten.
+     */
     private static String firmwareLabel(String sha) {
-        Candidates.Kind repair = Candidates.repairVersion(sha);
-        if (repair != null) {
-            return repair.version;
-        }
         if (Candidates.Kind.PROBE.matches(sha)) {
             return "probe";
         }
         if (Candidates.Kind.RESTORE.matches(sha)) {
             return "stock restore";
         }
-        String[] set = Recipe.reviewed(sha) == null ? null : Recipe.selectionOf(sha).set();
-        if (set != null) {
-            return set[4];       // any other reviewed build: its set's label ("v012 + EXIF dates")
-        }
-        return "update file";
+        Recipe.Selection made = Recipe.selectionOf(sha);
+        return made != null ? made.label() : "update file";
     }
 
     private void logFlash(FlashLog.Event event, String sha) {
@@ -1883,9 +1882,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The Repair make button's label for a pick: a version by its number, any other pick by its set's label. */
-    private static String makeLabel(Recipe.Selection sel) {
-        return sel.version() != null ? "Make firmware " + sel.version() : "Make " + sel.label();
+    /** The Repair make button's label, the same for every pick: the write step shows the pick's name above it. */
+    private static final String MAKE_FIRMWARE = "Make this firmware";
+
+    /**
+     * A firmware name at the start of a sentence: "Stock v012 (...)" for a stock pick. A name that starts with its
+     * base ("v012 with EXIF dates") stays as it is, since v012 is the build's own name.
+     */
+    private static String cap(String name) {
+        return name.startsWith("stock ") ? "S" + name.substring(1) : name;
     }
 
     /** The dump a base's files are made from, in the write step's words. */
@@ -1924,24 +1929,18 @@ public class MainActivity extends Activity {
 
     /** The file step's line for a factory dump picked on a route that does not use it: kept, and where it is used. */
     private static String factoryKeptOnly(String fromFactory) {
-        StringBuilder versions = new StringBuilder();
-        for (Candidates.Kind k : Candidates.repairVersions()) {
-            if (k.base == Candidates.Base.FACTORY) {
-                versions.append(versions.length() == 0 ? "" : " and ").append(k.version);
-            }
-        }
-        return fromFactory + " This route doesn't use it. " + q(routeTitle(Route.REPAIR)) + " makes firmware "
-                + versions + " from it.";
+        return fromFactory + " This route doesn't use it. " + q(routeTitle(Route.REPAIR)) + " makes firmware"
+                + " from it when base v012 is picked.";
     }
 
     /** What the file step says when the pick needs a dump the phone does not have: the factory dump, or v008_test's. */
     private static String needsFactory(Recipe.Selection sel) {
         if (Recipe.V008.equals(sel.base)) {
-            return "Firmware " + sel.name() + " is made from build v008_test's public file. " + q(makeLabel(sel))
+            return cap(sel.label()) + " is made from build v008_test's public file. " + q(MAKE_FIRMWARE)
                     + " downloads it from GitHub.";
         }
-        return "Firmware " + sel.name() + " is made from the factory build v012 of OV9732 cameras. "
-                + q(makeLabel(sel)) + " downloads its public cleaned copy, " + Candidates.CLEAN_FACTORY_NAME
+        return cap(sel.label()) + " is made from the factory build v012 of OV9732 cameras. "
+                + q(MAKE_FIRMWARE) + " downloads its public cleaned copy, " + Candidates.CLEAN_FACTORY_NAME
                 + ", from GitHub. To use your own backup of the chip instead (" + Candidates.FACTORY_DUMP_NAME + "), tap "
                 + q(USE_FILE) + " and choose it.";
     }
@@ -2016,7 +2015,7 @@ public class MainActivity extends Activity {
         return s;
     }
 
-    /** A row of the version menu in the screen's text colour (and, in the open list, on its card colour). */
+    /** A row of the base menu in the screen's text colour (and, in the open list, on its card colour). */
     private View menuRow(View row, boolean open) {
         if (row instanceof TextView) {
             TextView t = (TextView) row;
@@ -2055,7 +2054,8 @@ public class MainActivity extends Activity {
 
     /** The base menu, the mod boxes, the make button and the factory-dump hint, for the pick now. */
     private void refreshRepairChoice() {
-        repairButton.setText(makeLabel(repairSel));
+        repairButton.setText(MAKE_FIRMWARE);
+        repairName.setText(cap(repairSel.label()));
         int b = baseIndex(repairSel.base);
         if (baseChoice.getSelectedItemPosition() != b) {
             baseChoice.setSelection(b, false);
@@ -2115,7 +2115,7 @@ public class MainActivity extends Activity {
 
     /** The end of the experimental line: the file is still checked, and the version on the camera now is the way back. */
     private static final String REVIEWED_AND_WAY_BACK = " The file is still the reviewed one, checked byte for byte."
-            + " Before you flash, make sure you can write the version you're on now again (see Before you start).";
+            + " Before you flash, make sure you can write the firmware you're on now again (see Before you start).";
 
     /**
      * The line for a pick whose firmware is not what the presets are: stock v012, stock v006 (the restore file,
@@ -2171,7 +2171,9 @@ public class MainActivity extends Activity {
             picked.edit().remove(KEY_REPAIR_OLD).remove(KEY_REPAIR_CUSTOM)
                     .putString(KEY_REPAIR_SET, repairSel.serialize()).apply();
         }
-        repairButton = primary(makeLabel(repairSel), v -> makePatch(repairSel));
+        repairButton = primary(MAKE_FIRMWARE, v -> makePatch(repairSel));
+        repairName = body("");          // the pick's full name, under the write step's short title
+        repairName.setTypeface(Typeface.DEFAULT_BOLD);
         customPanel = new LinearLayout(this);
         customPanel.setOrientation(LinearLayout.VERTICAL);
         baseChoice = baseMenu();
@@ -2456,7 +2458,7 @@ public class MainActivity extends Activity {
         col.addView(fw);
         tile("Back up photos", "Save the camera's photos and videos as a zip.", Route.BACKUP_PHOTOS);
         tile(routeTitle(Route.IDENTIFY), "From the photos on the card. Writes nothing.", Route.IDENTIFY);
-        tile(routeTitle(Route.REPAIR), "Pick a base and tick the mods you want. Now: " + repairSel.label() + ".",
+        tile(routeTitle(Route.REPAIR), "Pick a base and tick the mods you want. Now: " + cap(repairSel.label()) + ".",
                 Route.REPAIR);
         tile(routeTitle(Route.PROBE), "Diagnostic only.", Route.PROBE);
         tile(routeTitle(Route.RESTORE), "Needs this camera's backup. Without one, use Advanced.", Route.RESTORE);
@@ -2569,7 +2571,8 @@ public class MainActivity extends Activity {
                         + " OmniVision OV9732 sensor. Not sure which sensor yours has? Run " + q(routeTitle(Route.IDENTIFY)) + " first. Use "
                         + q(routeTitle(Route.PROBE)) + " only when the card has no photos from before a flash.",
                 Recipe.V006.equals(repairSel.base) && repairSel.mods.isEmpty()
-                        ? repairSel.name() + " is the stock restore file. Write it on " + q(routeTitle(Route.RESTORE))
+                        ? "With no mods ticked, base v006 is the stock restore file. Write it on "
+                        + q(routeTitle(Route.RESTORE))
                         + ", which compares it with your backup, or without a backup on Advanced (" + q(DOWNLOAD) + ")."
                         : "You don't need a backup. The app writes only a reviewed file, checked byte for byte. If"
                         + " nothing confirms which firmware the camera runs (a backup, or Identify), it says so before"
@@ -2578,9 +2581,10 @@ public class MainActivity extends Activity {
                 "Charge the battery fully. A flash cut short leaves a camera that only a chip programmer can bring back.");
         flashDriveStep();
         boolean factory = Recipe.V012.equals(repairSel.base);
-        Step write = flowStep(FlashFlow.Step.WRITE, "Write firmware " + repairSel.name(), "Pick the base and tick"
+        Step write = flowStep(FlashFlow.Step.WRITE, "Write firmware", "Pick the base and tick"
                 + " the mods, then make it. The app builds the file from " + dumpWords(repairSel.base) + ", checks it, and copies it to"
                 + " the card.");
+        write.add(repairName);
         write.add(customPanel);
         write.add(repairButton);
         write.add(factoryHint);
@@ -2606,12 +2610,14 @@ public class MainActivity extends Activity {
         check.add(checkPhotoButton);
         check.result(checkStatus);
         check.more("The app reads the newest photo taken since the write and looks at how its header is made.",
-                Recipe.expectedPhoto(repairSel) == PhotoId.Kind.FACTORY_EXIF ? "Firmware " + repairSel.name()
+                Recipe.expectedPhoto(repairSel) == PhotoId.Kind.FACTORY_EXIF ? cap(repairSel.label())
                         + " writes the factory header with its own EXIF block (Make Kodak, Model Charmera), so the"
                         + " check looks for that one."
-                        : factory ? "Firmware " + repairSel.name() + " is the factory build. Its photos have the"
+                        : factory ? cap(repairSel.label()) + " is built on the factory build v012. Its photos have the"
                         + " factory header (no EXIF block), not the public build's, so the check looks for that one."
-                        : "The stock restore file, the probe and firmware " + repairSel.name() + " all write the"
+                        : Recipe.V006.equals(repairSel.base) && repairSel.stock() ? "The stock restore file and the"
+                        + " probe write the same header. A match shows the camera runs one of them, but not which one."
+                        : "The stock restore file, the probe and " + repairSel.label() + " all write the"
                         + " same header. A match shows the camera runs one of them, but not which one.",
                 "It can't see the picture, so a black or frozen photo passes too. Open the photo and look at it.",
                 "If the app didn't list the card at the write, or was restarted since, it picks the photo by its"
@@ -2623,29 +2629,29 @@ public class MainActivity extends Activity {
         String step = "step " + FlashFlow.number(FlashFlow.Route.REPAIR, FlashFlow.Step.WRITE);
         if (sel.mods.isEmpty()) {
             // a stock pick is itself what the camera's mods are undone with
-            return Recipe.V012.equals(sel.base) ? sel.name() + " is the factory firmware of OV9732 cameras, unchanged."
-                    + " It's the way back from every v012 version."
-                    : Recipe.V006.equals(sel.base) ? sel.name() + " is the stock restore file itself."
-                    : sel.name() + " is build v008_test unchanged. To go back from it, write the firmware this camera"
-                    + " ran before, using this camera's backup.";
+            return Recipe.V012.equals(sel.base) ? "This is the factory firmware of OV9732 cameras, unchanged. It's the"
+                    + " way back from every v012 build."
+                    : Recipe.V006.equals(sel.base) ? "This is the stock restore file itself."
+                    : "This is build v008_test unchanged. To go back from it, write the firmware this camera ran"
+                    + " before, using this camera's backup.";
         }
         if (Recipe.V012.equals(sel.base)) {
-            return "To go back, write the firmware the camera ran before in " + step + ": an older version, or stock"
-                    + " v012, the factory firmware (base v012 with no mods ticked).";
+            return "To go back, write the firmware the camera ran before in " + step + ". That's another v012 build,"
+                    + " or stock v012, the factory firmware (base v012 with no mods ticked).";
         }
         if (Recipe.V008.equals(sel.base)) {
-            return "To go back from " + sel.name() + ", write the firmware this camera ran before, using this"
+            return "To go back from " + sel.label() + ", write the firmware this camera ran before, using this"
                     + " camera's backup. That's the stock restore file (" + q(routeTitle(Route.RESTORE)) + ") if the"
                     + " backup, read before the camera was ever flashed, shows the public build.";
         }
         if (sel.has(Recipe.OV9732_PORT) && sel.mods.size() > 1) {
-            return "To go back from " + sel.name() + ", write v0.23's file. The app makes it here too (base"
-                    + " v006 with only the OV9732 port ticked).";
+            return "To go back from " + sel.label() + ", write v006 with the OV9732 port. The app makes it here too"
+                    + " (base v006 with only the OV9732 port ticked).";
         }
         if (sel.has(Recipe.OV9732_PORT)) {
-            return "To go back from " + sel.name() + ", pick another OV9732 version in " + step + " and write it.";
+            return "To go back from " + sel.label() + ", pick another OV9732 build in " + step + " and write it.";
         }
-        return "To go back from " + sel.name() + ", write the stock restore file: " + q(routeTitle(Route.RESTORE))
+        return "To go back from " + sel.label() + ", write the stock restore file: " + q(routeTitle(Route.RESTORE))
                 + " with this camera's backup, or Advanced > " + q(DOWNLOAD) + " without one.";
     }
 
@@ -2665,8 +2671,8 @@ public class MainActivity extends Activity {
                         + " card, and stops as it does now.",
                 "You don't need a backup. The app writes only the reviewed file, checked byte for byte.",
                 "It changes no boot or update code. On an SP140A camera the stock restore file reverses it. On an OV9732"
-                        + " camera, undo it with stock v012 or v0.25 or later (" + q(routeTitle(Route.REPAIR)) + "), not the"
-                        + " stock restore file.");
+                        + " camera, undo it with a v012 build, stock or with mods (" + q(routeTitle(Route.REPAIR))
+                        + "), not the stock restore file.");
         foldWrite(write);
         flashStep();
         removeStep();
@@ -2697,7 +2703,7 @@ public class MainActivity extends Activity {
                 "Several owners report working cameras after flashing it, but what their cameras ran before isn't known.",
                 "The app refuses the public dumps and any read named unverified-read.",
                 "A camera that stopped taking pictures after a flash has firmware for the other sensor. Flash one that"
-                        + " fits from the card: on an OV9732 camera, stock v012 or v0.25 to v0.27 in "
+                        + " fits from the card: on an OV9732 camera, a v012 build (stock or with mods) in "
                         + q(routeTitle(Route.REPAIR)) + ". Only a camera with a sensor no reviewed build drives needs"
                         + " the donor route on a computer (docs/02-RECOVERY.md, section D).",
                 "The app can't tell which camera a backup came from, and a backup read after a flash only shows"
@@ -2761,8 +2767,9 @@ public class MainActivity extends Activity {
                 "Open a photo and look at it too. A black or frozen picture has the same header.");
         look.needs = new Step[]{drive};
         Step ask = step("3", "Look at the camera", "No card or app needed.");
-        ask.body.addView(body("1. Setup page 2: are there Volume and LED rows after FORMAT? Then one of our mods"
-                + " (v0.24 or later) is installed. Without them it's stock, or our v0.21 to v0.23.\n"
+        ask.body.addView(body("1. Setup page 2: are there Volume and LED rows after FORMAT? Then one of our builds"
+                + " with Volume and LED rows is installed. Without them it's stock, or one of our builds without that"
+                + " mod.\n"
                 + "2. Does photo or video mode freeze after a flash? Then that firmware is for the other sensor"
                 + " family and doesn't drive this camera's sensor."));
         ask.more("Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells you nothing.",
@@ -3381,11 +3388,17 @@ public class MainActivity extends Activity {
 
     /**
      * The firmware for the test-shot zip's name: the one the owner saw the camera take (FlashLog.confirmedFirmware: a
-     * flash seen, or a passed photo check after a flash seen of that file), otherwise "unknown".
+     * flash seen, or a passed photo check after a flash seen of that file), otherwise "unknown". A reviewed file is
+     * named by its SHA-256 as Recipe.fileTag gives it ("v012-volume-led-exif"), since its full name is too long for a
+     * file name; any other entry by the words it was logged with ("v0.27" from an older app).
      */
     private String firmwareTag() {
-        String f = readLog().confirmedFirmware();
-        return f == null ? "unknown" : tag(f);
+        FlashLog.Entry e = readLog().confirmed();
+        if (e == null) {
+            return "unknown";
+        }
+        Recipe.Selection s = Recipe.selectionOfPrefix(e.sha256Prefix);
+        return s != null ? Recipe.fileTag(s) : tag(e.firmware);
     }
 
     private static String stamp(String pattern, long ms) {
@@ -4093,27 +4106,30 @@ public class MainActivity extends Activity {
                             + " restarted since), so this may be a photo from before the flash.";
                     String fw = sha == null ? null : firmwareLabel(sha);
                     Candidates.Kind written = Candidates.repairVersion(sha);
-                    // any reviewed build (a version or any other pick) by its base and mods; else by the fixed kind
+                    // any reviewed build by its base and mods; else by the fixed kind
                     Recipe.Selection made = Recipe.selectionOf(sha);
                     boolean factory = made != null ? Recipe.V012.equals(made.base)
                             : written != null && written.base == Candidates.Base.FACTORY;
                     PhotoId.Kind expected = made != null ? Recipe.expectedPhoto(made) : PhotoId.expectedFor(written);
-                    String version = written != null ? written.version : made != null ? made.name() : "?";
                     verdict = r.kind == expected;
                     if (expected == PhotoId.Kind.FACTORY_EXIF && r.kind == expected) {
-                        // v0.26: the factory header with its own EXIF block (Make Kodak, Model Charmera).
-                        text = "New photo found, with firmware " + version + "'s EXIF header ✓\n" + which
+                        // The EXIF dates mod: the factory header with its own EXIF block (Make Kodak, Model Charmera).
+                        boolean boot = made != null && made.has("v012/boot-last-mode");
+                        boolean flash = made != null && made.has("v012/capture-flash");
+                        text = "New photo found, with the EXIF dates header ✓\n" + which
                                 + ". Open it and check the picture."
-                                + (written == Candidates.Kind.V027 ? " v0.26 writes the same header, so check v0.27 on"
-                                + " the camera itself: power-on goes straight into Picture, and the screen flashes"
-                                + " black when you take a photo." : "") + how;
+                                + (boot || flash ? " Every build with EXIF dates writes this header, so check the other"
+                                + " mods on the camera itself." : "")
+                                + (boot ? " Power-on goes straight into the mode you last used (photo the first"
+                                + " time)." : "")
+                                + (flash ? " The screen flashes black when you take a photo." : "") + how;
                         appendLog(app, FlashLog.Event.CHECK_OK, fw, sha, "factory EXIF header: " + newest.path);
                     } else if (expected == PhotoId.Kind.FACTORY_EXIF) {
                         String got = r.kind == PhotoId.Kind.ORIGINAL_BARE ? "the factory header without EXIF"
                                 : r.kind == PhotoId.Kind.PUBLIC_FAMILY ? "the public build's header"
                                 : r.reasons.isEmpty() ? "a header the app does not know"
                                 : android.text.TextUtils.join("; ", r.reasons);
-                        text = "This photo has " + got + ", not firmware " + version + "'s EXIF header"
+                        text = "This photo has " + got + ", not the EXIF dates header"
                                 + " ✗\n" + which + ". The flash didn't take. Write the file again and wait for"
                                 + " \"Upgrade 100%\"." + how;
                         appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": " + got);
@@ -4127,9 +4143,9 @@ public class MainActivity extends Activity {
                                 + ". The flash didn't take. Write the file again and wait for \"Upgrade 100%\"." + how;
                         appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": public-build header");
                     } else if (r.kind == PhotoId.Kind.FACTORY_EXIF) {
-                        // The EXIF mod's header after a write of a firmware without it: it still runs v0.26 or later.
-                        text = "This photo has the EXIF header of firmware " + Candidates.Kind.V026.version + " or later, not the"
-                                + " written firmware's ✗\n" + which + ". The flash didn't take. Write the file"
+                        // The EXIF mod's header after a write of a firmware without it: it still runs a build with it.
+                        text = "This photo has the EXIF header of a build with EXIF dates, not the written"
+                                + " firmware's ✗\n" + which + ". The flash didn't take. Write the file"
                                 + " again and wait for \"Upgrade 100%\"." + how;
                         appendLog(app, FlashLog.Event.CHECK_FAILED, fw, sha, newest.path + ": factory EXIF header");
                     } else if (r.kind == PhotoId.Kind.PUBLIC_FAMILY) {
@@ -5211,7 +5227,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The base and mods a checked file the Repair route writes was made from (a version such as v0.26, or any other pick),
+     * The base and mods a checked file the Repair route writes was made from (any pick of a base and mods),
      * by its reviewed SHA-256, or null.
      */
     private static Recipe.Selection repairOf(UpdateCheck.Result result) {
@@ -5224,12 +5240,6 @@ public class MainActivity extends Activity {
      */
     private static boolean isRepair(UpdateCheck.Result result) {
         return repairOf(result) != null;
-    }
-
-    /** The few words after a Repair pick's name: a version's menu summary, or any other pick's set label. */
-    private static String summaryOf(Recipe.Selection sel) {
-        Candidates.Kind k = sel.kind();
-        return k != null && k.summary != null ? k.summary : sel.label();
     }
 
     /**
@@ -5504,8 +5514,9 @@ public class MainActivity extends Activity {
         fileStatus.setText(checkLine(result, chosen));
         checkShown = true;
         reveal(fileStatus);
-        showDetail(result.verdict() + "\n\n" + origin + "\n\nDetail: " + UpdateCheck.bytes(result.size) + ", SHA-256 "
-                + result.sha256 + ".\n\nThe app's checks"
+        String older = Recipe.olderNameNote(result.sha256);
+        showDetail(result.verdict() + "\n\n" + origin + (older == null ? "" : "\n\n" + older) + "\n\nDetail: "
+                + UpdateCheck.bytes(result.size) + ", SHA-256 " + result.sha256 + ".\n\nThe app's checks"
                 + (result.compared ? ", compared with " + backupName : " (not compared with a backup)") + ":\n\n"
                 + result.report());
     }
@@ -5527,9 +5538,8 @@ public class MainActivity extends Activity {
             String unsure = unconfirmed(result);
             int warns = warnCount(result);
             Recipe.Selection sel = Recipe.selectionOf(result.sha256);
-            state = "\u2713 " + (isRepair(result) ? "Firmware " + repairOf(result).name() : sel != null ? sel.label()
-                    : "Reviewed file") + " ready." + (warns == 0 ? "" : " " + warns + (warns == 1 ? " warning"
-                    : " warnings") + " (see Details).");
+            state = "\u2713 " + (sel != null ? cap(sel.label()) + " is ready." : "Reviewed file ready.")
+                    + (warns == 0 ? "" : " " + warns + (warns == 1 ? " warning" : " warnings") + " (see Details).");
             color = unsure != null || warns > 0 ? warnAccent : okColor;
             next = (unsure == null ? "" : "\u26a0 " + unsure + "\n") + "Next: connect the camera's drive and tap "
                     + q(WRITE) + ".";
@@ -5848,7 +5858,7 @@ public class MainActivity extends Activity {
             String problem = null;
             String technical = null;
             boolean keeping = false;
-            final String again = " Then tap " + q(makeLabel(sel)) + " again.";
+            final String again = " Then tap " + q(MAKE_FIRMWARE) + " again.";
             final String instead = " Or open " + Candidates.CLEAN_FACTORY_PAGE + " in the browser, download "
                     + Candidates.CLEAN_FACTORY_NAME + " there, and tap " + q(USE_FILE) + ". You can also choose your own read"
                     + " of the chip, " + Candidates.FACTORY_DUMP_NAME + ", the same way.";
@@ -5966,7 +5976,7 @@ public class MainActivity extends Activity {
             String technical = null;
             boolean kept = false;
             boolean keeping = false;
-            final String again = " Then tap " + q(makeLabel(sel)) + " again.";
+            final String again = " Then tap " + q(MAKE_FIRMWARE) + " again.";
             try {
                 dump = keptV008();
                 kept = dump != null;
@@ -6699,8 +6709,8 @@ public class MainActivity extends Activity {
         final boolean unknown = unknownNoBackup(check);
         final Recipe.Selection made = Recipe.selectionOf(check.sha256);
         final String untried = made != null && "experimental".equals(made.status()) ? "Experimental: "
-                + made.label() + " hasn't been tried on a camera as a whole. Make sure you can write your current version"
-                + " again if it doesn't work.\n" : "";
+                + made.label() + " hasn't been tried on a camera as a whole. Make sure you can write your current"
+                + " firmware again if it doesn't work.\n" : "";
         final String backupLine = backupSha256 == null ? null
                 : backupName + ", SHA-256 " + backupSha256.substring(0, 16) + "…";
         CardState.Item same = c.state.sameFile(check);
@@ -6715,7 +6725,7 @@ public class MainActivity extends Activity {
         }
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle(probe ? "Write the sensor-ID probe to the card?"
-                        : bringup ? "Write firmware " + repair.name() + " to the card?"
+                        : bringup ? "Write this firmware to the card?"
                         : "Write the update file to the card?")
                 .setMessage("The app copies the update file to the card's top folder. Nothing changes on the camera"
                         + " yet. It flashes the file the next time it switches on with this card in it.\n\n"
@@ -6723,14 +6733,16 @@ public class MainActivity extends Activity {
                         + (probe
                             ? "This is the sensor-ID probe, a reviewed file. It scans the sensor bus and writes a result"
                             + " to SENSOR.TXT. It doesn't fix the camera.\n"
+                            : factory && repair.stock()
+                            ? "This is " + repair.label() + ", a reviewed file. It's the camera's own factory firmware,"
+                            + " so it's also the way back to stock from every v012 build.\n"
                             : factory
-                            ? "This is firmware " + repair.name() + " (" + summaryOf(repair) + "), a reviewed file. The"
-                            + " way back is an older version's file. Pick it in the version menu on Flash custom"
-                            + " firmware.\n"
+                            ? "This is " + repair.label() + ", a reviewed file. The way back is another v012 build or"
+                            + " stock v012. Make it on " + q(routeTitle(Route.REPAIR)) + ".\n"
                             : port
-                            ? "This is the OV9732 bring-up, a reviewed file. It drives the fitted OV9732 in place of the"
-                            + " SP140A set-up and changes no boot or update code. The stock restore file doesn't drive"
-                            + " the OV9732.\n"
+                            ? "This is " + repair.label() + ", a reviewed file. It drives the fitted OV9732 in place"
+                            + " of the SP140A set-up and changes no boot or update code. The stock restore file"
+                            + " doesn't drive the OV9732.\n"
                             : bringup
                             ? "This is " + repair.label() + ", a reviewed SP140A firmware file.\n"
                             : backupLine != null && check.compared
@@ -7288,8 +7300,8 @@ public class MainActivity extends Activity {
             if ((b[off + 1 + 0x0A] & 0xFF) == 0x97 && (b[off + 1 + 0x0B] & 0xFF) == 0x32) ov9732 = true;
         }
         sb.append(ov9732
-                ? "\nThat's the sensor the factory build v012 drives. Flash stock v012 or v0.25 to v0.27 from the card"
-                  + " (" + q(routeTitle(Route.REPAIR)) + "). The stock restore file can't take pictures on it."
+                ? "\nThat's the sensor the factory build v012 drives. Flash a v012 build (stock or with mods) from"
+                  + " the card (" + q(routeTitle(Route.REPAIR)) + "). The stock restore file can't take pictures on it."
                 : "\nKeep SENSOR.TXT: the fingerprint below is what naming the part from a datasheet needs.");
         sb.append("\n\nRegister fingerprint (16-bit reads; FF = no answer):");
         for (int i = 0; i < count; i++) {

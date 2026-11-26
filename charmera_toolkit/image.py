@@ -379,7 +379,7 @@ OV9732_BUS = 0x6C
 
 # What a firmware image drives, from its bytes: the SP140A-class sensor (its 61-write init table, which starts
 # fd 00 2f 1b) or the OmniVision OV9732 (the SCCB context of v012's own driver, which our OV9732 port carries too).
-# The OV9732 context wins: a v006 build with our port (v0.21 to v0.24) still holds the SP140A table.
+# The OV9732 context wins: a v006 build with our OV9732 port still holds the SP140A table.
 SP140A_INIT = bytes.fromhex("fd002f1b")
 
 

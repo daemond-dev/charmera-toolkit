@@ -903,7 +903,7 @@ def test_inspect_names_our_ov9732_port(tmp_path, capsys):
     data = with_our_ov9732_port(make_image())
     path.write_bytes(data)
     inspect_cmd.print_report(path, data)
-    assert "OV9732 port (v0.21 to v0.24): this firmware drives an OV9732" in flat(capsys.readouterr().out)
+    assert "OV9732 port (built on v006): this firmware drives an OV9732" in flat(capsys.readouterr().out)
 
 
 def test_restore_on_a_chip_without_a_sensor_table_asks_a_second_time(fake_flashrom, tmp_path, monkeypatch, capsys):

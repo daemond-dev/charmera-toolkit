@@ -256,7 +256,7 @@ public final class CandidatesTest {
                     && level(changed, "sensor-table") == UpdateCheck.Level.WARN
                     && changed.report().contains("v012's program for the OmniVision OV9732 sensor"));
             expect("the factory dump never makes a stock kind", refused(() -> Candidates.build(factory,
-                    Candidates.Kind.BRINGUP), "is not exactly firmware v0.24"));
+                    Candidates.Kind.BRINGUP), "is not exactly v006 with the OV9732 port and Volume and LED rows"));
             // v0.26: v0.25 plus the EXIF header, its vendor template part copied from the dump at run time.
             byte[] v026 = Candidates.build(factory, Candidates.Kind.V026);   // throws unless it is the reference file
             expect("the factory dump makes the v0.26 reference file", v026.length == UpdateCheck.UPDATE_SIZE

@@ -2,14 +2,21 @@
 
 Reading order: 15 of 15 · previous: [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md) · [all docs](README.md)
 
-Status on 2026-11-13: v0.25 (§11) is built on the factory OV9732 firmware read from the owner's second camera, with
-v0.24's Volume and LED rows, and v0.26 (§12) adds EXIF dates to it. Neither had been flashed at that date.
+These are lab notes, and the numbers in them (v0.21 to v0.27) were this project's running build counter at the time.
+The camera never shows them. The app and `charmera build` now name each build by its base and mods, and
+[Older build names](06-ANDROID.md#older-build-names) maps the numbers to those names.
 
-AE is auto-exposure and WB is white balance. v0.21 (§7) built and flashed the AE redirect of §2, and it was confirmed
-working on the camera. v0.22 (§8) fixed two defects a review found in it, crushed shadows (black level) and the
-exposure cap. It was flashed on 2026-11-10, and the shadows are fixed on the camera. v0.24 (§10) was flashed on the
-owner's camera on 2026-11-11. Its Volume and LED rows work there, and Volume 8 has not been tried. It carries v0.23's
-colour and bright-light exposure tuning (§9), which was measured against the stock camera on 2026-11-12 (end of §10).
+Status on 2026-11-13: v0.25 (§11, now called v012 with Volume and LED rows) is built on the factory OV9732 firmware
+read from the owner's second camera, with v0.24's Volume and LED rows, and v0.26 (§12, now v012 with Volume and LED
+rows and EXIF dates) adds EXIF dates to it. Neither had been flashed at that date.
+
+AE is auto-exposure and WB is white balance. v0.21 (§7), the first stage of the OV9732 port on v006, built and
+flashed the AE redirect of §2, and it was confirmed working on the camera. v0.22 (§8) fixed two defects a review found
+in it, crushed shadows (black level) and the exposure cap. It was flashed on 2026-11-10, and the shadows are fixed on
+the camera. v0.24 (§10, now v006 with the OV9732 port and Volume and LED rows) was flashed on the owner's camera on
+2026-11-11. Its Volume and LED rows work there, and Volume 8 has not been tried. It carries the colour and
+bright-light exposure tuning of v0.23 (now v006 with the OV9732 port, §9), which was measured against the stock camera
+on 2026-11-12 (end of §10).
 
 The as-built offsets, bytes and on-camera result are in §7. The hook that shipped is at VA `0x7b378` (file `0x7B578`).
 §2 below and the earlier scope docs (docs/14, FIRST-FLASH-INCIDENT) name `0x7b340`; §7 explains the difference. The
@@ -470,8 +477,9 @@ and play both back on the camera.
 
 The tags that are optional in practice (resolution, colour space, pixel size) are left out.
 
-The app builds v0.25 and v0.26 (and later v0.27) from the factory dump: the owner's read, or the public cleaned copy
-([Using an Android phone](06-ANDROID.md#firmware-v025-the-cameras-own-factory-firmware)).
+The app builds v0.25 and v0.26 (and later v0.27, now v012 with Volume and LED rows, EXIF dates, boot to last mode and
+capture flash) from the factory dump: the owner's read, or the public cleaned copy
+([Using an Android phone](06-ANDROID.md#volume-and-led-rows-on-v012-the-cameras-own-factory-firmware)).
 
 The v0.26 file is `JH_5408202611130026_0FA38C7C.bin`, SHA-256 `617770c3…fa06d2`.
 

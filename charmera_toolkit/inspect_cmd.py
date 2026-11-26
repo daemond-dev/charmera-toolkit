@@ -62,12 +62,12 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         if not info["identity_checks"].get("sensor_table_known"):
             print("                 NOT the known builds' table")
             if ported:
-                print("                 the code also carries our OV9732 port (v0.21 to v0.24): this firmware drives an OV9732")
+                print("                 the code also carries our OV9732 port (built on v006): this firmware drives an OV9732")
         elif t.sensor == "OV9732":
             print("                 v012's table for the OmniVision OV9732 (bus 0x6C, 16-bit registers): its own driver, with no")
             print("                 SP140A-style table")
         elif ported:
-            print("                 the SP140A table, but the code also carries our OV9732 port (v0.21 to v0.24): this firmware")
+            print("                 the SP140A table, but the code also carries our OV9732 port (built on v006): this firmware")
             print("                 drives an OV9732")
         else:
             print("                 the SP140A table v006 and v008_test carry (public dump, film-mods): it drives one sensor and reads")

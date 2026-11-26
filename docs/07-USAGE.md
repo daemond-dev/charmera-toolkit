@@ -150,17 +150,18 @@ header, the size, the colour sampling, the JPEG quality on the IJG scale, the co
 and Software, then a conclusion for each file. Three still-photo headers are known, and the conclusion names the one
 it found:
 
-- The v006 / v008_test family (the SP140A builds; our v0.21 to v0.24 are built on v006 and write it too) writes a
+- The v006 / v008_test family (the SP140A builds; our OV9732 port is built on v006 and writes it too) writes a
   1,424-byte (0x590) header with an EXIF block (Make `Generalplus`, Model `CBB3`, Software `20150615`) and the comment
   `GPEncoder` padded with spaces. This is VERIFIED in v006. v008_test holds the same template and the code that fills
   it, VERIFIED by comparing the bytes. A photo can't tell v006 from v008_test.
-- The factory build v012 (OV9732 cameras; our v0.25 keeps it) writes a bare 624-byte (0x270) header, with no EXIF
-  block and the comment `GPEncoder` alone. v012 holds this template four times and no 0x590 one (VERIFIED by search of
-  the v012 dump). The v006 family holds the same bare template, byte for byte, but uses it only for thumbnails, video
+- The factory build v012 (OV9732 cameras; our v012 builds without EXIF dates keep it) writes a bare 624-byte (0x270)
+  header, with no EXIF block and the comment `GPEncoder` alone. v012 holds this template four times and no 0x590 one
+  (VERIFIED by search of the v012 dump). The v006 family holds the same bare template, byte for byte, but uses it only for thumbnails, video
   frames and a Wi-Fi stream. A photo the 2026-11-06 camera took on its original firmware has this header.
-- Our EXIF mod (v0.26 and later) writes an 832-byte (0x340) header: the start marker, one EXIF block of 0xD0 bytes
-  with Make `Kodak`, Model `Charmera` and Software naming the version, then v012's bare header (VERIFIED in the v0.26
-  update file).
+- Our EXIF mod (any of our v012 builds with EXIF dates) writes an 832-byte (0x340) header: the start marker, one
+  EXIF block of 0xD0 bytes with Make `Kodak`, Model `Charmera` and Software `v0.26`, then v012's bare header
+  (VERIFIED in the update file of v012 with Volume and LED rows and EXIF dates). Software `v0.26` is an old build
+  number that's part of the mod's code, so every build with EXIF dates writes it.
 
 The toolkit's own `exif-fix` also writes Make `Kodak` and Model `Charmera`, on copies, with no Software tag and the
 rest of the header kept. `photo-id` calls such a copy an exif-fix copy, not the EXIF mod, and says which family the
@@ -204,16 +205,16 @@ default). When there are more, it reads that many, evenly spaced by date, plus t
 photos it chose, and says so. It shows the newest video's verdict without using it.
 
 The v006 family is the 0x590-byte Generalplus header (stock v006 or v008_test, on SP140A cameras), and the v012 family
-the bare 0x270-byte one (stock v012, on OV9732 cameras). The 0x340-byte EXIF-mod header is ours (v0.26 and later,
-built on v012), so a camera that writes it isn't stock, and it's of the v012 family. The possible answers:
+the bare 0x270-byte one (stock v012, on OV9732 cameras). The 0x340-byte EXIF-mod header is ours (every build with
+EXIF dates, built on v012), so a camera that writes it isn't stock, and it's of the v012 family. The possible answers:
 
 - All dated camera-written photos of one family: "The photos were taken by stock v012 (an OV9732 camera): base v012"
   or "The photos were taken by stock v006 or v008_test (an SP140A camera): base v006", followed by "If the camera was
   flashed after these photos, it runs something else now". Confidence is `high` when the scan wasn't capped and at
   least two camera-written photos agree, and `medium` for a single photo or a capped scan. v006-family photos aren't
-  doubted just because our v0.21-v0.24 write the same header. One line says "If this camera was ever flashed with our
-  v0.21-v0.24, its photos look like this too."
-- Any EXIF-mod photo: "This camera does not look stock: our EXIF mod (v0.26 or later) is installed", with "installed
+  doubted just because our OV9732 port on v006 writes the same header. One line says "If this camera was ever flashed
+  with our OV9732 port on v006, its photos look like this too."
+- Any EXIF-mod photo: "This camera does not look stock: our EXIF mod (Software 'v0.26') is installed", with "installed
   between <date> and <date>" when bare photos come before them. The base is `v012` (the mod is built on it), with
   confidence `high`. Bare and EXIF-mod photos are one family, not a change of family.
 - Photos of both families: "This camera does not look stock: photos from two firmware families: <older> up to
@@ -239,8 +240,8 @@ was. The exit code is 0 when a file was decoded, 1 when there's no `SENSOR.TXT`,
 
 To make the probe, run `charmera build --base v006 --mods sensor-probe --download --out out/`, then verify and stage
 it as any update file. It's v006 with a patch, so it changes no boot or update code. On an SP140A camera the stock
-v006 build (the stock restore file) undoes it. On an OV9732 camera undo it with stock v012 or v0.25 or later, not the
-stock restore file. You don't need the probe when `identify` already names the base from photos taken before any
+v006 build (the stock restore file) undoes it. On an OV9732 camera undo it with a v012 build, stock or with mods, not
+the stock restore file. You don't need the probe when `identify` already names the base from photos taken before any
 flash.
 
 ## Commands that write files on your computer
@@ -273,8 +274,10 @@ charmera build --dump charmera_flash_....bin --mods volume-led,exif,boot-last-mo
   `stage` with `--stock <your backup>`, and the same two without `--stock` for when you have no backup. For a file
   from your own read they give that read as `--stock` (and `--allow-modified` when it has mods). `verify` knows
   reviewed files by SHA-256. It says which build a file is and doesn't refuse it for being modded.
-- Our versions are combinations too: v0.24 is `--base v006 --mods ov9732-port,volume-led`, v0.25 is `--base v012
-  --mods volume-led`, v0.26 adds `exif`, and v0.27 adds `boot-last-mode,capture-flash`.
+- Every set is named by its base and mods, the same way in `--list` and in the app, such as "v012 with Volume and LED
+  rows and EXIF dates" for `--base v012 --mods volume-led,exif`. The five sets older versions of the app numbered
+  v0.23 to v0.27 say so in `--list`, for example "(older versions of the app called this v0.26)". The full list is in
+  [Older build names](06-ANDROID.md#older-build-names).
 
 ```
 charmera pack --input my_backup.bin --out out/restore/               # prints the plan only

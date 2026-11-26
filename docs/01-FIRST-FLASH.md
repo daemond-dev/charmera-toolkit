@@ -13,7 +13,7 @@ from the card. A camera that doesn't start at all, or whose flash was cut off, i
 [section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
 
 Only have a phone? The [Charmera Card app](../android/README.md) identifies the camera's firmware from its photos,
-builds the reviewed files (the stock restore file, the sensor-ID probe, v0.23 to v0.27, or another mix of mods you tick)
+builds the reviewed files (the stock restore file, the sensor-ID probe, or a base with the mods you tick)
 and does steps 4 to 7 on the phone. Without the backup from step 1 it still writes. For a reviewed file it warns when
 nothing confirms what the camera runs, and for a file it doesn't know it warns loudly. Version 0.4, published before
 0.5, had no backup step and didn't refuse the withdrawn candidates, so if you still have it installed, don't flash with
@@ -120,7 +120,7 @@ build string, the stamp and the sensor table) and say which build the file is:
 - `charmera-unknown-build`: it runs a build nobody has published, which is exactly the case the backup is for.
 
 The sensor table line says which kind it found: the SP140A table v006 and v008_test carry, or v012's table for the
-OmniVision OV9732. A camera that runs our v0.23 or v0.24 shows the SP140A table, because the port keeps it, and
+OmniVision OV9732. A camera that runs our OV9732 port on v006 shows the SP140A table, because the port keeps it, and
 `inspect` adds that the code carries our OV9732 port. That camera is an OV9732.
 
 Keep the file in two places. It's your way back, and it's the `--stock` that every later `verify` and `stage` takes.
@@ -149,12 +149,14 @@ charmera build --base v012 --mods volume-led,exif --download --out out/
 ```
 
 Take the base Identify gave you (v012 for an OV9732 camera, v006 for an SP140A one). Leave out `--mods` for the stock
-build. `--list` shows every base, mod and combination. For v012 that's v0.25 (Volume and LED rows), v0.26 (plus EXIF
-dates) and v0.27 (plus boot to the last mode and capture flash), and the other mixes. For v006 it's the stock restore
-file, the sensor-ID probe and Volume/LED. v0.23 and v0.24 are v006 ported to the OV9732, for an OV9732 camera that
-was flashed with v006. `--download` fetches the base's cleaned public copy at a fixed commit and checks its SHA-256.
-The file is written only when it's the reviewed one listed for that combination, and `build` runs `verify` on it.
-Combinations marked experimental have been built and checked but not tried on a camera, and `build` says so. More in
+build. `--list` shows every base, mod and combination, each named by its base and mods, such as "v012 with Volume and
+LED rows and EXIF dates". For v012 the mods are Volume and LED rows, EXIF dates, boot to last mode and capture flash,
+in any mix. For v006 they're the sensor-ID probe, Volume/LED and the OV9732 port. v006 with the OV9732 port, with or
+without the Volume and LED rows, is for an OV9732 camera that was flashed with v006. The builds older app versions
+numbered v0.23 to v0.27 are in [Older build names](06-ANDROID.md#older-build-names). `--download` fetches the base's
+cleaned public copy at a fixed commit and checks its SHA-256. The file is written only when it's the reviewed one
+listed for that combination, and `build` runs `verify` on it. Combinations marked experimental have been built and
+checked but not tried on a camera, and `build` says so. More in
 [Command reference](07-USAGE.md#build-a-firmware-file-from-a-base-and-mods-charmera-build).
 
 With a backup, `--dump <your backup>` builds from your own read instead, when its firmware is still stock v006 or
@@ -358,7 +360,7 @@ You don't need these to flash, but every claim above comes from them:
 a camera was already flashed with firmware for the other image sensor, the
 [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md) and
 [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md) cover the repair, and
-[Using an Android phone](06-ANDROID.md#repair-an-ov9732-camera-the-ov9732-bring-up) has the builds for it.
+[Using an Android phone](06-ANDROID.md#repair-an-ov9732-camera-the-ov9732-port-on-v006) has the builds for it.
 
 ---
 

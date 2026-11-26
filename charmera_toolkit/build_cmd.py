@@ -65,7 +65,9 @@ def print_list(doc: dict) -> None:
         for s in sets:
             mods = ",".join(i.split("/")[-1] for i in s["mods"]) or "(none)"
             flag = "" if s["status"] == "tested" else "  [experimental]"
-            print(f"  set   --mods {mods:44s} {s['label']}{flag}")
+            old = R.old_name(s["base"], s["mods"], doc)
+            older = f"  (older versions of the app called this {old})" if old else ""
+            print(f"  set   --mods {mods:44s} {s['label']}{flag}{older}")
         print()
 
 

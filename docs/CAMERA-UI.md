@@ -63,8 +63,8 @@ DATE. The three date formats share one line, so page 1 holds six items and page 
 The photos above show a stock camera. Two things on the camera say something about the firmware it runs, and one
 says nothing.
 
-If setup page 2 has Volume and LED rows after FORMAT, one of our mods (v0.24 or later) is installed. The stock builds
-have FORMAT alone there ([v0.24's rows](15-OV9732-AE-WB-FLASH-PORT.md)).
+If setup page 2 has Volume and LED rows after FORMAT, one of our builds with Volume and LED rows is installed. The
+stock builds have FORMAT alone there ([the rows](15-OV9732-AE-WB-FLASH-PORT.md#10-v024-volume-and-led-rows-in-the-setup-menu)).
 
 If Photo or Video mode freezes after a flash, the firmware doesn't drive this camera's sensor. It's a build for the
 other sensor family (seen with an SP140A build on an OV9732 camera). Photos from before that flash say what fits. A

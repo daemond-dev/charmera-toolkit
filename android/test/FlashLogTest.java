@@ -94,6 +94,16 @@ public final class FlashLogTest {
         sameFile.add(T - MIN, FlashLog.Event.FLASH_SEEN, "v0.23", null, null);
         sameFile.add(T, FlashLog.Event.CHECK_OK, "v0.23", null, null);
         expect("a passed check naming the file of the flash seen names it", "v0.23".equals(sameFile.confirmedFirmware()));
+        FlashLog renamed = new FlashLog();
+        renamed.add(T - MIN, FlashLog.Event.FLASH_SEEN, "v0.27", "3333333333333333", null);
+        renamed.add(T, FlashLog.Event.CHECK_OK, "v012 with Volume and LED rows, EXIF dates, boot to last mode and"
+                + " capture flash", "3333333333333333", null);
+        expect("a passed check of the same file under its new name follows a flash seen an older app logged",
+                "v0.27".equals(renamed.confirmedFirmware()) && renamed.confirmed().sha256Prefix.equals("333333333333"));
+        FlashLog otherSha = new FlashLog();
+        otherSha.add(T - MIN, FlashLog.Event.FLASH_SEEN, "v0.27", "3333333333333333", null);
+        otherSha.add(T, FlashLog.Event.CHECK_OK, "v0.27", "4444444444444444", null);
+        expect("a passed check of another file with the same name names none", otherSha.confirmedFirmware() == null);
         FlashLog unnamed = new FlashLog();
         unnamed.add(T - MIN, FlashLog.Event.WRITTEN, "v0.23", null, null);
         unnamed.add(T, FlashLog.Event.FLASH_SEEN, "", null, null);

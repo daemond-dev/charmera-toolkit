@@ -97,7 +97,7 @@ def identify16(b: bytes, off: int) -> str:
             "are what a datasheet comparison needs.")
 
 
-OV9732_NEXT = ("That's the sensor the factory build v012 drives. Flash stock v012 or v0.25 to v0.27 from the card "
+OV9732_NEXT = ("That's the sensor the factory build v012 drives. Flash a v012 build (stock or with mods) from the card "
                "(`charmera build --base v012 --download --out out/`, or Flash custom firmware in the app). The stock "
                "restore file can't take pictures on it.")
 

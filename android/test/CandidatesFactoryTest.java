@@ -177,14 +177,16 @@ public final class CandidatesFactoryTest {
             newestFirst &= versions[i - 1].fileName.compareTo(versions[i].fileName) > 0;
         }
         expect("newest first, by the stamp in their file names", newestFirst);
-        expect("each version is read from its file name", "v0.26".equals(Candidates.Kind.V026.version)
-                && "v0.25".equals(Candidates.Kind.V025.version)
-                && "v0.24".equals(Candidates.Kind.BRINGUP.version) && Candidates.Kind.RESTORE.version == null
-                && Candidates.Kind.PROBE.version == null && !Candidates.Kind.PROBE.repair());
-        expect("the menu rows are short", "v0.26: factory firmware + Volume/LED + EXIF".equals(
-                Candidates.Kind.V026.menuText()) && "v0.25: factory firmware + Volume/LED".equals(
-                Candidates.Kind.V025.menuText()) && "v0.24: public build + OV9732 port".equals(
-                Candidates.Kind.BRINGUP.menuText()));
+        expect("each fixed kind is named by its base and mods", "v012 with Volume and LED rows and EXIF dates".equals(
+                Candidates.Kind.V026.firmwareName()) && "v012 with Volume and LED rows".equals(
+                Candidates.Kind.V025.firmwareName()) && "v006 with the OV9732 port and Volume and LED rows".equals(
+                Candidates.Kind.BRINGUP.firmwareName()) && Candidates.Kind.BRINGUP.repair()
+                && !Candidates.Kind.RESTORE.repair() && !Candidates.Kind.PROBE.repair());
+        boolean noNumber = true;
+        for (Candidates.Kind k : Candidates.Kind.values()) {
+            noNumber &= !k.label.contains("v0.") && !k.firmwareName().contains("v0.");
+        }
+        expect("no kind's words name a build by a number", noNumber);
         expect("v0.26 and v0.25 are made from the factory dump, v0.24 from the stock dump", Candidates.Kind.V026.base
                 == Candidates.Base.FACTORY && Candidates.Kind.V025.base == Candidates.Base.FACTORY
                 && Candidates.Kind.BRINGUP.base == Candidates.Base.STOCK);
@@ -227,7 +229,7 @@ public final class CandidatesFactoryTest {
                 Candidates.Kind.V025.sha256, UpdateCheck.UPDATE_SIZE, false, null);
         UpdateCheck.Result soft = Candidates.asFactory(marks, Candidates.Kind.V025);
         expect("unknown build marks are a warning for v0.25, which then passes", !marks.ok && soft.ok
-                && soft.lines.get(1).level == UpdateCheck.Level.WARN && soft.lines.get(1).text.contains("v0.25")
+                && soft.lines.get(1).level == UpdateCheck.Level.WARN && soft.lines.get(1).text.contains("v012 with Volume and LED rows")
                 && soft.lines.get(1).detail.contains("no sensor table.") && soft.lines.get(0).level == UpdateCheck.Level.PASS
                 && soft.sha256.equals(marks.sha256) && !soft.compared && soft.referenceSha256 == null);
         List<UpdateCheck.Line> sum = new ArrayList<>(lines);

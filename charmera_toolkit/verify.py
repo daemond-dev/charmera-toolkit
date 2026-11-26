@@ -508,10 +508,11 @@ def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stoc
         if ref.sha256 == sensor.sha256 and ours and theirs and ours != theirs:
             # The same table, but one side's code carries our OV9732 port: the two drive different sensors.
             # Not a refusal: a file for the other sensor boots, and the stock build of the right base undoes it from the
-            # card. This is also what v0.24 built from the own read of an OV9732 camera that was flashed with v006 looks like.
+            # card. This is also what v006 with the OV9732 port and Volume and LED rows, built from the own read of an OV9732
+            # camera that was flashed with v006, looks like.
             return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock ({table_where}), but the "
                           f"file is firmware for the {ours} and --stock for the {theirs}: one of them also carries the OV9732 "
-                          "driver our port adds (v0.21 to v0.24), so it drives the OV9732 whatever the table says. If --stock "
+                          "driver our OV9732 port adds (on v006), so it drives the OV9732 whatever the table says. If --stock "
                           f"shows the sensor this camera has, the camera boots with the file but can't take pictures until you "
                           "flash firmware for its sensor. If --stock is a read of a camera that was flashed with firmware for the "
                           "wrong sensor (an OV9732 camera that ran v006, for example), the file may be the fix", "warn")]
@@ -554,7 +555,7 @@ def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stoc
                       "into, read before it was ever flashed>, says which sensor it has" + no_code, "warn")]
     if sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()} and sensor_of(image) == "OV9732":
         return [Check("sensor-table", True, f"the image-sensor set-up table is the SP140A one v006 and v008_test carry: {table_where}, sha256 "
-                      f"{sensor.sha256[:8]}..., but the code also carries our OV9732 port (v0.21 to v0.24), so it drives the "
+                      f"{sensor.sha256[:8]}..., but the code also carries our OV9732 port (built on v006), so it drives the "
                       "OV9732. It fits a camera only if that camera has an OV9732, which nothing in the file can tell. `charmera "
                       "identify` on the camera's photos, or --stock <a dump of the camera this file goes into, read before it was "
                       "ever flashed>, says which sensor it has" + no_code, "warn")]

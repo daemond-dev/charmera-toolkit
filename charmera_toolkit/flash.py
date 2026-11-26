@@ -391,7 +391,7 @@ def build_marks_found(data: bytes) -> Dict[str, Optional[dict]]:
         "sensor_table": None if m.sensor is None else {"offset": f"0x{m.sensor.init[0]:X}", "writes": m.sensor.pairs,
                                                        "sha256": m.sensor.sha256, "sensor": m.sensor.sensor,
                                                        # what the code drives: OV9732 for a v006 build with our port
-                                                       # (v0.21 to v0.24), which keeps the SP140A table
+                                                       # (on v006), which keeps the SP140A table
                                                        "drives": image_mod.sensor_of(data) or m.sensor.sensor},
     }
 
@@ -966,7 +966,7 @@ def _drives(table: dict) -> str:
 
 
 def _ported(table: dict) -> bool:
-    """An SP140A table in code that carries our OV9732 port (v0.21 to v0.24): that firmware drives an OV9732."""
+    """An SP140A table in code that carries our OV9732 port (built on v006): that firmware drives an OV9732."""
     return table.get("sensor", "SP140A") == "SP140A" and _drives(table) == "OV9732"
 
 

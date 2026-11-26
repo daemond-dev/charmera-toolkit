@@ -16,8 +16,8 @@ import java.util.Locale;
  *   field 0x11) and an EXIF APP1 block with Make Generalplus, Model CBB3 and Software 20150615 (the camera always
  *   writes that Software; the same names without it are a copy the toolkit's exif-fix --keep-make made: OTHER);
  * - ORIGINAL_BARE: the bare template's comment ("GPEncoder", COM length field 0x0B) and no APP1 segment at all, which
- *   neither known build writes for a still photo (the factory build v012, and firmware v0.25 made from it, write it);
- * - FACTORY_EXIF: firmware v0.26's header, 0x340 bytes up to the end of the SOS header: the bare comment and one APP1
+ *   neither known build writes for a still photo (the factory build v012, and our v012 builds without EXIF dates, write it);
+ * - FACTORY_EXIF: the EXIF dates mod's header, 0x340 bytes up to the end of the SOS header: the bare comment and one APP1
  *   block, right after the SOI, with EXIF Make Kodak, Model Charmera and a Software tag (exif-fix writes the same
  *   names on its copies, but no Software: such a copy is OTHER);
  * - OTHER: anything else, with what differs in reasons.
@@ -37,14 +37,14 @@ final class PhotoId {
     static final String CAMERA_MODEL = "CBB3";
     /** The Software tag the v006 family's still writer always fills in (photo_id.CAMERA_SOFTWARE). */
     static final String CAMERA_SOFTWARE = "20150615";
-    /** Firmware v0.26's EXIF names and header length (SOI up to the end of the SOS header). */
+    /** The EXIF dates mod's EXIF names and header length (SOI up to the end of the SOS header). */
     static final String FACTORY_MAKE = "Kodak";
     static final String FACTORY_MODEL = "Charmera";
     static final int FACTORY_EXIF_HEADER = 0x340;
 
     /**
-     * The header the photos of a written firmware should have: the factory build's bare one for v0.25, the EXIF mod's
-     * one for v0.26 and v0.27, and the public build's family for everything else (the stock restore file, the probe, v0.24, or a firmware
+     * The header the photos of a written firmware should have: the factory build's bare one for V025, the EXIF mod's
+     * one for V026 and V027, and the public build's family for everything else (the stock restore file, the probe, BRINGUP, or a firmware
      * the app does not know, null).
      */
     static Kind expectedFor(Candidates.Kind written) {

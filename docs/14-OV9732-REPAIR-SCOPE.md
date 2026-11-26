@@ -127,9 +127,9 @@ do it:
 
 Rewrite the updater at `~0x7b340` to translate SP140A's `0xFD`-paged `0x04`/`0x03` (exposure) and `0x24` (gain) into
 the OV9732's `0x3500`/`0x3501`/`0x3502` (exposure, 3 bytes) and `0x350A`/`0x350B` (gain), with no paging. A first
-"does it stream" test doesn't need this; correct AE does. (The hook that shipped in v0.21 sits at VA `0x7b378`, and
-the real driver writes only `0x3501`/`0x3502`; see [OV9732 exposure, colour and white
-balance](15-OV9732-AE-WB-FLASH-PORT.md).)
+"does it stream" test doesn't need this; correct AE does. (The hook that shipped in v0.21, the first stage of our
+OV9732 port on v006, sits at VA `0x7b378`, and the real driver writes only `0x3501`/`0x3502`; see [OV9732 exposure,
+colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md).)
 
 ### 4. Add a real ID check (recommended)
 

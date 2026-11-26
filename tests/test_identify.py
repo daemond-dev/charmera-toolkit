@@ -63,7 +63,7 @@ def test_one_family_oldest_and_newest(tmp_path, capsys):
                                   "--out out/")
     assert line(out, "confidence:").startswith("high:")
     caveats_ok(out)
-    assert "not stock:" not in out and "v0.21-v0.24" not in out
+    assert "not stock:" not in out and "OV9732 port on v006" not in out
 
 
 def test_the_v006_family_alone_is_high(tmp_path, capsys):
@@ -79,7 +79,7 @@ def test_the_v006_family_alone_is_high(tmp_path, capsys):
     assert "--base v006 --mods <mods> --download" in line(out, "next:")
     assert line(out, "base:") == "v006 (stock firmware of SP140A cameras)"
     assert line(out, "confidence:").startswith("high:")
-    assert line(out, "note:") == identify.OUR_V021_V024
+    assert line(out, "note:") == identify.OUR_OV9732_PORT
     assert "not stock:" not in out
     caveats_ok(out)
     r = identify.build_report([root])
@@ -92,8 +92,7 @@ def test_the_exif_mod_alone_is_not_stock_on_base_v012(tmp_path, capsys):
     put(root, "DCIM/100MEDIA/PICT0002.JPG", exif_mod_header(), T0 + DAY)
     code, out = run(capsys, root)
     assert code == 0
-    assert line(out, "not stock:") == ("This camera does not look stock: our EXIF mod (v0.26 or later, Software "
-                                       "'v0.26') is installed")
+    assert line(out, "not stock:") == "This camera does not look stock: our EXIF mod (Software 'v0.26') is installed"
     assert "built on stock v012: base v012" in line(out, "conclusion:")
     assert line(out, "base:").startswith("v012 ")
     assert line(out, "confidence:").startswith("high:")
@@ -109,7 +108,7 @@ def test_bare_then_exif_mod_is_one_family_with_the_mod_note(tmp_path, capsys):
     data = json.loads(out)
     assert code == 0 and data["stock"] is False and data["base"] == "v012" and data["family"] == "v012"
     assert data["confidence"] == "high" and data["families"] is None
-    assert data["not_stock"] == [f"This camera does not look stock: our EXIF mod (v0.26 or later, Software 'v0.26') "
+    assert data["not_stock"] == [f"This camera does not look stock: our EXIF mod (Software 'v0.26') "
                                  f"is installed, installed between {date(T0 + DAY)} and {date(T0 + 2 * DAY)}"]
     assert [r["family"] for r in data["family_runs"]] == ["v012"]
 
@@ -137,7 +136,7 @@ def test_two_families_follow_the_oldest(tmp_path, capsys, older, newer):
     assert line(out, "conclusion:").endswith(f"base {older}")
     assert line(out, "base:").startswith(older + " ")
     assert line(out, "confidence:").startswith("low:")
-    assert line(out, "note:") == identify.OUR_V021_V024          # v006-family photos are on the card
+    assert line(out, "note:") == identify.OUR_OV9732_PORT          # v006-family photos are on the card
     code, out = run(capsys, root, "--json")
     data = json.loads(out)
     assert data["base"] == older and data["family"] == family[older] and data["stock"] is False

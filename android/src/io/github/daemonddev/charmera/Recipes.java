@@ -14,6 +14,10 @@ final class Recipes {
     static final String CATALOG_VERSION = "v0.27";
     static final String CATALOG_STAMP = "202611170027";
 
+    /** Each base and what its stock firmware is, for its name (Recipe.firmwareName). */
+    static final String[] BASE_IDS = {"v012", "v006", "v008_test"};
+    static final String[] BASE_STOCK = {"the factory firmware, unchanged", "the stock restore file", "the charmera-film-mods restore file, unchanged under a new file name"};
+
     /** {id, build, copy, prep, sha256, url or null}. */
     static final String[][] DUMPS = {
             {"v006-original", "v006", "original", "truncate", "cc3b4b2fd7eb71ba5a441decdc86984261fac8418ee3e105d7e2b3c38b7ea42f", "https://raw.githubusercontent.com/benbadio/keychain-camera-plus/209c25a47ce91c805b663edb6e18861b367a5a1b/dumps/charmera_stock_latest.bin"},
@@ -27,14 +31,16 @@ final class Recipes {
     static final String[] MOD_IDS = {"v006/sensor-probe", "v006/ov9732-port", "v006/volume-led", "v012/volume-led", "v012/exif", "v012/boot-last-mode", "v012/capture-flash"};
     static final String[] MOD_BASES = {"v006", "v006", "v006", "v012", "v012", "v012", "v012"};
     static final String[] MOD_NAMES = {"sensor-probe", "ov9732-port", "volume-led", "volume-led", "exif", "boot-last-mode", "capture-flash"};
-    static final String[] MOD_TITLES = {"Sensor-ID probe", "OV9732 port", "Volume and LED rows", "Volume and LED rows", "EXIF dates", "Boot to the last mode", "Capture flash"};
+    static final String[] MOD_TITLES = {"Sensor-ID probe", "OV9732 port", "Volume and LED rows", "Volume and LED rows", "EXIF dates", "Boot to last mode", "Capture flash"};
+    /** How a build's name says each mod (Recipe.firmwareName): "EXIF dates", "the OV9732 port". */
+    static final String[] MOD_PHRASES = {"the sensor-ID probe", "the OV9732 port", "Volume and LED rows", "Volume and LED rows", "EXIF dates", "boot to last mode", "capture flash"};
     static final String[] MOD_STATUS = {"tested", "tested", "tested", "tested", "tested", "tested", "tested"};
     static final String[] MOD_DESCRIPTIONS = {
             "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops as before.",
-            "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning (v0.23). It's for an OV9732 camera that was flashed with this build.",
+            "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning. It's for an OV9732 camera that was flashed with this build.",
             "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
             "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
-            "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26, and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",
+            "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26 (an old build number that's part of the mod's code, so it can't change), and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",
             "Power-on goes straight into the mode you last used, photo or video (photo the first time), instead of the SELECT MODE screen. A short press of the power button still opens it.",
             "When you take a photo, the picture area goes black for 120 ms under the on-screen icons, so you can see the shot was taken even at Volume 0.",
     };
@@ -378,30 +384,30 @@ final class Recipes {
             },
     };
 
-    /** {base, mods joined by ',', stamp, status, label}. */
+    /** {base, mods joined by ',', stamp, status, label (its name), old name or null ("v0.27")}. */
     static final String[][] SETS = {
-            {"v006", "", "202610261427", "tested", "stock v006 (the stock restore file)"},
-            {"v006", "v006/sensor-probe", "202611082300", "tested", "v006 + sensor-ID probe"},
-            {"v006", "v006/ov9732-port", "202611110023", "tested", "v0.23: v006 + OV9732 port"},
-            {"v006", "v006/volume-led", "202611170027", "experimental", "v006 + Volume and LED rows"},
-            {"v006", "v006/ov9732-port,v006/volume-led", "202611120024", "tested", "v0.24: v006 + OV9732 port + Volume/LED"},
-            {"v008_test", "", "202611170027", "tested", "stock v008_test (the film-mods restore file, renamed but unchanged)"},
-            {"v012", "", "202611170027", "tested", "stock v012 (the factory firmware, unchanged)"},
-            {"v012", "v012/volume-led", "202611130025", "tested", "v0.25: v012 + Volume/LED"},
-            {"v012", "v012/exif", "202611170027", "experimental", "v012 + EXIF dates"},
-            {"v012", "v012/boot-last-mode", "202611170027", "experimental", "v012 + Boot to the last mode"},
-            {"v012", "v012/capture-flash", "202611170027", "experimental", "v012 + Capture flash"},
-            {"v012", "v012/volume-led,v012/exif", "202611130026", "tested", "v0.26: v012 + Volume/LED + EXIF"},
-            {"v012", "v012/volume-led,v012/boot-last-mode", "202611170027", "experimental", "v012 + Volume and LED rows + Boot to the last mode"},
-            {"v012", "v012/volume-led,v012/capture-flash", "202611170027", "experimental", "v012 + Volume and LED rows + Capture flash"},
-            {"v012", "v012/exif,v012/boot-last-mode", "202611170027", "experimental", "v012 + EXIF dates + Boot to the last mode"},
-            {"v012", "v012/exif,v012/capture-flash", "202611170027", "experimental", "v012 + EXIF dates + Capture flash"},
-            {"v012", "v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 + Boot to the last mode + Capture flash"},
-            {"v012", "v012/volume-led,v012/exif,v012/boot-last-mode", "202611170027", "experimental", "v012 + Volume and LED rows + EXIF dates + Boot to the last mode"},
-            {"v012", "v012/volume-led,v012/exif,v012/capture-flash", "202611170027", "experimental", "v012 + Volume and LED rows + EXIF dates + Capture flash"},
-            {"v012", "v012/volume-led,v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 + Volume and LED rows + Boot to the last mode + Capture flash"},
-            {"v012", "v012/exif,v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 + EXIF dates + Boot to the last mode + Capture flash"},
-            {"v012", "v012/volume-led,v012/exif,v012/boot-last-mode,v012/capture-flash", "202611170027", "tested", "v0.27: v012 + Volume/LED + EXIF + boot to last mode + capture flash"},
+            {"v006", "", "202610261427", "tested", "stock v006 (the stock restore file)", null},
+            {"v006", "v006/sensor-probe", "202611082300", "tested", "v006 with the sensor-ID probe", null},
+            {"v006", "v006/ov9732-port", "202611110023", "tested", "v006 with the OV9732 port", "v0.23"},
+            {"v006", "v006/volume-led", "202611170027", "experimental", "v006 with Volume and LED rows", null},
+            {"v006", "v006/ov9732-port,v006/volume-led", "202611120024", "tested", "v006 with the OV9732 port and Volume and LED rows", "v0.24"},
+            {"v008_test", "", "202611170027", "tested", "stock v008_test (the charmera-film-mods restore file, unchanged under a new file name)", null},
+            {"v012", "", "202611170027", "tested", "stock v012 (the factory firmware, unchanged)", null},
+            {"v012", "v012/volume-led", "202611130025", "tested", "v012 with Volume and LED rows", "v0.25"},
+            {"v012", "v012/exif", "202611170027", "experimental", "v012 with EXIF dates", null},
+            {"v012", "v012/boot-last-mode", "202611170027", "experimental", "v012 with boot to last mode", null},
+            {"v012", "v012/capture-flash", "202611170027", "experimental", "v012 with capture flash", null},
+            {"v012", "v012/volume-led,v012/exif", "202611130026", "tested", "v012 with Volume and LED rows and EXIF dates", "v0.26"},
+            {"v012", "v012/volume-led,v012/boot-last-mode", "202611170027", "experimental", "v012 with Volume and LED rows and boot to last mode", null},
+            {"v012", "v012/volume-led,v012/capture-flash", "202611170027", "experimental", "v012 with Volume and LED rows and capture flash", null},
+            {"v012", "v012/exif,v012/boot-last-mode", "202611170027", "experimental", "v012 with EXIF dates and boot to last mode", null},
+            {"v012", "v012/exif,v012/capture-flash", "202611170027", "experimental", "v012 with EXIF dates and capture flash", null},
+            {"v012", "v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 with boot to last mode and capture flash", null},
+            {"v012", "v012/volume-led,v012/exif,v012/boot-last-mode", "202611170027", "experimental", "v012 with Volume and LED rows, EXIF dates and boot to last mode", null},
+            {"v012", "v012/volume-led,v012/exif,v012/capture-flash", "202611170027", "experimental", "v012 with Volume and LED rows, EXIF dates and capture flash", null},
+            {"v012", "v012/volume-led,v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 with Volume and LED rows, boot to last mode and capture flash", null},
+            {"v012", "v012/exif,v012/boot-last-mode,v012/capture-flash", "202611170027", "experimental", "v012 with EXIF dates, boot to last mode and capture flash", null},
+            {"v012", "v012/volume-led,v012/exif,v012/boot-last-mode,v012/capture-flash", "202611170027", "tested", "v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash", "v0.27"},
     };
 
     /** {base, mods joined by ',', dump id, file name, sha256}: the reviewed file of each set from each dump. */

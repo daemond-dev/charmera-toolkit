@@ -1385,13 +1385,16 @@ def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
     follow = _bodies(java, "private void followLoadedRepair(")[0]
     assert "if (fileFor != Route.REPAIR || k == null || k.equals(repairSel)) {" in follow
     assert follow.index("repairSel = k;") < follow.index("rememberRepair();") < follow.index("render();")
-    # the way back: an older version in the menu for a factory version, v0.23's file (made here with only the port ticked) for
-    # v0.24, the restore file for v008_test and the SP140A v006 picks; no "no backup" line for a pick that needs one
+    # the way back: another v012 build or stock v012 for a v012 pick, v006 with the OV9732 port (made here with only the
+    # port ticked) for the port with more mods, the restore file for v008_test and the SP140A v006 picks; no "no backup"
+    # line for a pick that needs one
     repair = _bodies(java, "private void renderRepair()")[0]
     assert "wayBack(repairSel)" in repair and "You don't need a backup." in repair
     back = _bodies(java, "private static String wayBack(")[0]
     said = _joined(back)
-    assert "an older version, or stock v012" in said and "It's the way back from every v012 version" in said         and "write v0.23's file. The app makes it here too" in said
+    assert "That's another v012 build, or stock v012" in said and "It's the way back from every v012 build" in said \
+        and "write v006 with the OV9732 port. The app makes it here too" in said
+    assert "v0." not in said and "version" not in said
     v008 = back[back.index("if (Recipe.V008.equals(sel.base)) {"):]
     v008 = v008[:v008.index("}")]
     assert "older version" not in v008 and "stock restore file" in v008
@@ -1404,7 +1407,7 @@ def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
     assert load.index("factoryKept = keepFactoryDump(factory);") < load.index("if (fd != null) {")
     assert factory.index("factoryDump = fd;") < factory.index("if (!buildsFactory(forRoute)) {") \
         < factory.index("showFile(factoryKeptOnly(fromFactory), null);") < factory.index("buildRestore(fd, request")
-    assert "makes firmware" in _bodies(java, "private static String factoryKeptOnly(")[0]
+    assert "makes firmware from it when base v012 is picked." in _joined(_bodies(java, "private static String factoryKeptOnly(")[0])
     # the flash check: the header each written firmware's photos should have
     check = _bodies(java, "private void checkPhoto()")[0]
     assert "PhotoId.Kind expected = made != null ? Recipe.expectedPhoto(made) : PhotoId.expectedFor(written);" in check
@@ -1456,8 +1459,8 @@ def test_app_identify_route_reads_the_photos_and_writes_nothing():
     assert "Identify.identify(entries, TimeZone.getDefault())" in run and "identifiedBase = r.base;" in run
     # the three guided questions, worded from what is known
     said = _joined(render)
-    for fact in ("Setup page 2: are there Volume and LED rows after FORMAT? Then one of our mods (v0.24 or later) is"
-                 " installed.",
+    for fact in ("Setup page 2: are there Volume and LED rows after FORMAT? Then one of our builds with Volume and LED"
+                 " rows is installed. Without them it's stock, or one of our builds without that mod.",
                  "Does photo or video mode freeze after a flash? Then that firmware is for the other sensor family and"
                  " doesn't drive this camera's sensor",
                  "Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells you nothing."):
@@ -1469,3 +1472,29 @@ def test_app_identify_route_reads_the_photos_and_writes_nothing():
     assert "r.caveats.add(CAVEAT_V008);" in ident and "r.caveats.add(CAVEAT_AFTER_FLASH);" in ident
     assert "A photo can't tell v006 from v008_test" in _joined(ident)
     assert "only photos from before the flash say what fits" in _joined(ident)
+
+
+def test_app_names_a_build_by_the_same_rule_as_recipes_py():
+    """Parity: Recipe.firmwareName follows recipes.firmware_name (base, then "with" and the mods' phrases in the table's
+    order, joined "a, b and c"; "stock <base> (<what it is>)" with no mods), and the app's table carries the same names
+    and old numbers. RecipeTest runs the Java side on the JVM with the same examples as tests/test_recipes.py."""
+    from charmera_toolkit import recipes as R
+    doc = R.load()
+    recipe = (PKG / "Recipe.java").read_text(encoding="utf-8")
+    body = _bodies(recipe, "static String firmwareName(String base, List<String> mods)")[0]
+    assert 'return "stock " + base + " (" + Recipes.BASE_STOCK[i] + ")";' in body
+    assert "parts.add(Recipes.MOD_PHRASES[i]);" in body and 'return base + " with " + joinAnd(parts);' in body
+    join = _bodies(recipe, "static String joinAnd(List<String> parts)")[0]
+    assert 'i == 0 ? "" : i == parts.size() - 1 ? " and " : ", "' in join
+    assert "return firmwareName(base, mods);" in _bodies(recipe, "String label()")[0]
+    table = (PKG / "Recipes.java").read_text(encoding="utf-8")
+    rows = re.findall(r'\{"(v\w+)", "([^"]*)", "(\d{12})", "(\w+)", "([^"]+)", (null|"[^"]+")\},', table)
+    assert len(rows) == len(doc["sets"])
+    for (base, csv, _, _, label, old), s in zip(rows, doc["sets"]):
+        mods = csv.split(",") if csv else []
+        assert label == R.firmware_name(base, mods, doc) == s["label"]
+        assert (None if old == "null" else old.strip('"')) == R.old_name(base, mods, doc)
+    # the one older-name line, in the file check's details
+    assert '"Older versions of the app called this " + old + "."' in recipe
+    show = _bodies(ACTIVITY.read_text(encoding="utf-8"), "private void showChecked(")[0]
+    assert "String older = Recipe.olderNameNote(result.sha256);" in show

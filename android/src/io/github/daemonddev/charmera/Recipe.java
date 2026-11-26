@@ -102,18 +102,18 @@ final class Recipe {
             return s == null ? null : s[3];
         }
 
-        /** Its set's label, or the base and mod names when it is not a set. */
+        /**
+         * Its name: the base and the mods on it (firmwareName), e.g. "v012 with Volume and LED rows and EXIF dates". A
+         * set's label in the recipes is the same name (a test checks it).
+         */
         String label() {
+            return firmwareName(base, mods);
+        }
+
+        /** The number older versions of the app called this build ("v0.27"), from its set, or null. */
+        String oldName() {
             String[] s = set();
-            if (s != null) {
-                return s[4];
-            }
-            StringBuilder b = new StringBuilder(base);
-            for (String m : mods) {
-                int i = modIndex(m);
-                b.append(" + ").append(i < 0 ? m : Recipes.MOD_TITLES[i]);
-            }
-            return b.toString();
+            return s == null || s.length < 6 ? null : s[5];
         }
 
         /** Whether a file with this SHA-256 is this selection made from any of its base's dumps. */
@@ -142,18 +142,6 @@ final class Recipe {
             return null;
         }
 
-        /** The firmware version of a preset ("v0.26"), or null for any other selection. */
-        String version() {
-            Candidates.Kind k = kind();
-            return k == null ? null : k.version;
-        }
-
-        /** How the screen names it: a preset by its version, any other by its set's label. */
-        String name() {
-            String v = version();
-            return v != null ? v : label();
-        }
-
         /** "base|mod,mod", for the preferences; parse() reads it back. */
         String serialize() {
             return base + "|" + csv();
@@ -178,6 +166,51 @@ final class Recipe {
     /** The fixed kinds that are sets of the table, so a preset builds the same file it always did. */
     static final Candidates.Kind[] LEGACY = {Candidates.Kind.RESTORE, Candidates.Kind.PROBE, Candidates.Kind.BRINGUP,
             Candidates.Kind.V025, Candidates.Kind.V026, Candidates.Kind.V027};
+
+    /** "a", "a and b", "a, b and c". */
+    static String joinAnd(List<String> parts) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            b.append(i == 0 ? "" : i == parts.size() - 1 ? " and " : ", ").append(parts.get(i));
+        }
+        return b.toString();
+    }
+
+    /**
+     * What a build is called: its base and the mods on it, e.g. "v012 with Volume and LED rows and EXIF dates", or
+     * "stock v012 (the factory firmware, unchanged)" with no mods. Each mod is named by its phrase (Recipes.MOD_PHRASES)
+     * in the table's order; an unknown id by itself, at the end. charmera_toolkit/recipes.py's firmware_name follows
+     * the same rule (tests/test_android.py checks they agree).
+     */
+    static String firmwareName(String base, List<String> mods) {
+        if (mods.isEmpty()) {
+            for (int i = 0; i < Recipes.BASE_IDS.length; i++) {
+                if (Recipes.BASE_IDS[i].equals(base)) {
+                    return "stock " + base + " (" + Recipes.BASE_STOCK[i] + ")";
+                }
+            }
+            return "stock " + base;
+        }
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < Recipes.MOD_IDS.length; i++) {
+            if (mods.contains(Recipes.MOD_IDS[i])) {
+                parts.add(Recipes.MOD_PHRASES[i]);
+            }
+        }
+        for (String m : mods) {
+            if (modIndex(m) < 0 && !parts.contains(m)) {
+                parts.add(m);
+            }
+        }
+        return base + " with " + joinAnd(parts);
+    }
+
+    /** The "older name" line for a reviewed file that had a number in older versions of the app, or null. */
+    static String olderNameNote(String sha) {
+        Selection s = selectionOf(sha);
+        String old = s == null ? null : s.oldName();
+        return old == null ? null : "Older versions of the app called this " + old + ".";
+    }
 
     /** A selection written by Selection.serialize(), or null when the text is not one (or names no base). */
     static Selection parse(String text) {
@@ -507,7 +540,44 @@ final class Recipe {
         return b == null ? null : new Selection(b[0], b[1].isEmpty() ? new String[0] : b[1].split(","));
     }
 
-    /** The v006 mod that makes the public build drive the OV9732 (v0.23; with the Volume and LED rows, v0.24). */
+    /**
+     * The selection of the reviewed file whose SHA-256 starts with this prefix (the flash log keeps 12 hex digits), or
+     * null when none does, or more than one selection does.
+     */
+    static Selection selectionOfPrefix(String prefix) {
+        if (prefix == null || prefix.length() < 12) {
+            return null;
+        }
+        String p = prefix.toLowerCase(java.util.Locale.ROOT);
+        Selection found = null;
+        for (String[] b : Recipes.BUILDS) {
+            if (b[4].startsWith(p)) {
+                Selection s = selectionOf(b[4]);
+                if (found != null && !(found.base.equals(s.base) && found.mods.equals(s.mods))) {
+                    return null;
+                }
+                found = s;
+            }
+        }
+        return found;
+    }
+
+    /**
+     * A short name for a file name, e.g. "v012-volume-led-exif-boot-last-mode-capture-flash" or "v012-stock": the
+     * base and each mod's id without its base, joined by '-'. The full name (label()) is too long for a file name.
+     */
+    static String fileTag(Selection sel) {
+        StringBuilder b = new StringBuilder(sel.base);
+        if (sel.stock()) {
+            b.append("-stock");
+        }
+        for (String m : sel.mods) {
+            b.append('-').append(m.substring(m.indexOf('/') + 1));
+        }
+        return b.toString().replaceAll("[^A-Za-z0-9._-]+", "");
+    }
+
+    /** The v006 mod that makes the public build drive the OV9732 (on its own, or with the Volume and LED rows). */
     static final String OV9732_PORT = "v006/ov9732-port";
     /** The v006 mod that is the sensor-ID probe (the Probe route's file). */
     static final String PROBE_MOD = "v006/sensor-probe";
@@ -566,9 +636,9 @@ final class Recipe {
         return PhotoId.Kind.PUBLIC_FAMILY;
     }
 
-    /** The plain words for a selection the app has no fixed kind for: its label and each mod's description. */
+    /** The plain words for a selection the app has no fixed kind for: its name and each mod's description. */
     static String describe(Selection sel) {
-        StringBuilder b = new StringBuilder(sel.label()).append(".");
+        StringBuilder b = new StringBuilder("This is ").append(sel.label()).append(".");
         for (String m : sel.mods) {
             b.append(" ").append(title(m)).append(experimental(m) ? " (experimental, not yet tried on a camera)" : "")
                     .append(": ").append(description(m));

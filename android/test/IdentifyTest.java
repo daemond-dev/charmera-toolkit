@@ -59,14 +59,14 @@ public final class IdentifyTest {
         expect("bare everywhere is stock v012, high", r.base == Identify.Base.V012
                 && r.family == Identify.Base.V012 && r.confidence == Identify.Confidence.HIGH && r.changes.isEmpty()
                 && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If the camera was flashed after them, it runs something else now.") && r.notStock.isEmpty()
-                && !r.conclusion.contains("does not look stock") && !r.conclusion.contains("v0.21-v0.24"));
+                && !r.conclusion.contains("does not look stock") && !r.conclusion.contains("OV9732 port on v006"));
         expect("the evidence names both ends", any(r.evidence, "Oldest camera-written: DCIM/PICT0001.jpg")
                 && any(r.evidence, "Newest camera-written: DCIM/PICT0003.jpg"));
         expect("dates carry the year", any(r.evidence, "taken " + Identify.date(card.get(1), UTC))
                 && Identify.date(card.get(1), UTC).startsWith("2025-10-"));
         consistent("stock v012", r);
 
-        // stock v006 family: two agree, not capped: high, and the v0.21-v0.24 line instead of a lower confidence;
+        // stock v006 family: two agree, not capped: high, and the OV9732-port line instead of a lower confidence;
         // OTHER and unreadable photos at the ends are skipped and counted
         card = new ArrayList<>();
         card.add(photo("DCIM/PICT0001.jpg", T0, junk));
@@ -89,8 +89,8 @@ public final class IdentifyTest {
                 && Identify.stockName(Identify.Base.V006_FAMILY).equals("v006 or v008_test"));
         expect("all read agree: high, and why", r.confidenceWhy.equals("all 2 camera-written photos read show the same"
                 + " family, oldest to newest"));
-        expect("the v006 family adds the one v0.21-v0.24 line", r.conclusion.contains(Identify.OUR_V021_V024)
-                && r.conclusion.indexOf("v0.21-v0.24") == r.conclusion.lastIndexOf("v0.21-v0.24"));
+        expect("the v006 family adds the one OV9732-port line", r.conclusion.contains(Identify.OUR_OV9732_PORT)
+                && r.conclusion.indexOf("OV9732 port on v006") == r.conclusion.lastIndexOf("OV9732 port on v006"));
         consistent("stock v006", r);
 
         // a single camera-written photo: medium
@@ -120,8 +120,8 @@ public final class IdentifyTest {
         expect("bare then EXIF mod is one family", r.changes.isEmpty() && r.exifMod && r.family == Identify.Base.V012);
         expect("the EXIF mod is not stock, base v012, high", r.base == Identify.Base.V012
                 && r.confidence == Identify.Confidence.HIGH && r.notStock.size() == 1
-                && r.notStock.get(0).startsWith("This camera does not look stock: our EXIF mod (v0.26 or later,"
-                + " Software 'v0.26') is installed") && !r.conclusion.contains("taken by stock"));
+                && r.notStock.get(0).startsWith("This camera does not look stock: our EXIF mod (Software 'v0.26')"
+                + " is installed") && !r.conclusion.contains("taken by stock"));
         expect("the EXIF mod's install falls between the last bare and the first EXIF photo",
                 r.notStock.get(0).contains("installed between " + Identify.date(card.get(1), UTC) + " and "
                         + Identify.date(card.get(2), UTC)));
@@ -173,7 +173,7 @@ public final class IdentifyTest {
         r = Identify.identify(card, UTC);
         expect("v012 then the v006 family is base v012, low", r.base == Identify.Base.V012
                 && r.confidence == Identify.Confidence.LOW && r.changes.size() == 1 && r.notStock.size() == 1
-                && r.notStock.get(0).contains("the v012 family up to") && r.conclusion.contains(Identify.OUR_V021_V024));
+                && r.notStock.get(0).contains("the v012 family up to") && r.conclusion.contains(Identify.OUR_OV9732_PORT));
         consistent("v012 then v006", r);
 
         // there and back: two changes, both found
@@ -338,7 +338,7 @@ public final class IdentifyTest {
         card.add(photo("DCIM/PICT0003.jpg", T0 + 2 * DAY, bare));
         r = Identify.identify(card, UTC);
         expect("and makes no second family", r.changes.isEmpty() && r.base == Identify.Base.V012
-                && r.notStock.isEmpty() && !r.conclusion.contains(Identify.OUR_V021_V024));
+                && r.notStock.isEmpty() && !r.conclusion.contains(Identify.OUR_OV9732_PORT));
         // an exif-fix copy of a bare photo (Kodak/Charmera, no Software) is not our EXIF mod
         card = new ArrayList<>();
         card.add(photo("DCIM/PICT0001.jpg", T0, bare));
@@ -374,7 +374,7 @@ public final class IdentifyTest {
         expect("labels name the family", Identify.label(PhotoId.Kind.PUBLIC_FAMILY).equals(
                 "v006 family (stock v006 or v008_test, SP140A cameras)")
                 && Identify.label(PhotoId.Kind.ORIGINAL_BARE).equals("v012 family (stock v012, OV9732 cameras)")
-                && Identify.label(PhotoId.Kind.FACTORY_EXIF).equals("our EXIF mod (v0.26 or later), v012 family"));
+                && Identify.label(PhotoId.Kind.FACTORY_EXIF).equals("our EXIF mod, v012 family"));
 
         System.out.printf(Locale.ROOT, "IdentifyTest: %d passed, %d failed%n", passes, failures);
         if (failures > 0) {
