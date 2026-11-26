@@ -80,15 +80,15 @@ the app refuses the withdrawn candidates A and B and backups given as update fil
 
 ## Which firmware?
 
-A base is the stock firmware of one build (v006, v008_test or v012). A mod is a change on top of it. Custom in the app
-(or `charmera build`) lets you pick a base and any mix of its mods. What they make from the public dumps is a
-reviewed file: this project built and checked that exact file, and `verify`, `stage` and the app know it by its
+A base is the stock firmware of one build (v006, v008_test or v012). A mod is a change on top of it. In the app you pick
+a base and tick its mods one by one (`charmera build` takes `--base` and `--mods`). What they make from the public dumps
+is a reviewed file: this project built and checked that exact file, and `verify`, `stage` and the app know it by its
 SHA-256. A file made any other way, from your own read for example, isn't one, and the checks treat it more strictly.
 
 | Your camera | Base | Versions | Back to stock |
 |---|---|---|---|
-| OmniVision OV9732 sensor | v012 (its factory firmware) | v0.25 Volume/LED, v0.26 adds EXIF dates, v0.27 adds boot to last mode and capture flash | stock v012, from Custom with base v012 and no mods, or `charmera build --base v012 --download` |
-| SP140A sensor | v006 (public stock) | Volume/LED, experimental (Custom, or `--mods volume-led`) | the stock restore file: Advanced > Download the stock restore file (no backup needed), or Restore stock firmware with your backup. On a computer, `charmera build --base v006 --download` |
+| OmniVision OV9732 sensor | v012 (its factory firmware) | v0.25 Volume/LED, v0.26 adds EXIF dates, v0.27 adds boot to last mode and capture flash | stock v012 (in the app, base v012 with no mods ticked), or `charmera build --base v012 --download` |
+| SP140A sensor | v006 (public stock) | Volume/LED, experimental (tick it on base v006, or `--mods volume-led`) | the stock restore file: Advanced > Download the stock restore file (no backup needed), or Restore stock firmware with your backup. On a computer, `charmera build --base v006 --download` |
 | OV9732 that was flashed with v006 | v012, or v006 with the OV9732 port | v0.25 to v0.27 as in the first row (v0.25 went onto a camera running v0.24 and works), or v0.23 (v006 changed to drive the OV9732) and v0.24 (adds Volume/LED) | stock v012, as in the first row. The stock restore file can't take pictures on this camera. |
 
 Identify (in the app, or `charmera identify`) reads the photos on the card and says which firmware took them, which

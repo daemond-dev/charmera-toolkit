@@ -415,8 +415,8 @@ public final class Candidates {
                 + " (system sounds, 0 to 8, which also sets playback volume) and LED (the automatic flash light, On as"
                 + " before or Off). Boot and update code are the stock restore file's, byte for byte. The stock restore"
                 + " file doesn't drive the OV9732, so it stops photo and video working on this camera. The way back is"
-                + " v0.23's file (JH_5408202611110023_….bin), which the app makes under Custom: pick base and mods"
-                + " (base v006, OV9732 port only). Like any update, the flash itself must not be interrupted.",
+                + " v0.23's file (JH_5408202611110023_….bin), which the app makes too (Flash custom firmware,"
+                + " base v006 with only the OV9732 port ticked). Like any update, the flash itself must not be interrupted.",
                 "JH_5408202611120024_0F0613AC.bin", "0919c5d857f855b11424407211a132ac61f4c91852e01af583bd6b76c85b1c69",
                 "JH_5408202611120024_0FB7027B.bin", "8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b"),
         V025(true, Base.FACTORY, "factory firmware + Volume/LED", "Firmware v0.25 is this camera's own factory firmware"

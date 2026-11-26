@@ -1332,17 +1332,20 @@ def test_app_repair_route_offers_each_version_from_a_menu():
     views = _bodies(java, "private void makeViews()")[0]
     # 0.28: the pick is base and mods (Recipe.Selection), remembered as such, with the old Kind name migrated once
     assert "repairSel = Recipe.remembered(picked.getString(KEY_REPAIR_SET, null), picked.getString(KEY_REPAIR_OLD, null));" in views
-    assert "picked.edit().remove(KEY_REPAIR_OLD).putString(KEY_REPAIR_SET, repairSel.serialize())" in views
+    assert "picked.edit().remove(KEY_REPAIR_OLD).remove(KEY_REPAIR_CUSTOM)" in views
     assert 'KEY_REPAIR_OLD = "repairVersion"' in java
-    version_menu = _bodies(java, "private android.widget.Spinner versionMenu()")[0]
-    assert "Recipe.presets()" in version_menu and "rows[presets.length] = CUSTOM_ROW;" in version_menu
-    assert 'CUSTOM_ROW = "Custom: pick base and mods"' in java
-    assert "chooseRepair(customStart(), true);" in version_menu
+    # 0.32: no preset menu. The step always shows the base menu and one box per mod, so mods are picked one by one.
+    assert "versionMenu()" not in java and "CUSTOM_ROW" not in java and "boolean repairCustom" not in java
+    repair = _bodies(java, "private void renderRepair()")[0]
+    assert "write.add(customPanel);" in repair and "repairChoice" not in repair
+    refresh = _bodies(java, "private void refreshRepairChoice()")[0]
+    assert "customPanel.setVisibility" not in refresh
+    assert "box.setOnCheckedChangeListener((v, on) -> chooseRepair(repairSel.with(mod, on)));" in refresh
     menu = _bodies(java, "private android.widget.Spinner menu(")[0]
     assert "new android.widget.Spinner(this, android.widget.Spinner.MODE_DROPDOWN)" in menu
     assert "setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(cardFill))" in menu
     assert "t.setTextColor(textPrimary);" in _bodies(java, "private View menuRow(")[0]
-    assert "repairChoice.setEnabled(idle && !downloading && !checking);" in _bodies(java, "private void updateButtons()")[0]
+    assert "boolean pickable = idle && !downloading && !checking;" in _bodies(java, "private void updateButtons()")[0]
     choose = _bodies(java, "private void chooseRepair(")[0]
     assert choose.index("if (busy() || downloading || checking || dialog != null) {") < choose.index("repairSel = sel;")
     assert choose.index("repairSel = sel;") < choose.index("rememberRepair();")
@@ -1382,7 +1385,7 @@ def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
     follow = _bodies(java, "private void followLoadedRepair(")[0]
     assert "if (fileFor != Route.REPAIR || k == null || k.equals(repairSel)) {" in follow
     assert follow.index("repairSel = k;") < follow.index("rememberRepair();") < follow.index("render();")
-    # the way back: an older version in the menu for a factory version, v0.23's file (made here by Custom) for
+    # the way back: an older version in the menu for a factory version, v0.23's file (made here with only the port ticked) for
     # v0.24, the restore file for v008_test and the SP140A v006 picks; no "no backup" line for a pick that needs one
     repair = _bodies(java, "private void renderRepair()")[0]
     assert "wayBack(repairSel)" in repair and "You don't need a backup." in repair
@@ -1392,8 +1395,8 @@ def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
     v008 = back[back.index("if (Recipe.V008.equals(sel.base)) {"):]
     v008 = v008[:v008.index("}")]
     assert "older version" not in v008 and "stock restore file" in v008
-    # the version menu dims while it is off
-    assert "repairChoice.setAlpha(repairChoice.isEnabled() ? 1f : 0.45f);" in _bodies(java, "private void updateButtons()")[0]
+    # the base menu dims while it is off
+    assert "baseChoice.setAlpha(pickable ? 1f : 0.45f);" in _bodies(java, "private void updateButtons()")[0]
     # a factory dump: kept on every route, built only on Repair and Advanced
     assert "return forRoute == Route.REPAIR || forRoute == Route.ADVANCED;" in _bodies(java, "private static boolean buildsFactory(")[0]
     load = _bodies(java, "private void loadFile(")[0]

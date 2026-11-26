@@ -13,11 +13,11 @@ from the card. A camera that doesn't start at all, or whose flash was cut off, i
 [section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
 
 Only have a phone? The [Charmera Card app](../android/README.md) identifies the camera's firmware from its photos,
-builds the reviewed files (the stock restore file, the sensor-ID probe, v0.23 to v0.27, or Custom) and does steps 4
-to 7 on the phone. Without the backup from step 1 it still writes. For a reviewed file it warns when nothing confirms
-what the camera runs, and for a file it doesn't know it warns loudly. Version 0.4, published before 0.5, had no
-backup step and didn't refuse the withdrawn candidates, so if you still have it installed, don't flash with it
-([how to tell the two apart](../android/README.md#install)). Read steps 0 and 1 here first.
+builds the reviewed files (the stock restore file, the sensor-ID probe, v0.23 to v0.27, or another mix of mods you tick)
+and does steps 4 to 7 on the phone. Without the backup from step 1 it still writes. For a reviewed file it warns when
+nothing confirms what the camera runs, and for a file it doesn't know it warns loudly. Version 0.4, published before
+0.5, had no backup step and didn't refuse the withdrawn candidates, so if you still have it installed, don't flash with
+it ([how to tell the two apart](../android/README.md#install)). Read steps 0 and 1 here first.
 
 Not flashing anything? If you only want the photo and video dates fixed, go to
 [Photo dates (EXIF)](10-EXIF.md). If your phone won't read the camera's card, go to
@@ -344,7 +344,7 @@ charmera build --base v006 --download --out out/      # SP140A camera
 Verify and stage it as in steps 3 and 4, then flash it as in step 5. It puts back the factory software with the
 cleaned copy's factory settings, and it erases the photos stored in the camera. If the camera froze after a flash
 with firmware for the other sensor, the base is the one its photos from before that flash show (step 1). In the app,
-stock v012 is Custom with base v012 and no mods.
+stock v012 is base v012 with no mods ticked.
 
 If the camera doesn't boot far enough to read the card, see
 [Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).

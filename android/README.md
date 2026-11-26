@@ -18,7 +18,7 @@ the card.
     was flashed with the public build can take these or the v012 builds)
   - for SP140A cameras: the stock restore file (build v006)
   - the sensor-ID probe, for a camera that can't take photos and can't be identified from its photos
-  - Custom: a base and any reviewed mix of its mods
+  - any other reviewed mix of a base and its mods, ticked one by one
 - Checks the file against a backup of the camera's flash chip, if you have one.
 - Walks you through ejecting, flashing and removing the update file, then checks a photo taken afterwards.
 - Saves the camera's photos and videos as a zip, with their dates fixed in the copies.
@@ -47,7 +47,8 @@ The usual run, for a camera that works:
 1. Switch the camera off, take the card out, switch it on, wait 10 seconds, put the card back and connect the camera
    with a USB-C data cable. Pick its drive when the app asks.
 2. **Identify this camera's firmware.** Card empty? Take two or three photos with the camera first.
-3. **Flash custom firmware.** Pick a version (the presets are for OV9732 cameras), make it and write it.
+3. **Flash custom firmware.** Pick the base (v012 for an OV9732 camera), tick the mods you want, make it and write
+   it.
 4. Eject, unplug, switch the camera off and on with the card in, and wait for "Upgrade 100%".
 5. Take the card out, switch off, reconnect as in step 1 and remove the update file. Then take a photo, switch off,
    reconnect and tap **Check the newest photo**.
@@ -69,18 +70,18 @@ links to **Flash log**, **Advanced** and **Check for app updates**.
   with what it wrote. It deletes from the camera only files whose entry matched, that read whole and that the camera
   made, and nothing at all if any part failed. With delete on, the zip also holds each date-fixed file as the camera
   wrote it, in `originals/` under its name on the card, and a file is deleted only when both its entries matched.
-- **Flash custom firmware.** The presets are for a camera whose photos Identify says were taken by stock v012, or
-  that the probe names as an OV9732. Pick the version in the menu (newest first; it starts on the newest the app can
-  make), make it (no backup needed) and write it. Not sure which? v0.26 is Volume/LED plus EXIF dates, and v0.27 adds
-  boot to the last mode and capture flash. v0.24 is made from the public stock dump. v0.25, v0.26 and v0.27 are made
-  from the factory build v012. With no factory dump on the phone, making them downloads its public cleaned copy
+- **Flash custom firmware.** Pick a base in the menu and tick its mods one by one ([Picking a base and
+  mods](#picking-a-base-and-mods)), then make it (no backup needed) and write it. Base v012 is for a camera whose photos
+  Identify says were taken by stock v012, or that the probe names as an OV9732. The step's title names the version your
+  ticks make. Not sure what to tick? On base v012, the Volume and LED rows make v0.25, adding EXIF dates makes v0.26, and adding boot
+  to the last mode and capture flash makes v0.27. v0.24 is made from the public stock dump. v0.25, v0.26 and v0.27 are
+  made from the factory build v012. With no factory dump on the phone, making them downloads its public cleaned copy
   ([the-dumping-grounds/charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012), checked
   by SHA-256). **Use a file on the phone** takes that copy, or the private read it was cleaned from, in its place (if
-  you pick it on another route, it's kept, and this route makes the firmware). A read of your own v012 camera goes in
-  as a backup instead. Then eject, flash, remove the update file, and tap **Check the newest photo**, which reads the
-  header of a photo taken after the flash. The header shows only the firmware family, not whether the picture is
-  right. The menu's last row is **Custom: pick base and mods** ([Custom build](#custom-build)). The way back to stock
-  on an OV9732 camera is stock v012 (Custom, base v012, no mods).
+  you pick it on another route, it's kept, and this route makes the firmware). A read of your own v012 camera goes in as
+  a backup instead. Then eject, flash, remove the update file, and tap **Check the newest photo**, which reads the
+  header of a photo taken after the flash. The header shows only the firmware family, not whether the picture is right.
+  The way back to stock on an OV9732 camera is stock v012 (base v012 with no mods ticked).
 - **Identify this camera's firmware.** No flash, no backup, no file, and it writes nothing. Choose the drive, then tap
   **Identify from the photos on the card**. Card empty or new? Take two or three photos with the camera first. The
   app reads the headers of up to 500 photos in `DCIM` and says which firmware family took the oldest and the newest it
@@ -100,7 +101,7 @@ links to **Flash log**, **Advanced** and **Check for app updates**.
   On an OV9732 camera, undo it with stock v012 or v0.25 or later (Flash custom firmware), not the stock restore file.
 - **Restore stock firmware.** For SP140A cameras. Needs this camera's backup (step 1), then the stock restore file
   (step 2), the drive, the write, eject and flash, and removing the update file. Without a backup, **Advanced** writes
-  the same file. On an OV9732 camera, stock is Custom, base v012, no mods, in Flash custom firmware.
+  the same file. On an OV9732 camera, stock is base v012 with no mods ticked, in Flash custom firmware.
 - **Test shots.** Shows the colour card on the phone (or use a printed one), names the lighting, and saves the photos
   taken since then as `Charmera-<firmware>-<lighting>-<date>-<time>.zip` with a `manifest.txt`.
 - **Flash log.** What the app wrote, removed and saved, and what you answered to "Did the camera show Upgrade 100%?",
@@ -212,8 +213,8 @@ since the card then holds that file). On Restore stock firmware, choosing anothe
 - Know what the camera runs: run Identify, or choose a backup of its chip. Without either, the app warns but doesn't
   refuse.
 - Every reviewed file is written without a backup, with a warning when nothing confirms what the camera runs. That's
-  the probe, every v012 build (stock v012 included), the v006 builds with the OV9732 port (v0.23, v0.24) and their
-  Custom combinations, and the stock restore file (from Advanced; the Restore stock firmware route itself needs a
+  the probe, every v012 build (stock v012 included), the v006 builds with the OV9732 port (v0.23, v0.24) and the
+  other mixes you can tick, and the stock restore file (from Advanced; the Restore stock firmware route itself needs a
   backup). A file the app doesn't know (any file of your own) is written without one too, with a loud warning that
   this project didn't review it and nothing compared it with this camera's own firmware. If you've chosen a backup,
   the file is checked against it first.
@@ -267,11 +268,15 @@ after power-on, so it doesn't notice a file added while it's running. And pluggi
 switches it on and runs the updater, so never connect a camera with an update file on its card unless you want that
 flash.
 
-## Custom build
+## Picking a base and mods
 
-In **Flash custom firmware**, the version menu's last row, **Custom: pick base and mods**, shows a base menu (v012, the
-factory build for OV9732 cameras; v006 and v008_test, SP140A builds) and one box per mod of that base, with its
-description. It starts on the base **Identify this camera's firmware** found. Experimental mods (not yet tried on a
+The write step of **Flash custom firmware** shows a base menu (v012, the factory build for OV9732 cameras; v006 and
+v008_test, SP140A builds) and one box per mod of that base, with its description. You tick the mods one by one, and
+the step's title names the version they make: on v012, the Volume and LED rows make v0.25, adding EXIF dates makes v0.26, and adding
+boot to the last mode and capture flash makes v0.27. With no mods ticked it's stock v012. On v006, the OV9732 port
+alone is v0.23, and with Volume/LED too it's v0.24. A file loaded with **Use a file on the phone** becomes the pick,
+its base and its boxes. The app doesn't pick the base from what **Identify this camera's firmware** found. If the base
+you pick v012 or v006 and it isn't the base it found, the step says so. Experimental mods (not yet tried on a
 camera) are marked and add a warning, but can be ticked. A mod that conflicts with a ticked one is greyed out, with the
 reason.
 
@@ -281,13 +286,13 @@ SHA-256) with `Recipe.java`, the app's copy of charmera_toolkit/recipes.py. It k
 reviewed file `Recipes.java` lists for that base, those mods and that dump, under that file's name.
 
 No pick needs a backup. You decide whether a file fits the camera. When nothing confirms which firmware the camera runs
-(no backup chosen, and Identify not run or naming the other sensor's family), the file step and the write
-confirmation say so. A chosen backup whose firmware drives the other sensor gives a loud "Wrong sensor?" warning.
-Neither one refuses. Stock v012 (base v012, no mods) is the factory firmware of OV9732 cameras, written here like any
+(no backup chosen, and Identify not run or naming the other sensor's family), the file step and the write confirmation
+say so. A chosen backup whose firmware drives the other sensor gives a loud "Wrong sensor?" warning. Neither one
+refuses. Stock v012 (base v012 with no mods ticked) is the factory firmware of OV9732 cameras, written here like any
 other pick, and the way back to stock from every v012 version. Stock v006 (the stock restore file) is made here but
-written on Restore stock firmware, which compares it with your backup, or on Advanced. A combination marked
-experimental says so even when each of its mods has been tested alone. The pick is remembered as base and mods.
-Details: [Custom build](../docs/06-ANDROID.md#custom-build-pick-a-base-and-mods).
+written on Restore stock firmware, which compares it with your backup, or on Advanced. A combination marked experimental
+says so even when each of its mods has been tested alone. The pick is remembered as base and mods. Details: [Picking a
+base and mods](../docs/06-ANDROID.md#picking-a-base-and-mods).
 
 ## What it cannot do
 
@@ -300,13 +305,13 @@ Details: [Custom build](../docs/06-ANDROID.md#custom-build-pick-a-base-and-mods)
   in the phone to get round it: that erases the photos Identify reads, and the flag comes back the next time the
   camera writes to the card. Copy the photos off on a computer, which mounts the card anyway, and clear the flag there
   with `charmera card-fix`.
-- It makes no other mods. It makes only the stock restore file and the reviewed files (the sensor-ID probe, the
-  presets in Flash custom firmware (v0.24 to v0.27) and the other reviewed combinations of [Custom
-  build](#custom-build)). A file from your own backup, frames, a boot logo or start-up tweaks need the toolkit on a
-  computer, or in Termux ([Using an Android phone](../docs/06-ANDROID.md)). The app then checks the file they produce,
-  against your backup if you've chosen one, and writes it (without a backup, with the loud unknown-file warning). In
-  Termux, `pip install` takes the toolkit straight from its GitHub URL.
-- It has no donor route for an unreviewed dump from another camera. The v012 presets are reviewed builds for OV9732
+- It makes no other mods. It makes only the stock restore file and the reviewed files (the sensor-ID probe, v0.23 to
+  v0.27 and the other reviewed mixes you can tick in Flash custom firmware, see [Picking a base and
+  mods](#picking-a-base-and-mods)). A file from your own backup, frames, a boot logo or start-up tweaks need the toolkit
+  on a computer, or in Termux ([Using an Android phone](../docs/06-ANDROID.md)). The app then checks the file they
+  produce, against your backup if you've chosen one, and writes it (without a backup, with the loud unknown-file
+  warning). In Termux, `pip install` takes the toolkit straight from its GitHub URL.
+- It has no donor route for an unreviewed dump from another camera. The v012 builds are reviewed builds for OV9732
   cameras, checked by SHA-256. For a camera whose own firmware is gone and whose sensor no reviewed build drives,
   another camera's firmware is the only help. With a backup chosen, the app refuses a file of your own whose
   image-sensor set-up differs from that backup. A computer does the donor route
@@ -333,7 +338,7 @@ The app uses the network for these things only. No firmware ships inside the app
 - For v0.25, v0.26, v0.27 and other v012 picks, on a phone with no factory dump, the factory build v012's cleaned copy
   from [the-dumping-grounds/charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012) the
   same way (`63e39684…`). It keeps it until you pick the private read it was cleaned from.
-- For a Custom v008_test pick, build v008_test's public file from
+- For a pick on base v008_test, build v008_test's public file from
   [the-dumping-grounds/charmera-firmware-v008_test](https://github.com/the-dumping-grounds/charmera-firmware-v008_test)
   the same way, at a fixed commit and checked by SHA-256.
 - Check for app updates, only when you tap it, downloads the app's release APK from GitHub to compare its version with
@@ -353,11 +358,14 @@ no storage permission.
 - 0.24: split that column into separate routes, one job per screen ([Use](#use)), and added the photo backup, a flash
   log, test shots and a flash check.
 - 0.26: added a version menu to Flash custom firmware (v0.26, v0.25 or v0.24).
-- 0.28: added Custom to that menu, a base and its mods in any reviewed combination ([Custom build](#custom-build)).
+- 0.28: added Custom to that menu, a base and its mods in any reviewed combination ([Picking a base and
+  mods](#picking-a-base-and-mods)).
 - 0.29: writes every reviewed file without a backup, with a warning when nothing confirms what the camera runs.
 - 0.30: also writes a file it doesn't know without a backup, with a loud warning.
-- 0.31 (current): knows v012 (factory OV9732 firmware) when it checks a file or backup, so your own v012 read counts
+- 0.31: knows v012 (factory OV9732 firmware) when it checks a file or backup, so your own v012 read counts
   as a backup. Clearer next steps for SP140A owners going back to stock and for cameras with no photos left.
+- 0.32 (current): Flash custom firmware drops its version menu. It shows the base menu and one box per mod, so
+  you tick the features you want one by one.
 
 On 2026-11-11 the app wrote the OV9732 bring-up, firmware v0.24 (Flash custom firmware), to an OV9732 camera over the
 camera's USB-C cable, and the camera flashed it

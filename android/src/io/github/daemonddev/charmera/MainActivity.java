@@ -196,14 +196,10 @@ public class MainActivity extends Activity {
     private Button probeButton;
     private Button repairButton;
     /**
-     * The Repair route's version menu (the presets, Recipe.presets(): Candidates.repairVersions(), newest first, then
-     * "Custom: pick base and mods") and the base and mods it makes (a preset's set, or the owner's own pick).
+     * The Repair route's pick: a base and the mods ticked on it (the owner's own pick, or the newest preset at first).
      */
-    private android.widget.Spinner repairChoice;
     private Recipe.Selection repairSel = Recipe.presets()[0];
-    /** Whether the menu shows Custom (the base menu and the mod boxes) rather than a preset. */
-    private boolean repairCustom;
-    /** Custom's base menu, its mod boxes and the warning line for an experimental or stock pick. */
+    /** The base menu, its mod boxes and the warning line for an experimental or stock pick. */
     private android.widget.Spinner baseChoice;
     private LinearLayout customPanel;
     private LinearLayout modBoxes;
@@ -234,7 +230,7 @@ public class MainActivity extends Activity {
     private byte[] stockDump;
     /** The owner's factory dump once picked or read back from the phone and checked (Candidates.factoryDump). */
     private byte[] factoryDump;
-    /** Build v008_test's public file once downloaded and checked (Recipes.DUMPS), for a Custom v008_test pick. */
+    /** Build v008_test's public file once downloaded and checked (Recipes.DUMPS), for a v008_test pick. */
     private byte[] v008Dump;
     private boolean downloading;
 
@@ -494,7 +490,7 @@ public class MainActivity extends Activity {
     private static final int SAVE_SHOTS = 7;
     private static final String KEY_FIX_DATES = "fixDates";
     private static final String KEY_DATE_NAMES = "dateNames";
-    /** The Repair pick (Recipe.Selection.serialize(): base and mods) and whether it was made with Custom. */
+    /** The Repair pick (Recipe.Selection.serialize(): base and mods). Apps 0.28 to 0.31 also kept KEY_REPAIR_CUSTOM. */
     private static final String KEY_REPAIR_SET = "repairSet";
     private static final String KEY_REPAIR_CUSTOM = "repairCustom";
     /** The Repair version an app before 0.28 remembered, by Kind name: read once, moved to KEY_REPAIR_SET. */
@@ -1887,7 +1883,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The Repair make button's label for a pick: a preset by its version, a Custom pick by its set's label. */
+    /** The Repair make button's label for a pick: a version by its number, any other pick by its set's label. */
     private static String makeLabel(Recipe.Selection sel) {
         return sel.version() != null ? "Make firmware " + sel.version() : "Make " + sel.label();
     }
@@ -1913,27 +1909,9 @@ public class MainActivity extends Activity {
         throw new IllegalStateException("no factory version");
     }
 
-    /** The preset's row in the version menu, or -1 when the pick is no preset. */
-    private static int presetIndex(Recipe.Selection sel) {
-        Recipe.Selection[] presets = Recipe.presets();
-        for (int i = 0; i < presets.length; i++) {
-            if (presets[i].equals(sel)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    /** The version menu's row for the pick now: its preset, or the last row (Custom). */
-    private int repairIndex() {
-        int i = presetIndex(repairSel);
-        return repairCustom || i < 0 ? Recipe.presets().length : i;
-    }
-
-    /** Keeps the Repair pick (base and mods, and whether it is Custom) in the preferences. */
+    /** Keeps the Repair pick (base and mods) in the preferences. */
     private void rememberRepair() {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_REPAIR_SET, repairSel.serialize())
-                .putBoolean(KEY_REPAIR_CUSTOM, repairCustom).apply();
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_REPAIR_SET, repairSel.serialize()).apply();
     }
 
     /**
@@ -1968,33 +1946,7 @@ public class MainActivity extends Activity {
                 + q(USE_FILE) + " and choose it.";
     }
 
-    /** The last row of the version menu, which shows the base menu and the mod boxes. */
-    private static final String CUSTOM_ROW = "Custom: pick base and mods";
-
-    /**
-     * The Repair route's version menu: the presets (newest first), then Custom. Off while anything runs
-     * (updateButtons).
-     */
-    private android.widget.Spinner versionMenu() {
-        final Recipe.Selection[] presets = Recipe.presets();
-        String[] rows = new String[presets.length + 1];
-        for (int i = 0; i < presets.length; i++) {
-            rows[i] = presets[i].kind().menuText();
-        }
-        rows[presets.length] = CUSTOM_ROW;
-        return menu(rows, "Firmware version", repairIndex(), position -> {
-            if (position == repairIndex()) {
-                return;                     // the row shown now (a Spinner reports it again when it is laid out)
-            }
-            if (position < presets.length) {
-                chooseRepair(presets[position], false);
-            } else {
-                chooseRepair(customStart(), true);
-            }
-        });
-    }
-
-    /** Custom's base menu: v012 (OV9732), v006 and v008_test (SP140A). */
+    /** The Repair route's base menu: v012 (OV9732), v006 and v008_test (SP140A). */
     private android.widget.Spinner baseMenu() {
         String[] rows = new String[Recipe.BASES.length];
         for (int i = 0; i < rows.length; i++) {
@@ -2003,7 +1955,7 @@ public class MainActivity extends Activity {
         return menu(rows, "Base firmware", baseIndex(repairSel.base), position -> {
             String base = Recipe.BASES[position];
             if (!base.equals(repairSel.base)) {
-                chooseRepair(new Recipe.Selection(base), true);     // another base: none of its mods ticked yet
+                chooseRepair(new Recipe.Selection(base));     // another base: none of its mods ticked yet
             }
         });
     }
@@ -2017,16 +1969,6 @@ public class MainActivity extends Activity {
     private static int baseIndex(String base) {
         int i = java.util.Arrays.asList(Recipe.BASES).indexOf(base);
         return Math.max(0, i);
-    }
-
-    /**
-     * Where Custom starts: the pick now, or, when the Identify route found this camera's base and it is another one,
-     * that base with no mods (v006 for the v006 family, which a photo cannot tell from v008_test).
-     */
-    private Recipe.Selection customStart() {
-        Identify.Base found = identifiedBase;
-        String base = found == Identify.Base.V012 ? Recipe.V012 : found == Identify.Base.V006_FAMILY ? Recipe.V006 : null;
-        return base == null || base.equals(repairSel.base) ? repairSel : new Recipe.Selection(base);
     }
 
     interface Picked {
@@ -2089,12 +2031,12 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The owner picked a version in the Repair menu, a base in Custom's base menu, or ticked a mod: it is remembered,
+     * The owner picked a base in the Repair route's base menu, or ticked or unticked a mod: it is remembered,
      * a loaded file of another pick goes (with a build of one still running), and a finished run of another pick
      * starts over. A pick while anything runs (the menus are off then) is put back.
      */
-    private void chooseRepair(Recipe.Selection sel, boolean custom) {
-        if (sel.equals(repairSel) && custom == repairCustom) {
+    private void chooseRepair(Recipe.Selection sel) {
+        if (sel.equals(repairSel)) {
             return;
         }
         if (busy() || downloading || checking || dialog != null) {
@@ -2102,7 +2044,6 @@ public class MainActivity extends Activity {
             return;
         }
         repairSel = sel;
-        repairCustom = custom;
         rememberRepair();
         if (route == Route.REPAIR && (fileCheck == null || !sel.matches(fileCheck.sha256))) {
             dropFile();
@@ -2112,14 +2053,9 @@ public class MainActivity extends Activity {
         updateButtons();
     }
 
-    /** The menus, the mod boxes, the make button and the factory-dump hint, for the pick now. */
+    /** The base menu, the mod boxes, the make button and the factory-dump hint, for the pick now. */
     private void refreshRepairChoice() {
         repairButton.setText(makeLabel(repairSel));
-        int i = repairIndex();
-        if (repairChoice.getSelectedItemPosition() != i) {
-            repairChoice.setSelection(i, false);
-        }
-        customPanel.setVisibility(repairCustom ? View.VISIBLE : View.GONE);
         int b = baseIndex(repairSel.base);
         if (baseChoice.getSelectedItemPosition() != b) {
             baseChoice.setSelection(b, false);
@@ -2135,7 +2071,7 @@ public class MainActivity extends Activity {
                     + " camera)"), repairSel.has(mod));
             box.setTag(clash);
             box.setEnabled(idle && clash == null);
-            box.setOnCheckedChangeListener((v, on) -> chooseRepair(repairSel.with(mod, on), true));
+            box.setOnCheckedChangeListener((v, on) -> chooseRepair(repairSel.with(mod, on)));
             modBoxes.addView(box);
             TextView about = body(clash == null ? Recipe.description(mod)
                     : "Can't go with " + Recipe.title(clash) + ". Untick it first. " + Recipe.description(mod));
@@ -2160,9 +2096,16 @@ public class MainActivity extends Activity {
                 + " on a camera yet." + REVIEWED_AND_WAY_BACK
                 : untried ? " Experimental: each ticked mod has been tried on a camera, but this combination hasn't."
                 + REVIEWED_AND_WAY_BACK : "");
+        Identify.Base found = identifiedBase;
+        String foundBase = found == Identify.Base.V012 ? Recipe.V012 : found == Identify.Base.V006_FAMILY ? Recipe.V006
+                : null;
+        if (foundBase != null && !foundBase.equals(repairSel.base) && !Recipe.V008.equals(repairSel.base)) {
+            warn = "Identify found base " + foundBase + " for this camera, and " + repairSel.base + " is picked. "
+                    + warn;
+        }
         warn = warn.trim();
         customWarning.setText(warn);
-        customWarning.setVisibility(repairCustom && !warn.isEmpty() ? View.VISIBLE : View.GONE);
+        customWarning.setVisibility(!warn.isEmpty() ? View.VISIBLE : View.GONE);
         boolean ask = Recipe.V012.equals(repairSel.base) && !haveFactoryDump()
                 && (fileCheck == null || !repairSel.matches(fileCheck.sha256));
         factoryHint.setText(ask ? needsFactory(repairSel) : "");
@@ -2170,12 +2113,12 @@ public class MainActivity extends Activity {
         factoryFileButton.setVisibility(ask ? View.VISIBLE : View.GONE);
     }
 
-    /** The end of Custom's experimental line: the file is still checked, and the version on the camera now is the way back. */
+    /** The end of the experimental line: the file is still checked, and the version on the camera now is the way back. */
     private static final String REVIEWED_AND_WAY_BACK = " The file is still the reviewed one, checked byte for byte."
             + " Before you flash, make sure you can write the version you're on now again (see Before you start).";
 
     /**
-     * Custom's line for a pick whose firmware is not what the presets are: stock v012, stock v006 (the restore file,
+     * The line for a pick whose firmware is not what the presets are: stock v012, stock v006 (the restore file,
      * also on its own route) or SP140A firmware. "" for a build with mods that drives the OV9732. No pick needs a
      * backup; the file step warns when nothing confirms what the camera runs.
      */
@@ -2224,13 +2167,11 @@ public class MainActivity extends Activity {
         // V025, BRINGUP), which is moved to its set here, once.
         android.content.SharedPreferences picked = getSharedPreferences(PREFS, MODE_PRIVATE);
         repairSel = Recipe.remembered(picked.getString(KEY_REPAIR_SET, null), picked.getString(KEY_REPAIR_OLD, null));
-        repairCustom = picked.getBoolean(KEY_REPAIR_CUSTOM, false) || presetIndex(repairSel) < 0;
-        if (picked.contains(KEY_REPAIR_OLD)) {
-            picked.edit().remove(KEY_REPAIR_OLD).putString(KEY_REPAIR_SET, repairSel.serialize())
-                    .putBoolean(KEY_REPAIR_CUSTOM, repairCustom).apply();
+        if (picked.contains(KEY_REPAIR_OLD) || picked.contains(KEY_REPAIR_CUSTOM)) {
+            picked.edit().remove(KEY_REPAIR_OLD).remove(KEY_REPAIR_CUSTOM)
+                    .putString(KEY_REPAIR_SET, repairSel.serialize()).apply();
         }
         repairButton = primary(makeLabel(repairSel), v -> makePatch(repairSel));
-        repairChoice = versionMenu();
         customPanel = new LinearLayout(this);
         customPanel.setOrientation(LinearLayout.VERTICAL);
         baseChoice = baseMenu();
@@ -2515,8 +2456,8 @@ public class MainActivity extends Activity {
         col.addView(fw);
         tile("Back up photos", "Save the camera's photos and videos as a zip.", Route.BACKUP_PHOTOS);
         tile(routeTitle(Route.IDENTIFY), "From the photos on the card. Writes nothing.", Route.IDENTIFY);
-        tile(routeTitle(Route.REPAIR), repairCustom ? "Custom: " + repairSel.label() + "."
-                : repairSel.name() + " for the OV9732 sensor.", Route.REPAIR);
+        tile(routeTitle(Route.REPAIR), "Pick a base and tick the mods you want. Now: " + repairSel.label() + ".",
+                Route.REPAIR);
         tile(routeTitle(Route.PROBE), "Diagnostic only.", Route.PROBE);
         tile(routeTitle(Route.RESTORE), "Needs this camera's backup. Without one, use Advanced.", Route.RESTORE);
         tile("Test shots", "Shoot the colour card and save the shots.", Route.TEST_SHOTS);
@@ -2614,8 +2555,8 @@ public class MainActivity extends Activity {
     }
 
     private void renderRepair() {
-        header(routeTitle(Route.REPAIR), "The presets are for OV9732 cameras. Custom has a base and mods for"
-                + " either sensor (SP140A: base v006).");
+        header(routeTitle(Route.REPAIR), "Pick the base for your camera's sensor (v012 for the OV9732, v006 for the"
+                + " SP140A), then tick the mods you want.");
         // Each step is numbered and shown as the route's flash run says (FlashFlow; refreshSteps).
         Step intro = flowStep(FlashFlow.Step.INTRO, "Before you start", "Flashing replaces the photos kept in the"
                 + " camera's own memory. Photos on the SD card stay.");
@@ -2624,8 +2565,8 @@ public class MainActivity extends Activity {
             repairStarted = true;
             updateButtons();
         }));
-        intro.more("The presets are for an original 2025-series camera (matte body, yellow Kodak boot screen) with an"
-                        + " OmniVision OV9732 sensor. Not sure? Run " + q(routeTitle(Route.IDENTIFY)) + " first. Use "
+        intro.more("Base v012 is for an original 2025-series camera (matte body, yellow Kodak boot screen) with an"
+                        + " OmniVision OV9732 sensor. Not sure which sensor yours has? Run " + q(routeTitle(Route.IDENTIFY)) + " first. Use "
                         + q(routeTitle(Route.PROBE)) + " only when the card has no photos from before a flash.",
                 Recipe.V006.equals(repairSel.base) && repairSel.mods.isEmpty()
                         ? repairSel.name() + " is the stock restore file. Write it on " + q(routeTitle(Route.RESTORE))
@@ -2637,10 +2578,9 @@ public class MainActivity extends Activity {
                 "Charge the battery fully. A flash cut short leaves a camera that only a chip programmer can bring back.");
         flashDriveStep();
         boolean factory = Recipe.V012.equals(repairSel.base);
-        Step write = flowStep(FlashFlow.Step.WRITE, "Write firmware " + repairSel.name(), "Pick the version, then"
-                + " make it. The app builds the file from " + dumpWords(repairSel.base) + ", checks it, and copies it to"
+        Step write = flowStep(FlashFlow.Step.WRITE, "Write firmware " + repairSel.name(), "Pick the base and tick"
+                + " the mods, then make it. The app builds the file from " + dumpWords(repairSel.base) + ", checks it, and copies it to"
                 + " the card.");
-        write.add(repairChoice);
         write.add(customPanel);
         write.add(repairButton);
         write.add(factoryHint);
@@ -2691,7 +2631,7 @@ public class MainActivity extends Activity {
         }
         if (Recipe.V012.equals(sel.base)) {
             return "To go back, write the firmware the camera ran before in " + step + ": an older version, or stock"
-                    + " v012, the factory firmware (" + q(CUSTOM_ROW) + ", base v012, no mods).";
+                    + " v012, the factory firmware (base v012 with no mods ticked).";
         }
         if (Recipe.V008.equals(sel.base)) {
             return "To go back from " + sel.name() + ", write the firmware this camera ran before, using this"
@@ -2699,8 +2639,8 @@ public class MainActivity extends Activity {
                     + " backup, read before the camera was ever flashed, shows the public build.";
         }
         if (sel.has(Recipe.OV9732_PORT) && sel.mods.size() > 1) {
-            return "To go back from " + sel.name() + ", write v0.23's file. The app makes it here too (" + q(CUSTOM_ROW)
-                    + ", base v006, OV9732 port only).";
+            return "To go back from " + sel.name() + ", write v0.23's file. The app makes it here too (base"
+                    + " v006 with only the OV9732 port ticked).";
         }
         if (sel.has(Recipe.OV9732_PORT)) {
             return "To go back from " + sel.name() + ", pick another OV9732 version in " + step + " and write it.";
@@ -4153,7 +4093,7 @@ public class MainActivity extends Activity {
                             + " restarted since), so this may be a photo from before the flash.";
                     String fw = sha == null ? null : firmwareLabel(sha);
                     Candidates.Kind written = Candidates.repairVersion(sha);
-                    // any reviewed build (a preset or a Custom pick) by its base and mods; else by the fixed kind
+                    // any reviewed build (a version or any other pick) by its base and mods; else by the fixed kind
                     Recipe.Selection made = Recipe.selectionOf(sha);
                     boolean factory = made != null ? Recipe.V012.equals(made.base)
                             : written != null && written.base == Candidates.Base.FACTORY;
@@ -5062,15 +5002,15 @@ public class MainActivity extends Activity {
         downloadButton.setEnabled(idle && !downloading);
         probeButton.setEnabled(idle && !downloading);
         repairButton.setEnabled(idle && !downloading);
-        // The version menu is off while a file is being made, checked or written, so a pick never meets work in flight.
-        repairChoice.setEnabled(idle && !downloading && !checking);
-        repairChoice.setAlpha(repairChoice.isEnabled() ? 1f : 0.45f);   // the Spinner itself does not look off when it is
-        baseChoice.setEnabled(repairChoice.isEnabled());
-        baseChoice.setAlpha(repairChoice.isEnabled() ? 1f : 0.45f);
+        // The base menu and mod boxes are off while a file is being made, checked or written, so a pick never meets
+        // work in flight.
+        boolean pickable = idle && !downloading && !checking;
+        baseChoice.setEnabled(pickable);
+        baseChoice.setAlpha(pickable ? 1f : 0.45f);   // the Spinner itself does not look off when it is
         for (int i = 0; i < modBoxes.getChildCount(); i++) {
             View box = modBoxes.getChildAt(i);
             if (box instanceof android.widget.CheckBox) {
-                box.setEnabled(repairChoice.isEnabled() && box.getTag() == null);   // tag: the mod it conflicts with
+                box.setEnabled(pickable && box.getTag() == null);   // tag: the mod it conflicts with
             }
         }
         factoryFileButton.setEnabled(idle);
@@ -5271,7 +5211,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The base and mods a checked file the Repair route writes was made from (a preset such as v0.26, or a Custom pick),
+     * The base and mods a checked file the Repair route writes was made from (a version such as v0.26, or any other pick),
      * by its reviewed SHA-256, or null.
      */
     private static Recipe.Selection repairOf(UpdateCheck.Result result) {
@@ -5279,14 +5219,14 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Whether a checked file is one the Repair route writes: a preset version or any Custom pick (Candidates.isRepairFile:
+     * Whether a checked file is one the Repair route writes: any pick of a base and mods (Candidates.isRepairFile:
      * every reviewed build but the probe and the stock restore file).
      */
     private static boolean isRepair(UpdateCheck.Result result) {
         return repairOf(result) != null;
     }
 
-    /** The few words after a Repair pick's name: a preset's menu summary, or a Custom pick's set label. */
+    /** The few words after a Repair pick's name: a version's menu summary, or any other pick's set label. */
     private static String summaryOf(Recipe.Selection sel) {
         Candidates.Kind k = sel.kind();
         return k != null && k.summary != null ? k.summary : sel.label();
@@ -5552,7 +5492,6 @@ public class MainActivity extends Activity {
             return;
         }
         repairSel = k;
-        repairCustom = presetIndex(k) < 0;    // a file of a preset shows that preset; any other shows Custom
         rememberRepair();
         freshRunIfStale(FlashFlow.Route.REPAIR);
         if (route == Route.REPAIR) {
@@ -6373,7 +6312,6 @@ public class MainActivity extends Activity {
                         if (!Recipe.V012.equals(repairSel.base)
                                 && getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_REPAIR_SET, null) == null) {
                             repairSel = newestFactory();
-                            repairCustom = false;
                             freshRunIfStale(FlashFlow.Route.REPAIR);
                         }
                         showFile(factoryKeptOnly(fromFactory), null);
@@ -6382,7 +6320,6 @@ public class MainActivity extends Activity {
                     }
                     if (forRoute == Route.REPAIR && !k.equals(repairSel)) {
                         repairSel = k;
-                        repairCustom = false;
                         rememberRepair();
                         freshRunIfStale(FlashFlow.Route.REPAIR);
                         render();

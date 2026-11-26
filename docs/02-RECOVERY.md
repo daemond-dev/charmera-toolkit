@@ -496,7 +496,7 @@ need to open the camera or have a backup.
 2. Flash the build that fits, from the app's "Flash custom firmware" or with `charmera build` (`charmera build
    --list` shows every version and its `--mods`). This is for the original 2025 series only. For a Millennium or
    CLOT edition, whether any public build fits is unknown; see [the donor route](#the-donor-route).
-   - OV9732: stock v012, the factory firmware of OV9732 cameras (in the app, Custom with base v012 and no mods; on a
+   - OV9732: stock v012, the factory firmware of OV9732 cameras (in the app, base v012 with no mods ticked; on a
      computer, `charmera build --base v012 --download --out out/`), or v0.25 to v0.27, built on it. v0.23 and v0.24,
      the v006 build changed to drive the OV9732 (`--base v006 --mods ov9732-port`, plus `volume-led` for v0.24),
      work too. The stock restore file is no way back for this camera. An OV9732 camera that ran v0.24 took
@@ -505,8 +505,7 @@ need to open the camera or have a backup.
      keeps v006's boot and update code byte for byte, so that flash ran v006's own updater. A v012 build flashed over
      stock v006 itself hasn't been tried, but the same updater does the work (INFERRED).
    - SP140A: the stock restore file (v006). On a computer, `charmera build --base v006 --download --out out/`. In the
-     app, "Restore stock firmware" needs a backup; without one, make it under Custom (base v006, no mods) and write
-     it from Advanced.
+     app, "Restore stock firmware" needs a backup. Without one, use Advanced > Download the stock restore file.
 
    On a computer, check the file with `charmera verify out/JH_5408<stamp>_<sum>.bin`. Without `--stock` it warns
    that nothing compares the file with the camera, and for a v012 file it says the table is for the OV9732. Then
