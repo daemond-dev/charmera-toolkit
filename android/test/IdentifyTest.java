@@ -84,7 +84,10 @@ public final class IdentifyTest {
         expect("the v006 family is stock v006 or v008_test, high", r.base == Identify.Base.V006_FAMILY
                 && r.confidence == Identify.Confidence.HIGH && r.notStock.isEmpty()
                 && r.conclusion.startsWith("These photos were taken by stock v006 or v008_test (an SP140A camera)."));
-        expect("the v006 family's base is v006, as identify.py's", r.conclusion.contains("\nBase to build on: v006.")
+        expect("the v006 family's base is v006, as identify.py's, and the line says where each v006 file is written",
+                r.conclusion.contains("\nYour base is v006. For mods, pick base v006 on \"Flash custom firmware\". Stock"
+                        + " v006 is written on \"Restore stock firmware\" or Advanced.")
+                && Identify.nextStep(Identify.Base.V012).equals("Pick base v012 on \"Flash custom firmware\".")
                 && Identify.baseName(Identify.Base.V006_FAMILY).equals("v006")
                 && Identify.stockName(Identify.Base.V006_FAMILY).equals("v006 or v008_test"));
         expect("all read agree: high, and why", r.confidenceWhy.equals("all 2 camera-written photos read show the same"
@@ -108,7 +111,7 @@ public final class IdentifyTest {
         card.add(photo("DCIM/B.jpg", T0 + DAY, junk));
         r = Identify.identify(card, UTC);
         expect("no recognised photo, no base", r.base == Identify.Base.UNKNOWN && r.oldest == null && r.other == 2
-                && r.conclusion.contains("None of the photos") && !r.conclusion.contains("Base to build on"));
+                && r.conclusion.contains("None of the photos") && !r.conclusion.contains("Your base is"));
 
         // our EXIF mod after stock v012's bare photos: one family, not a change; not stock; base v012, high
         card = new ArrayList<>();
@@ -161,8 +164,8 @@ public final class IdentifyTest {
                         + Identify.date(card.get(3), UTC) + " and the v012 family from " + Identify.date(card.get(4), UTC)
                         + ". Either the camera was flashed in between, or the card holds photos from two cameras."));
         expect("and the EXIF mod as well, without weakening the base", r.notStock.get(1).contains("our EXIF mod")
-                && r.conclusion.contains("Base to build on: v006 (from the oldest photos")
-                && !r.conclusion.contains("Base to build on: v012"));
+                && r.conclusion.contains("Your base is v006. That's from the oldest photos, since")
+                && !r.conclusion.contains("Your base is v012"));
         consistent("v006 then EXIF mod", r);
 
         // two families the other way round: never the newest family's base
@@ -357,7 +360,7 @@ public final class IdentifyTest {
         r = Identify.identify(card, UTC, 3);
         expect("no newest within the cap: no answer", r.base == Identify.Base.UNKNOWN && r.newest == null
                 && r.oldest != null && r.conclusion.contains("None of the newest 3 photos")
-                && !r.conclusion.contains("Base to build on") && r.notes.isEmpty());
+                && !r.conclusion.contains("Your base is") && r.notes.isEmpty());
         // none at the oldest end within the cap, but one at the newest: the answer goes by those read
         card = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
@@ -386,12 +389,12 @@ public final class IdentifyTest {
     static void consistent(String what, Identify.Result r) {
         String name = Identify.baseName(r.base);
         boolean ok = r.base != Identify.Base.UNKNOWN && r.family == r.base
-                && r.conclusion.contains("Base to build on: " + name);
+                && r.conclusion.contains("Your base is " + name + ".");
         for (Identify.Base b : Identify.Base.values()) {
             if (b != r.base && b != Identify.Base.UNKNOWN) {
                 ok &= !r.conclusion.contains("taken by stock " + Identify.stockName(b))
                         && !r.conclusion.contains("show stock " + Identify.stockName(b))
-                        && !r.conclusion.contains("Base to build on: " + Identify.baseName(b));
+                        && !r.conclusion.contains("Your base is " + Identify.baseName(b) + ".");
             }
         }
         for (String line : r.notStock) {

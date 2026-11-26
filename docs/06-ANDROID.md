@@ -40,10 +40,11 @@ The same rules apply as in [step 5 of The first flash](01-FIRST-FLASH.md#5-flash
 
 [Charmera Card](../android/README.md) does the card part on the phone. It identifies the firmware a camera runs from
 the photos on its card. It downloads the stock dump's cleaned copy and makes the stock restore file from it, plus
-reviewed patches of that file: the sensor-ID probe, and v006 with the OV9732 port, with or without the Volume and LED
-rows. From the factory build v012 (its public cleaned copy, which it downloads, or the private read that copy was
-cleaned from) it makes stock v012 and v012 with any mix of Volume and LED rows, EXIF dates, boot to last mode and
-capture flash. You pick a base and tick its mods, and it makes any reviewed combination
+reviewed patches of that file: the sensor-ID probe, Volume and LED rows (experimental on an SP140A camera), and the
+OV9732 port with or without those rows. From the factory build v012 (its public cleaned copy, which it downloads, or
+the private read that copy was cleaned from) it makes stock v012 and v012 with any mix of Volume and LED rows, EXIF
+dates, boot to last mode and capture flash. From build v008_test's public file it makes stock v008_test, which has no
+mods yet. You pick a base and tick its mods, and it makes any reviewed combination
 ([Picking a base and mods](#picking-a-base-and-mods)). It builds nothing else. Older versions of the app gave some of
 these builds numbers, v0.23 to v0.27. [Older build names](#older-build-names) maps them.
 
@@ -96,9 +97,6 @@ with each result shown right under its button ([the app's routes](../android/REA
 Every screen shows which camera drive the app has saved and whether it's connected. The app can't eject a drive by
 itself. It opens the drive's own storage page, and says "Ejected" only once Android reports the drive unmounted.
 
-Version 0.4, published before the backup step existed, didn't refuse the withdrawn candidates C, A and B. It was taken
-down on 2026-11-06. If you still have it installed, don't flash with it.
-
 How the card reaches the app depends on the Android version:
 
 - Android 11 and later: Android doesn't let an app pick the top level of a card in the phone's own SD slot ("Use this
@@ -114,8 +112,8 @@ How the card reaches the app depends on the Android version:
 
 ## Identify this camera's firmware
 
-This route needs no flash, no backup and no update file, and it writes nothing (not to the card, the flash log or a
-flash run). Choose the camera's drive, then tap **Identify from the photos on the card**. Card empty or new? Take two
+This route needs no flash, no backup and no update file, and it writes nothing to the card or the flash
+log. Choose the camera's drive, then tap **Identify from the photos on the card**. Card empty or new? Take two
 or three photos with the camera first. With no photos it says "The card holds no photos. Take two or three with the
 camera first, then identify again. If photo mode freezes and the camera can't take any, Identify the image sensor
 finds the sensor instead."
@@ -167,205 +165,23 @@ The answer gives the base, a confidence and the evidence, photo by photo. What a
 - The true dates. The dates and the order come from the file times, which come from the camera's clock.
 
 The third step lists what you can check on the camera itself
-([Telling builds apart on the camera](CAMERA-UI.md#telling-builds-apart-on-the-camera)). The app keeps the suggested
-base (v012 for the factory build, v006 for the v006 family). Flash custom firmware doesn't pick it for you. If the
-base you pick there (v012 or v006) isn't the one Identify found, the write step says so.
+([Telling builds apart on the camera](CAMERA-UI.md#telling-builds-apart-on-the-camera)). The answer's last line names
+the base ("Your base is v012.") and says where to pick it, and **Open Flash custom firmware** takes you there. The app
+keeps that base (v012 for the factory build, v006 for the v006 family). Flash custom firmware doesn't pick it for
+you. If the base you pick there is for the other sensor than the one Identify found, the write step says so.
 
-## Identify the image sensor (the sensor-ID probe)
+## Picking a base and mods
 
-If a camera boots to its menu but freezes when it enters photo or video mode, the cause may be an image sensor the
-firmware doesn't drive. The app can build a **sensor-ID probe** (the "Identify the image sensor" route) to find out
-which sensor is fitted. It's a diagnostic and doesn't make the camera take pictures. If the card has photos the camera
-took before any flash, [Identify](#identify-this-cameras-firmware) already tells you: photos taken by stock v012 mean
-an OV9732 camera, and you don't need the probe.
-
-The probe is the stock restore file with a small reviewed patch. Its boot code, update code and image-sensor table are
-the stock restore file's, byte for byte. Only a dead debug routine and the one call that writes the sensor set-up are
-changed. When the camera next enters photo mode, the patch walks the sensor bus across every device address (0x08..0x77)
-with the firmware's own read routine. For each address that answers, it reads the 16-bit chip-ID registers
-(0x3000..0x301F and 0x3100..0x310F) and writes the result to `SENSOR.TXT` in the card's root, then stops as the camera
-does now. On an SP140A camera the stock restore file puts it back. On an OV9732 camera, undo it with a v012 build, stock or
-with mods (Flash custom firmware), not the stock restore file. It's one of the reviewed files the app writes without a
-backup, like every build of Flash custom firmware.
-
-After flashing it, take the update file off the card first, or the camera re-flashes it on every boot instead of
-running it. Then boot the camera and open photo mode so the probe runs. Bring the card back to the phone and tap **Read
-the sensor result from the card** (the route's last step). The result is one of these:
-
-- A named sensor, for example "OmniVision OV2680" or "SmartSens SC…". The app read the sensor's 16-bit chip-ID
-  registers and matched them, so the exact part is known and a firmware built for it becomes possible.
-- A sensor at some address, not yet named. It answered, but its chip ID wasn't at the registers the app reads. The app
-  shows the raw register fingerprint and what to try next (often an 8-bit read, for an older part).
-- Nothing answered at any address. The sensor isn't responding at all (disconnected, unpowered, or dead). Reseat the
-  sensor's ribbon and scan again. If it still answers nowhere, it's a hardware fault no firmware can fix.
-
-For every address that answers, the app shows its 16-bit register fingerprint (0x3000..0x301F and 0x3100..0x310F,
-where `FF` means no answer). Those bytes name the exact part against a datasheet, and the `SENSOR.TXT` file holds them
-for a closer look.
-
-The app builds the probe deterministically and checks it against a fixed hash, so a wrong byte can't produce a usable
-file. The exact artifact:
-
-- file name: `JH_5408202611082300_0F065C4D.bin`
-- SHA-256: `6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b`
-
-Made from the cleaned copy of the stock dump the app now downloads (see
-[Where the dumps come from](#where-the-dumps-come-from)), it's the same code, with only the factory settings record and
-no stored photos:
-
-- file name: `JH_5408202611082300_0FB74B1C.bin`
-- SHA-256: `02e2729cffa4dd835f2b138b4ff4df9be89baecfb96f473665dc4b3411e7d2d5`
-
-To undo it on an SP140A camera, flash the stock restore file, which the app also makes:
-`JH_5408202610261427_0F065D55.bin` from the original dump, or `JH_5408202610261427_0FB74C24.bin` (SHA-256
-`9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec`) from the cleaned copy. The second has the same bytes
-as the withdrawn candidate C, which was the stock software with factory settings and no photos. If the probe names an
-OV9732, skip the stock restore file, which can't take pictures on that camera, and flash a v012 build, stock or with
-mods (below), or v006 with the OV9732 port.
-
-## Repair an OV9732 camera (the OV9732 port on v006)
-
-This is for a camera whose image sensor is an OmniVision OV9732 (Identify on photos from before the flash, or the
-probe above, names it) and which was flashed with the public build, made for a SuperPix SP140A, so photo and video
-mode no longer work. Such a camera can also take the v012 builds below (stock v012, or v012 with mods), since v012 is
-the factory firmware of OV9732 cameras. v012 with Volume and LED rows went onto a camera running v006 with the OV9732
-port and Volume and LED rows, and works. v006 with the OV9732 port is the public build with the OV9732
-driven in place of the SP140A: its start-up table, its exposure and gain, its black level, and image tuning fitted on
-a colour card against a working camera. With the Volume and LED rows ticked too, it also adds two setup-menu rows
-after FORMAT, **Volume** (system sounds, 0 to 8; it also sets playback volume, and 0 mutes) and **LED** (the automatic flash light,
-On as before or Off). Boot and update code are the public build's, byte for byte. What each build changed and what it
-measured on a camera is in [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md). Why the repair is
-needed is in [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md).
-
-The app builds it deterministically and checks it against a fixed hash, so a wrong byte can't produce a usable file.
-The exact artifact (v006 with the OV9732 port and Volume and LED rows):
-
-- file name: `JH_5408202611120024_0F0613AC.bin`
-- SHA-256: `0919c5d857f855b11424407211a132ac61f4c91852e01af583bd6b76c85b1c69`
-
-Made from the cleaned copy of the stock dump, it's the same code with the factory settings record and no stored photos:
-
-- file name: `JH_5408202611120024_0FB7027B.bin`
-- SHA-256: `8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b`
-
-The stock restore file (`JH_5408202610261427_0F065D55.bin`) is no way back for this camera. It doesn't drive the
-OV9732, so with it photo and video stop working again. The way back to stock is stock v012 (base v012 with no
-mods ticked), the factory firmware of OV9732 cameras. To drop the Volume and LED rows, go back to v006 with the
-OV9732 port alone:
-
-- file name: `JH_5408202611110023_0F061F28.bin`
-- SHA-256: `f0cced2e9cb2c1925d6d20bc54c8002c1543f9710bf5ab90032db316572507b2`
-
-The app makes that one too. In **Flash custom firmware**, pick base v006 and tick only the OV9732 port. Made from the
-cleaned copy, it's `JH_5408202611110023_0FB70DF7.bin` (SHA-256
-`554d3c2fb69185df5020c5521eaaf02f59d9282d51a1384c56a91aec586f1466`). Before you update the app or flash another build,
-you can also keep a copy of the file that works: make it in **Flash custom firmware**, then tap **Save a copy to the
-phone** in **Advanced**. Like any update, the flash itself must not be interrupted.
-
-### Volume and LED rows on v012 (the camera's own factory firmware)
-
-v012 with Volume and LED rows is the factory firmware of OV9732 cameras (build v012, from a private read of a v012
-camera's chip taken on 2026-11-13), which drives the OV9732 natively, with the **Volume** and **LED** rows of the
-v006 port moved over to it. None of the OV9732 port's sensor work is carried over, since the factory build has its own start-up table, exposure, white balance and colour. The camera
-starts with Volume 5 and LED On, and photos carry no EXIF date.
-
-The factory dump isn't in this repository or the app. The app gets it one of two ways, and keeps a copy in its own
-storage that it checks again on each use:
-
-- Download (the default). With no factory dump on the phone, **Make this firmware** on base v012 downloads the
-  public cleaned copy, `charmera-v012-2026-01-12-clean.bin` from
-  [the-dumping-grounds/charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012) at a
-  fixed commit, and uses it only if its SHA-256 is
-  `63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c`.
-- A file on the phone. **Use a file on the phone** takes the cleaned copy, downloaded in a browser, when the phone
-  can't reach GitHub, or the private read it was cleaned from (SHA-256
-  `08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce`). It takes no other file as the factory dump,
-  by SHA-256. The file picked replaces the downloaded copy and is used from then on. A read of your own v012 camera
-  goes in as a backup (**Choose this camera's backup**), and the app compares the file with it.
-
-The app makes v012 with Volume and LED rows from it the same way the computer build does: the dump's first 0x1E0000 bytes, the internal photo
-slots (0x180000..0x1CB000) blanked, and 172 authored bytes (the source holds only those). The checker knows the
-factory build v012 and finds its OV9732 set-up table (v012 has its own OV9732 driver, with no SP140A-style table).
-With no backup chosen, the sensor line is a warning that nothing in the file can tell whether your camera has an
-OV9732, and that its photos can (Identify). The exact artifact:
-
-- file name: `JH_5408202611130025_0FA3BF37.bin`
-- SHA-256: `a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0`
-
-Made from the cleaned copy, it's the same code with the factory settings record:
-
-- file name: `JH_5408202611130025_0FB76FE9.bin`
-- SHA-256: `bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a`
-
-The way back to stock is stock v012 (base v012 with no mods ticked). v006 with the OV9732 port and Volume and LED rows
-works too. After a flash of a v012 build without EXIF dates, the flash check expects the factory header (no EXIF
-block).
-
-### EXIF dates
-
-The EXIF dates mod puts an EXIF block in every still photo, on the SD card and in the camera's own memory: Make `Kodak`,
-Model `Charmera`, Software `v0.26`, and DateTime, DateTimeOriginal and DateTimeDigitized from the camera's clock. Set
-the date in the camera's setup menu first, because an unset clock gives `2025:01:01`. The still header grows from the
-factory build's bare 0x270 bytes to 0x340: the SOI, an authored APP1 block of 0xD0 bytes, then the factory template's
-own segments from SOF0 on. Software `v0.26` is an old build number that's part of the mod's code, so it can't change.
-The first build with it to be tried on a camera was v012 with Volume and LED rows and EXIF dates. With the Volume and
-LED rows, the camera starts with Volume 5 and LED On.
-
-The app makes it from your factory dump the way it makes v012 with Volume and LED rows, then adds one more layer. That
-layer is 332 authored bytes (the APP1 block, a new date-fill routine, and the instructions that point the photo writers at the new header)
-and one range of 0x26E bytes, the factory template from SOF0 on, which the app copies from your factory dump at run
-time (file 0x10753A to 0x89712). So the source holds none of the vendor's bytes. The exact artifact (v012 with Volume
-and LED rows and EXIF dates):
-
-- file name: `JH_5408202611130026_0FA38C7C.bin`
-- SHA-256: `617770c3f3c9d880f93f06043090d3d07909c845633ca08e9c183deb44fa06d2`
-
-Made from the cleaned copy:
-
-- file name: `JH_5408202611130026_0FB73D2E.bin`
-- SHA-256: `be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738`
-
-The way back to stock is stock v012 (base v012 with no mods ticked). v012 with Volume and LED rows works too, and so
-does v006 with the OV9732 port and Volume and LED rows. After a flash of a build with EXIF dates, the flash check
-expects the 0x340-byte header with its APP1 EXIF block (Make Kodak, Model Charmera).
-
-### Boot to last mode and capture flash
-
-These are two more mods on v012. Both were tested in an emulator first, then on a camera, in v012 with Volume and LED
-rows, EXIF dates, boot to last mode and capture flash.
-
-- Boot to last mode. After power-on (and after the card's update check, which is unchanged) the camera goes
-  straight into the mode last used, photo or video, instead of the SELECT MODE screen. The first time, that's photo. A
-  short press of the power button still opens SELECT MODE. The mode is kept in a spare settings byte (+0x61). The camera
-  saves its settings on its own schedule, so a mode change can be lost if you switch it off within a few seconds.
-- Capture flash. When a photo is taken, the picture area goes black for 120 ms under the on-screen icons, inside the
-  stock 200 ms shutter delay, so you see the shot even at Volume 0. If the camera stops sending preview frames during
-  that delay, no flash shows, and nothing else changes.
-
-The app makes that build the way it makes the EXIF one, then adds one more layer of 202 authored bytes
-(build-v027/build_v027.py). Photos keep the EXIF dates header (Software `v0.26`), so the photo check can't tell this
-build from v012 with Volume and LED rows and EXIF dates. Check boot to last mode and capture flash on the camera
-itself. The way back to stock is stock v012 (base v012 with no mods ticked). v012 with Volume and LED rows and EXIF
-dates works too. The exact artifacts:
-
-- from a private read of a v012 camera: `JH_5408202611170027_0FA38996.bin`, SHA-256
-  `108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968`
-- from the cleaned copy: `JH_5408202611170027_0FB73A48.bin`, SHA-256
-  `89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639`
-
-### Picking a base and mods
-
-Since 0.32, the write step of **Flash custom firmware** shows a base menu and one box per mod of that base, each with a
-one-line description. You tick the mods you want one by one. The bases are v012 (factory build, OV9732 sensor), v006
-(public build, SP140A sensor) and v008_test (later build, SP140A sensor), which has no mods yet. The step is called
-**Write firmware**, and the line under its title names the firmware your ticks make by its base and mods, such as
-"v012 with Volume and LED rows and EXIF dates" or "v006 with the OV9732 port". With no mods ticked on v012 it's "stock
-v012 (the factory firmware, unchanged)". **Make this firmware** makes it, and the Home tile shows the same name. The
-app doesn't pick the base from what **Identify
-this camera's firmware** found. If you pick v012 or v006 and it isn't the base it found, the step says so. A mod marked
-*experimental, not yet tried on a camera* adds a warning line but is never blocked. A mod that can't go with one already
-ticked is greyed out, with the reason (on v006, that's the sensor-ID probe with the OV9732 port or with the Volume and
-LED rows).
+The write step of **Flash custom firmware** shows a base menu and one box per mod of that base, each with a one-line
+description. You tick the mods you want one by one. The bases are v012 (factory build, OV9732 sensor), v006 (public
+build, SP140A sensor) and v008_test (later build, SP140A sensor), which has no mods yet. The step is called **Write
+firmware**, and the line under its title names the firmware your ticks make by its base and mods, such as "v012 with
+Volume and LED rows and EXIF dates" or "v006 with the OV9732 port". With no mods ticked on v012 it's "stock v012 (the
+factory firmware, unchanged)". **Make this firmware** makes it, and the Home tile shows the same name. The app doesn't
+pick the base from what **Identify this camera's firmware** found. If you pick a base for the other sensor than the one
+Identify found, the step says so. A mod marked *experimental, not yet tried on a camera* adds a warning line but is never
+blocked. A mod that can't go with one already ticked is greyed out, with the reason (on v006, that's the sensor-ID
+probe with the OV9732 port or with the Volume and LED rows).
 
 The app makes the pick exactly as `charmera build` does on a computer (charmera_toolkit/recipes.py, from the same
 recipes.json). v012 comes from the factory dump (the private read when the phone keeps it, otherwise the public cleaned
@@ -386,36 +202,151 @@ the sensor line becomes a "Wrong sensor?" warning. A wrong-sensor flash boots bu
 still works, so flashing a file that fits undoes it.
 
 Stock v012 (base v012, no mods) is the factory firmware of OV9732 cameras, unchanged. It's written here like any other
-pick, and it's the way back to stock from every v012 build. Stock v006 is the stock restore file itself, made here
-but written on **Restore stock firmware** (which compares the file with your backup) or on **Advanced**. A combination the recipes mark experimental says so in the warning line and in the write
-confirmation, even when each of its mods has been tested alone. The pick (base and mods) is remembered, and a numbered
-build picked in an older app (v0.24 to v0.27) comes back as its base and mods.
+pick, and it's the way back to stock from every v012 build. Stock v006 is the stock restore file, and this screen
+doesn't write it. With base v006 and no mods ticked, **Make this firmware** gives way to two buttons: **Open Restore
+stock firmware**, which compares the file with your backup, and **Open Advanced**, which writes it without one. A
+combination the recipes mark experimental says so in the warning line and in the write confirmation, even when each of
+its mods has been tested alone. The pick (base and mods) is remembered, and a numbered build picked in an older app
+(v0.24 to v0.27) comes back as its base and mods.
 
-### Older build names
+## The mods on v012
 
-Up to app 0.31, this project numbered its builds as it made them. The numbers were only a running build counter, and
-they span two bases. The camera never shows them. Setup > Version reads `JH5408  20250520` on every build. Now the app
-and `charmera build` name a build by its base and its mods. If you have an old file or old notes, this is what each
-number is now:
+Base v012 is the factory firmware of OV9732 cameras. It has four mods, and you can tick any mix of them. Three mixes
+have been tried on a camera: Volume and LED rows alone, Volume and LED rows with EXIF dates, and all four. Any other
+mix is marked experimental. The way back to stock from every one is stock v012 (base v012 with no mods ticked). The
+file names and SHA-256s are in [The files the app makes](#the-files-the-app-makes).
 
-| Older name | Name now |
-| --- | --- |
-| v0.21, v0.22 | earlier stages of the OV9732 port on v006. Nothing makes them any more. |
-| v0.23 | v006 with the OV9732 port |
-| v0.24 | v006 with the OV9732 port and Volume and LED rows |
-| v0.25 | v012 with Volume and LED rows |
-| v0.26 | v012 with Volume and LED rows and EXIF dates |
-| v0.27 | v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash |
+### Volume and LED rows on v012 (the camera's own factory firmware)
 
-Load a file of v0.23 to v0.27 and the app's file check details say "Older versions of the app called this v0.27" (or
-whichever it was). `charmera build --list` adds the same note to those five sets. The old numbers stay in a few places
-on purpose. Update file names keep the stamps they've always had, such as `JH_5408202611130026_….bin`, since the
-camera's updater needs a stamp in the name. For the five numbered builds, the last four digits of the stamp were the
-number. `JH_5408202611130026_….bin` is v0.26. Don't name a file by its stamp now, though. Stock v012, stock v008_test
-and every newer mix share the stamp `202611170027` with v0.27. To find out what a file is, load it with **Use a file on
-the phone** or run `charmera verify`. The check names it by its contents. Photos taken with EXIF dates say Software `v0.26` whichever build took
-them, because that text is part of the mod's code. Flash log entries an older app saved keep the name they were saved
-with. The app's own version (0.32 and so on) is a separate number.
+v012 with Volume and LED rows is the factory firmware of OV9732 cameras (build v012, from a private read of a v012
+camera's chip taken on 2026-11-13), which drives the OV9732 natively, with the **Volume** and **LED** rows of the
+v006 port moved over to it. None of the OV9732 port's sensor work is carried over, since the factory build has its
+own start-up table, exposure, white balance and colour. The camera starts with Volume 5 and LED On, and photos carry
+no EXIF date.
+
+The factory dump isn't in this repository or the app. The app gets it one of two ways, and keeps a copy in its own
+storage that it checks again on each use:
+
+- Download (the default). With no factory dump on the phone, **Make this firmware** on base v012 downloads the
+  public cleaned copy, `charmera-v012-2026-01-12-clean.bin` from
+  [the-dumping-grounds/charmera-firmware-v012](https://github.com/the-dumping-grounds/charmera-firmware-v012) at a
+  fixed commit, and uses it only if its SHA-256 is
+  `63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c`.
+- A file on the phone. **Use a file on the phone** takes the cleaned copy, downloaded in a browser, when the phone
+  can't reach GitHub, or the private read it was cleaned from (SHA-256
+  `08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce`). It takes no other file as the factory dump,
+  by SHA-256. The file picked replaces the downloaded copy and is used from then on. A read of your own v012 camera
+  goes in as a backup (**Choose this camera's backup**), and the app compares the file with it.
+
+The app makes v012 with Volume and LED rows from it the same way the computer build does: the dump's first 0x1E0000
+bytes, the internal photo slots (0x180000..0x1CB000) blanked, and 172 authored bytes (the source holds only those).
+The checker knows the factory build v012 and finds its OV9732 set-up table (v012 has its own OV9732 driver, with no
+SP140A-style table). With no backup chosen, the sensor line is a warning that nothing in the file can tell whether
+your camera has an OV9732, and that its photos can (Identify).
+
+v006 with the OV9732 port and Volume and LED rows is a way back too, next to stock v012. After a flash of a v012 build
+without EXIF dates, the flash check expects the factory header (no EXIF block).
+
+### EXIF dates
+
+The EXIF dates mod puts an EXIF block in every still photo, on the SD card and in the camera's own memory: Make `Kodak`,
+Model `Charmera`, Software `v0.26`, and DateTime, DateTimeOriginal and DateTimeDigitized from the camera's clock. Set
+the date in the camera's setup menu first, because an unset clock gives `2025:01:01`. The still header grows from the
+factory build's bare 0x270 bytes to 0x340: the SOI, an authored APP1 block of 0xD0 bytes, then the factory template's
+own segments from SOF0 on. Software `v0.26` is an old build number that's part of the mod's code, so it can't change.
+The first build with it to be tried on a camera was v012 with Volume and LED rows and EXIF dates. With the Volume and
+LED rows, the camera starts with Volume 5 and LED On.
+
+The app makes it from your factory dump the way it makes v012 with Volume and LED rows, then adds one more layer. That
+layer is 332 authored bytes (the APP1 block, a new date-fill routine, and the instructions that point the photo
+writers at the new header) and one range of 0x26E bytes, the factory template from SOF0 on, which the app copies from
+your factory dump at run time (file 0x10753A to 0x89712). So the source holds none of the vendor's bytes.
+
+v012 with Volume and LED rows is a way back too, and so is v006 with the OV9732 port and Volume and LED rows. After a
+flash of a build with EXIF dates, the flash check expects the 0x340-byte header with its APP1 EXIF block (Make Kodak,
+Model Charmera).
+
+### Boot to last mode and capture flash
+
+These are two more mods on v012. Both were tested in an emulator first, then on a camera, in v012 with Volume and LED
+rows, EXIF dates, boot to last mode and capture flash.
+
+- Boot to last mode. After power-on (and after the card's update check, which is unchanged) the camera goes
+  straight into the mode last used, photo or video, instead of the SELECT MODE screen. The first time, that's photo. A
+  short press of the power button still opens SELECT MODE. The mode is kept in a spare settings byte (+0x61). The camera
+  saves its settings on its own schedule, so a mode change can be lost if you switch it off within a few seconds.
+- Capture flash. When a photo is taken, the picture area goes black for 120 ms under the on-screen icons, inside the
+  stock 200 ms shutter delay, so you see the shot even at Volume 0. If the camera stops sending preview frames during
+  that delay, no flash shows, and nothing else changes.
+
+The app makes that build the way it makes the EXIF one, then adds one more layer of 202 authored bytes. Photos keep
+the EXIF dates header (Software `v0.26`), so the photo check can't tell this build from v012 with Volume and LED rows
+and EXIF dates. Check boot to last mode and capture flash on the camera itself. v012 with Volume and LED rows and EXIF
+dates is a way back too.
+
+## Identify the image sensor (the sensor-ID probe)
+
+If a camera boots to its menu but freezes when it enters photo or video mode, the cause may be an image sensor the
+firmware doesn't drive. The app can build a **sensor-ID probe** (the "Identify the image sensor" route) to find out
+which sensor is fitted. It's a diagnostic and doesn't make the camera take pictures. If the card has photos the camera
+took before any flash, [Identify](#identify-this-cameras-firmware) already tells you: photos taken by stock v012 mean
+an OV9732 camera, and you don't need the probe.
+
+The probe is the stock restore file with a small reviewed patch. Its boot code, update code and image-sensor table are
+the stock restore file's, byte for byte. Only a dead debug routine and the one call that writes the sensor set-up are
+changed. When the camera next enters photo mode, the patch walks the sensor bus across every device address (0x08..0x77)
+with the firmware's own read routine. For each address that answers, it reads the 16-bit chip-ID registers
+(0x3000..0x301F and 0x3100..0x310F) and writes the result to `SENSOR.TXT` in the card's root, then stops there. It
+replaces the camera's firmware until you flash another. On an SP140A camera the stock restore file puts it back. On an
+OV9732 camera, undo it with a v012 build, stock or with mods (Flash custom firmware), not the stock restore file. It's
+one of the reviewed files the app writes without a backup, like every build of Flash custom firmware.
+
+After flashing it, take the update file off the card first, or the camera re-flashes it on every boot instead of
+running it. Then boot the camera and open photo mode so the probe runs. Bring the card back to the phone and tap **Read
+the sensor result from the card** (the route's last step). The result is one of these:
+
+- A named sensor, for example "OmniVision OV2680" or "SmartSens SC…". The app read the sensor's 16-bit chip-ID
+  registers and matched them, so the exact part is known and a firmware built for it becomes possible.
+- A sensor at some address, not yet named. It answered, but its chip ID wasn't at the registers the app reads. The app
+  shows the raw register fingerprint and what to try next (often an 8-bit read, for an older part).
+- Nothing answered at any address. The sensor isn't responding at all (disconnected, unpowered, or dead). Reseat the
+  sensor's ribbon and scan again. If it still answers nowhere, it's a hardware fault no firmware can fix.
+
+For every address that answers, the app shows its 16-bit register fingerprint (0x3000..0x301F and 0x3100..0x310F,
+where `FF` means no answer). Those bytes name the exact part against a datasheet, and the `SENSOR.TXT` file holds them
+for a closer look.
+
+The app builds the probe deterministically and checks it against a fixed hash, so a wrong byte can't produce a usable
+file ([The files the app makes](#the-files-the-app-makes)).
+
+To undo it on an SP140A camera, flash the stock restore file, which the app also makes. If the probe names an OV9732,
+skip the stock restore file, which can't take pictures on that camera, and flash a v012 build, stock or with mods
+([The mods on v012](#the-mods-on-v012)), or v006 with the OV9732 port
+([below](#repair-an-ov9732-camera-the-ov9732-port-on-v006)).
+
+## Repair an OV9732 camera (the OV9732 port on v006)
+
+This is for a camera whose image sensor is an OmniVision OV9732 (Identify on photos from before the flash, or
+[the probe](#identify-the-image-sensor-the-sensor-id-probe), names it) and which was flashed with the public build, made for a SuperPix SP140A, so photo and video
+mode no longer work. Such a camera can also take the v012 builds (stock v012, or [v012 with mods](#the-mods-on-v012)), since v012 is
+the factory firmware of OV9732 cameras. v012 with Volume and LED rows went onto a camera running v006 with the OV9732
+port and Volume and LED rows, and works. v006 with the OV9732 port is the public build with the OV9732
+driven in place of the SP140A: its start-up table, its exposure and gain, its black level, and image tuning fitted on
+a colour card against a working camera. With the Volume and LED rows ticked too, it also adds two setup-menu rows
+after FORMAT, **Volume** (system sounds, 0 to 8; it also sets playback volume, and 0 mutes) and **LED** (the automatic flash light,
+On as before or Off). Boot and update code are the public build's, byte for byte. What each build changed and what it
+measured on a camera is in [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md). Why the repair is
+needed is in [OV9732 repair scope](14-OV9732-REPAIR-SCOPE.md).
+
+The app builds it deterministically and checks it against a fixed hash, so a wrong byte can't produce a usable file
+([The files the app makes](#the-files-the-app-makes)).
+
+The stock restore file is no way back for this camera. It doesn't drive the OV9732, so with it photo and video stop
+working again. The way back to stock is stock v012 (base v012 with no mods ticked), the factory firmware of OV9732
+cameras. To drop the Volume and LED rows, go back to v006 with the OV9732 port alone. The app makes that one too. In
+**Flash custom firmware**, pick base v006 and tick only the OV9732 port. Before you update the app or flash another
+build, you can also keep a copy of the file that works: make it in **Flash custom firmware**, then tap **Save a copy
+to the phone** in **Advanced**. Like any update, the flash itself must not be interrupted.
 
 ## Where the dumps come from
 
@@ -432,9 +363,62 @@ exact files (by SHA-256). The v008_test base comes from its own public file
 
 A cleaned copy has the original's bytes up to 0x170000 (boot header, code, data, resources) unchanged. Only its factory
 settings record is kept, and its stored photos are erased. So each file made from it is the same firmware as the one
-made from the original, under its own name and SHA-256 (both are listed above), and the camera starts with factory
+made from the original, under its own name and SHA-256 (both are in the table below), and the camera starts with factory
 settings. The candidates C, A and B are the same file from either copy. The app recognises both files of each build,
 so a copy saved by an older app still counts as that build.
+
+### The files the app makes
+
+The app builds each file deterministically and keeps it only when its SHA-256 is the one listed here. "Cleaned" is
+the file made from the cleaned copy, which is what you get from a download. "Original" is the same build made from
+the original dump (for v012, the private read).
+
+| Build | Made from | File | SHA-256 |
+| --- | --- | --- | --- |
+| Stock restore file (stock v006) | cleaned | `JH_5408202610261427_0FB74C24.bin` | `9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec` |
+| Stock restore file (stock v006) | original | `JH_5408202610261427_0F065D55.bin` | `b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906` |
+| v006 with the sensor-ID probe | cleaned | `JH_5408202611082300_0FB74B1C.bin` | `02e2729cffa4dd835f2b138b4ff4df9be89baecfb96f473665dc4b3411e7d2d5` |
+| v006 with the sensor-ID probe | original | `JH_5408202611082300_0F065C4D.bin` | `6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b` |
+| v006 with the OV9732 port | cleaned | `JH_5408202611110023_0FB70DF7.bin` | `554d3c2fb69185df5020c5521eaaf02f59d9282d51a1384c56a91aec586f1466` |
+| v006 with the OV9732 port | original | `JH_5408202611110023_0F061F28.bin` | `f0cced2e9cb2c1925d6d20bc54c8002c1543f9710bf5ab90032db316572507b2` |
+| v006 with the OV9732 port and Volume and LED rows | cleaned | `JH_5408202611120024_0FB7027B.bin` | `8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b` |
+| v006 with the OV9732 port and Volume and LED rows | original | `JH_5408202611120024_0F0613AC.bin` | `0919c5d857f855b11424407211a132ac61f4c91852e01af583bd6b76c85b1c69` |
+| v012 with Volume and LED rows | cleaned | `JH_5408202611130025_0FB76FE9.bin` | `bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a` |
+| v012 with Volume and LED rows | original | `JH_5408202611130025_0FA3BF37.bin` | `a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0` |
+| v012 with Volume and LED rows and EXIF dates | cleaned | `JH_5408202611130026_0FB73D2E.bin` | `be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738` |
+| v012 with Volume and LED rows and EXIF dates | original | `JH_5408202611130026_0FA38C7C.bin` | `617770c3f3c9d880f93f06043090d3d07909c845633ca08e9c183deb44fa06d2` |
+| v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash | cleaned | `JH_5408202611170027_0FB73A48.bin` | `89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639` |
+| v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash | original | `JH_5408202611170027_0FA38996.bin` | `108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968` |
+
+Made from the cleaned copy, the stock restore file has the same bytes as the withdrawn candidate C, which was the stock
+software with factory settings and no photos. Every other pick, such as stock v012 or a v012 mix that isn't in this
+table, has its file name and SHA-256 in `charmera_toolkit/recipes.json`.
+
+## Older build names
+
+Up to app 0.31, this project numbered its builds as it made them. The numbers were only a running build counter, and
+they span two bases. The camera never shows them. Setup > Version reads `JH5408  20250520` on every build. Now the app
+and `charmera build` name a build by its base and its mods. If you have an old file or old notes, this is what each
+number is now:
+
+| Older name | Name now |
+| --- | --- |
+| v0.21, v0.22 | earlier stages of the OV9732 port on v006. Nothing makes them any more. |
+| v0.23 | v006 with the OV9732 port |
+| v0.24 | v006 with the OV9732 port and Volume and LED rows |
+| v0.25 | v012 with Volume and LED rows |
+| v0.26 | v012 with Volume and LED rows and EXIF dates |
+| v0.27 | v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash |
+
+Load a file of v0.23 to v0.27 and the app's file check details say "Older versions of the app called this v0.27" (or
+whichever it was). `charmera build --list` and `charmera verify` add the same note for those five. The old numbers stay in a few places
+on purpose. Update file names keep the stamps they've always had, such as `JH_5408202611130026_….bin`, since the
+camera's updater needs a stamp in the name. For the five numbered builds, the last four digits of the stamp were the
+number. `JH_5408202611130026_….bin` is v0.26. Don't name a file by its stamp now, though. Stock v012, stock v008_test
+and every newer mix share the stamp `202611170027` with v0.27. To find out what a file is, load it with **Use a file on
+the phone** or run `charmera verify`. The check names it by its contents. Photos taken with EXIF dates say Software
+`v0.26` whichever build took them, because that text is part of the mod's code. Flash log entries an older app saved keep the name they were saved
+with. The app's own version (0.32 and so on) is a separate number.
 
 ## Without the app
 

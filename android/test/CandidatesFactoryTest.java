@@ -168,9 +168,9 @@ public final class CandidatesFactoryTest {
         expect("build() refuses v0.26 from any other dump", refused(() -> Candidates.build(img, Candidates.Kind.V026),
                 "not the factory dump"));
 
-        // The menu: the Repair versions, newest first, and the latest available.
+        // The fixed Repair kinds (the builds older apps numbered v0.27 to v0.24), newest first.
         Candidates.Kind[] versions = Candidates.repairVersions();
-        expect("the Repair versions are v0.27, v0.26, v0.25 then v0.24", Arrays.equals(versions, new Candidates.Kind[]{
+        expect("the fixed Repair kinds are V027, V026, V025 then BRINGUP", Arrays.equals(versions, new Candidates.Kind[]{
                 Candidates.Kind.V027, Candidates.Kind.V026, Candidates.Kind.V025, Candidates.Kind.BRINGUP}));
         boolean newestFirst = true;
         for (int i = 1; i < versions.length; i++) {
@@ -190,26 +190,20 @@ public final class CandidatesFactoryTest {
         expect("v0.26 and v0.25 are made from the factory dump, v0.24 from the stock dump", Candidates.Kind.V026.base
                 == Candidates.Base.FACTORY && Candidates.Kind.V025.base == Candidates.Base.FACTORY
                 && Candidates.Kind.BRINGUP.base == Candidates.Base.STOCK);
-        expect("latest available: v0.27, with the factory dump kept or not (its cleaned copy downloads)",
-                Candidates.latestAvailable(true) == Candidates.Kind.V027
-                        && Candidates.latestAvailable(false) == Candidates.Kind.V027
-                        && Candidates.canBuild(Candidates.Kind.V025, false));
+        boolean plainLabels = true;
+        for (Candidates.Kind k : versions) {
+            // A Repair pick is described from the recipes with its way back, so its kind's label only says what the
+            // build is: nothing about whose dump it was made from, and no way back that could go stale.
+            plainLabels &= !k.label.contains("your factory dump") && !k.label.contains("read off its chip")
+                    && !k.label.contains("this camera's own") && !k.label.contains("way back");
+        }
+        expect("the Repair kinds' labels say what the build is, and nothing about one camera's dump", plainLabels);
         expect("the factory dump downloads from its repository at a fixed commit",
                 Candidates.CLEAN_FACTORY_DOWNLOAD.startsWith("https://raw.githubusercontent.com/the-dumping-grounds/"
                         + "charmera-firmware-v012/") && Candidates.CLEAN_FACTORY_DOWNLOAD.endsWith("/"
                         + Candidates.CLEAN_FACTORY_NAME) && Candidates.CLEAN_FACTORY_DOWNLOAD.matches(".*/[0-9a-f]{40}/.*"));
-        expect("no pick remembered: the latest available", Candidates.repairChoice(null, true) == Candidates.Kind.V027
-                && Candidates.repairChoice(null, false) == Candidates.Kind.V027);
-        expect("the owner's pick is kept while it can be made", Candidates.repairChoice("BRINGUP", true)
-                == Candidates.Kind.BRINGUP && Candidates.repairChoice("V025", true) == Candidates.Kind.V025
-                && Candidates.repairChoice("V026", true) == Candidates.Kind.V026);
-        expect("a remembered v0.25 or v0.26 stays picked with no factory dump (the screen asks for it)",
-                Candidates.repairChoice("V025", false) == Candidates.Kind.V025
-                        && Candidates.repairChoice("V026", false) == Candidates.Kind.V026);
-        expect("a remembered name that is no Repair version is ignored", Candidates.repairChoice("RESTORE", true)
-                == Candidates.Kind.V027 && Candidates.repairChoice("V099", false) == Candidates.Kind.V027);
 
-        // Every Repair version belongs to the Repair route and is a reviewed patch (WriteGate's waiver), by SHA-256.
+        // Every fixed Repair kind belongs to the Repair route and is a reviewed patch (WriteGate's waiver), by SHA-256.
         for (Candidates.Kind k : versions) {
             expect(k + " is found by its SHA-256 and is a reviewed patch", Candidates.repairVersion(k.sha256) == k
                     && Candidates.isReviewedPatch(k.sha256));

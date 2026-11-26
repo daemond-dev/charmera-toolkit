@@ -1135,7 +1135,7 @@ def test_app_warns_loudly_on_an_unknown_file_with_no_backup():
     the write confirmation both carry the loud warning."""
     java = ACTIVITY.read_text(encoding="utf-8")
     unknown_file = _joined(java[java.index("UNKNOWN_FILE = "):java.index("DOWNLOAD = ")])
-    for fact in ("isn't one of this project's reviewed builds", "with no backup chosen",
+    for fact in ("isn't one of this project's reviewed builds", "with no chip backup chosen",
                  "can't compare it with this camera's firmware", "Only write it if you know it fits."):
         assert fact in unknown_file, fact
     unknown = _bodies(java, "private boolean unknownNoBackup(")[0]
@@ -1310,7 +1310,7 @@ def test_build_runs_every_jvm_test_and_compiles_the_gate():
 
 
 def test_release_workflow_runs_the_source_and_doc_checks_before_it_builds():
-    """critic wf-1: the checks that hold the backup gate (tests/test_android.py) and the flash docs run in the job that
+    """critic wf-1: the checks that hold the write gate (tests/test_android.py) and the flash docs run in the job that
     publishes, before build.sh, with the public dump in place; the publish conditions stay as they were."""
     wf = WORKFLOW.read_text(encoding="utf-8")
     run = wf.index("tests/test_android.py tests/test_flash_docs.py tests/test_docs.py")
@@ -1321,10 +1321,12 @@ def test_release_workflow_runs_the_source_and_doc_checks_before_it_builds():
     assert "if: github.ref == 'refs/heads/main' && steps.key.outputs.release == 'true'" in publish.splitlines()[1]
 
 
-def test_app_repair_route_offers_each_version_from_a_menu():
-    """0.26: the Repair route writes the version picked in its menu (Candidates.repairVersions, newest first), defaulting
-    to the latest the app can make; every Repair version belongs to that route; the menu is off while anything runs, and
-    a pick drops a loaded file of another version; the factory dump is recognised before any other 2 MiB file."""
+def test_app_repair_route_picks_a_base_and_mods():
+    """The Repair route writes the build picked: a base from its menu and one box per mod, remembered as such (a pick an
+    app before 0.28 kept by Kind name is moved once). Every Repair file belongs to that route. The menu and boxes are
+    off while anything runs, and a pick drops a loaded file of another build without scrolling away from the boxes.
+    Stock v006 is not made here: its two screens are offered. The factory dump is recognised before any other 2 MiB
+    file."""
     java = ACTIVITY.read_text(encoding="utf-8")
     assert "Kind.BRINGUP" not in java and "bringupFirmwareVersion" not in java and "isBringup" not in java
     assert "Candidates.isRepairFile(sha) ? FlashFlow.Route.REPAIR" in _bodies(java, "private static FlashFlow.Route routeOfFile(")[0]
@@ -1350,7 +1352,25 @@ def test_app_repair_route_offers_each_version_from_a_menu():
     assert choose.index("if (busy() || downloading || checking || dialog != null) {") < choose.index("repairSel = sel;")
     assert choose.index("repairSel = sel;") < choose.index("rememberRepair();")
     assert "putString(KEY_REPAIR_SET, repairSel.serialize())" in _bodies(java, "private void rememberRepair()")[0]
-    assert "(fileCheck == null || !sel.matches(fileCheck.sha256))" in choose and "dropFile();" in choose
+    assert "(fileCheck == null || !sel.matches(fileCheck.sha256))" in choose and "dropFile(false);" in choose
+    # a tick must not scroll the boxes away: the quiet drop sets the line without reveal, the plain one still reveals
+    quiet = _bodies(java, "private void dropFile(boolean reveal)")[0]
+    assert "showFile(NO_FILE, null);" in quiet and "setStatus(fileStatus, NO_FILE);" in quiet
+    assert "reveal(" not in quiet[quiet.index("} else {"):]
+    assert "dropFile(true);" in _bodies(java, "private void dropFile()")[0]
+    # the make button never changes its words, and stock v006 gets the buttons to Restore and Advanced in its place
+    assert "repairButton.setText" not in java
+    assert "boolean elsewhere = writtenOnRestore(repairSel);" in refresh
+    assert "repairButton.setVisibility(elsewhere ? View.GONE : View.VISIBLE);" in refresh
+    assert "stockV006Panel.setVisibility(elsewhere ? View.VISIBLE : View.GONE);" in refresh
+    assert "write.add(stockV006Panel);" in repair
+    assert "go(Route.RESTORE)" in views and "go(Route.ADVANCED)" in views
+    assert "return sel.stock() && Recipe.V006.equals(sel.base);" in _bodies(java, "private static boolean writtenOnRestore(")[0]
+    # Identify's answer counts only for the drive it was read from, and v006 found with v008_test picked is no mismatch
+    assert "Identify.Base found = identified();" in refresh
+    assert "!(Recipe.V006.equals(foundBase) && Recipe.V008.equals(repairSel.base))" in refresh
+    assert "Recipe.untriedNote(repairSel)" in refresh and "reviewedAndWayBack(repairSel)" in refresh
+    assert "wayBack(sel)" in _bodies(java, "private static String reviewedAndWayBack(")[0]
     load = _bodies(java, "private void loadFile(")[0]
     assert load.index("Candidates.isFactoryDump(data)") < load.index("Candidates.isStockDump(data)") \
         < load.index("UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S)")
@@ -1373,11 +1393,11 @@ def test_app_repair_route_offers_each_version_from_a_menu():
     assert "return new Layer[]{V025_LAYER, V026_LAYER};" in _bodies(cand, "static Layer[] layersOf(")[0]
 
 
-def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
-    """0.26 review: a Repair-version file loaded for the Repair route becomes the menu's pick (so the step's title, its
-    check line and the file written name one version); the way-back line fits the version picked; the menu looks off
-    while it is off; a factory dump is kept on every route but made into firmware only where firmware is written; the
-    flash check expects v0.26's EXIF header after a v0.26 write."""
+def test_app_repair_route_keeps_name_pick_and_file_on_one_build():
+    """A Repair file loaded for the Repair route becomes the pick, on the direct path and after a recheck (so the name
+    in bold, the base menu, the mod boxes, the check line and the file written name one build); the way-back line fits
+    the pick; the menu looks off while it is off; a factory dump is kept on every route but made into firmware only
+    where firmware is written; the flash check expects the EXIF header after a write of a build with EXIF dates."""
     java = ACTIVITY.read_text(encoding="utf-8")
     apply = _bodies(java, "private void applyCheck(")[0]
     assert apply.index("fileCheck = result;") < apply.index("followLoadedRepair(result);") \
@@ -1385,11 +1405,15 @@ def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
     follow = _bodies(java, "private void followLoadedRepair(")[0]
     assert "if (fileFor != Route.REPAIR || k == null || k.equals(repairSel)) {" in follow
     assert follow.index("repairSel = k;") < follow.index("rememberRepair();") < follow.index("render();")
+    # a check made with another backup goes through recheckFile, which follows the loaded file too
+    recheck = _bodies(java, "private void recheckFile()")[0]
+    assert recheck.index("fileCheck = result;") < recheck.index("followLoadedRepair(result);") \
+        < recheck.index("showChecked(result, origin, chosen);")
     # the way back: another v012 build or stock v012 for a v012 pick, v006 with the OV9732 port (made here with only the
     # port ticked) for the port with more mods, the restore file for v008_test and the SP140A v006 picks; no "no backup"
     # line for a pick that needs one
     repair = _bodies(java, "private void renderRepair()")[0]
-    assert "wayBack(repairSel)" in repair and "You don't need a backup." in repair
+    assert "wayBack(repairSel)" in repair and "You don't need a chip backup" in _joined(repair)
     back = _bodies(java, "private static String wayBack(")[0]
     said = _joined(back)
     assert "That's another v012 build, or stock v012" in said and "It's the way back from every v012 build" in said \
@@ -1456,13 +1480,25 @@ def test_app_identify_route_reads_the_photos_and_writes_nothing():
     render, run, show = route
     assert 'readDriveStep("1")' in render and "look.add(identifyButton);" in render
     assert "listMedia(t, false)" in run and "readUpTo(in, PhotoId.HEADER_LIMIT + 16)" in run
-    assert "Identify.identify(entries, TimeZone.getDefault())" in run and "identifiedBase = r.base;" in run
-    # the three guided questions, worded from what is known
+    assert "Identify.identify(entries, TimeZone.getDefault())" in run
+    # The base found is an answer about one drive. A run that fails or finds none clears the old one, and it is paired
+    # with the drive's UUID after the try, so a failed read never leaves another drive's base on this one.
+    assert "Identify.Base base = null;" in run and "base = r.base;" in run
+    assert run.index("} catch (IOException | RuntimeException e) {") < run.index("identifiedBase = base;") \
+        < run.index("identifyFor = uuid;")
+    scoped = _bodies(java, "private Identify.Base identified()")[0]
+    assert "drive.equals(treeUuid()) ? identifiedBase : null" in scoped
+    assert java.count("identifiedBase") - java[:java.index("private Identify.Base identified()")].count("identifiedBase") == 2
+    assert "Identify.Base f = identified();" in _bodies(java, "private String unconfirmed(")[0]
+    # the answer names a base, and the button under it opens the screen where the base is picked
+    assert "look.add(identifyNextButton);" in render
+    assert "identifyNextButton.setVisibility(identified() != null ? View.VISIBLE : View.GONE);" in show
+    # the guided questions, worded from what is known, each with what to do
     said = _joined(render)
-    for fact in ("Setup page 2: are there Volume and LED rows after FORMAT? Then one of our builds with Volume and LED"
-                 " rows is installed. Without them it's stock, or one of our builds without that mod.",
-                 "Does photo or video mode freeze after a flash? Then that firmware is for the other sensor family and"
-                 " doesn't drive this camera's sensor",
+    for fact in ("1. On the camera, open Setup and go to page 2. If there are Volume and LED rows after FORMAT, the camera"
+                 " runs one of this project's builds with that mod. If not, it's stock, or a build without that mod.",
+                 "2. If photo or video mode freezes after a flash, the firmware you flashed is for the other sensor. Flash"
+                 " the other base.",
                  "Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells you nothing."):
         assert fact in said, fact
     assert "identifyButton.setEnabled(idle && !zipping && !identifying && listed);" in \
@@ -1498,3 +1534,97 @@ def test_app_names_a_build_by_the_same_rule_as_recipes_py():
     assert '"Older versions of the app called this " + old + "."' in recipe
     show = _bodies(ACTIVITY.read_text(encoding="utf-8"), "private void showChecked(")[0]
     assert "String older = Recipe.olderNameNote(result.sha256);" in show
+
+
+def test_app_shows_the_backups_wrong_sensor_warning_where_the_owner_looks():
+    """A chip backup on record that is firmware for the other sensor is stronger evidence than no backup at all, so its
+    "Wrong sensor?" line is the sensor warning in the file step and the write dialog, not only a line under Details
+    (a backup on record silences Recipe.unconfirmed)."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    warn = _bodies(java, "private String sensorWarning(")[0]
+    assert warn.index("UpdateCheck.wrongSensor(result)") < warn.index("unconfirmed(result)")
+    assert "if (!isReviewedPatch(result)) {" in warn
+    assert "String unsure = sensorWarning(result);" in _bodies(java, "private SpannableString checkLine(")[0]
+    assert "final String unsure = sensorWarning(check);" in _bodies(java, "private void confirmWrite()")[0]
+    check = (PKG / "UpdateCheck.java").read_text(encoding="utf-8")
+    assert 'static final String WRONG_SENSOR = "Wrong sensor?";' in check
+    found = _bodies(check, "static String wrongSensor(Result result)")[0]
+    assert "l.level == Level.WARN && WRONG_SENSOR.equals(l.title)" in found
+    cand = (PKG / "Candidates.java").read_text(encoding="utf-8")
+    assert cand.count("UpdateCheck.WRONG_SENSOR, ") == 2 and ', "Wrong sensor?", ' not in cand
+
+
+def test_app_says_what_a_changed_backup_means_for_the_file_written():
+    """When the chip backup changes after a write or a save: a file that was compared with the old one may no longer
+    pass, so it says to remove it unless the file step shows it ready again (never a verdict the file step doesn't
+    print for it). A file checked alone was never compared, so it only points at the file step's sensor line."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    out = _bodies(java, "private void outdated(")[0]
+    said = _joined(out)
+    assert "OK to put on the card" not in said
+    assert "Unless the file step shows the file ready again, tap " in said
+    assert "unless the file step shows the file ready again." in said
+    assert "Candidates.checkedAlone(writtenSha)" in out and "Candidates.checkedAlone(savedSha)" in out
+    assert said.count("The file isn't compared with a backup, but its sensor warning goes by the backup chosen.") == 2
+    assert java.count("writtenSha = ") == 2 and java.count("savedSha = ") == 1
+
+
+def test_app_copy_for_someone_who_only_owns_the_camera():
+    """The screens say up front what a stranger needs: two sensors and what a base is, which stock each restore screen
+    writes, that the probe replaces the firmware, what a chip backup is, and where the brick risk lies."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    home = _joined(_bodies(java, "private void renderHome()")[0])
+    for fact in ("Stock firmware for your sensor, plus the changes you tick. Now: ",
+                 "Only for a camera that can't take photos. It replaces the camera's firmware with a test build.",
+                 "Stock v006, for SP140A cameras. Needs a chip backup. Without one, use Advanced. OV9732 camera? Flash"
+                 " base v012 with no mods.",
+                 "never a Millennium or CLOT edition. Charge the battery fully before any flash."):
+        assert fact in home, fact
+    assert "LAST_FLASH + flashLog.summary(" in _bodies(java, "private void renderHome()")[0]
+    assert 'LAST_FLASH = "Last flash from this app: "' in java and "Camera firmware: " not in java
+    repair = _joined(_bodies(java, "private void renderRepair()")[0])
+    for fact in ("The Charmera was made with two image sensors, and each needs its own firmware. The base is the stock"
+                 " firmware for your sensor: v012 for the OV9732, v006 for the SP140A. Mods are optional changes on top.",
+                 "Charge the battery fully first. If the flash is cut off, only a chip programmer can bring the camera"
+                 " back.",
+                 "never a Millennium (blue boot screen) or CLOT edition.",
+                 "one whose SHA-256 matches the list published with this project",
+                 "Stock v012 is the factory firmware. Its photos have the factory header (no EXIF block)"):
+        assert fact in repair, fact
+    assert "Your factory dump stays on this phone" not in java and '"the factory dump"' not in java
+    assert "a public copy of the factory firmware" in _bodies(java, "private static String dumpWords(")[0]
+    probe = _joined(_bodies(java, "private void renderProbe()")[0])
+    assert "it replaces the camera's firmware until you flash another." in probe and "stops as it does now" not in probe
+    restore = _joined(_bodies(java, "private void renderRestore()")[0])
+    assert "This screen writes stock v006, the firmware of SP140A cameras, and compares it with your chip backup" in restore
+    assert "It isn't the photo zip." in restore and "donor route" not in java
+    assert 'linkText("Recovery guide ↗", DOCS_PAGE + "02-RECOVERY.md")' in _bodies(java, "private void renderRestore()")[0]
+    assert 'linkText("Card help ↗", DOCS_PAGE + "05-CARDS.md")' in _bodies(java, "private Step driveStep(")[0]
+    assert "docs/0" not in java.replace("blob/main/docs/", "")
+    adv = _bodies(java, "private void renderAdvanced()")[0]
+    assert 'step("1", "Chip backup (optional)"' in adv
+    for n in ("2", "4", "6", "7"):
+        assert f'step("{n}", ' in adv and f'step("{n}", "' in adv
+        line = adv[adv.index(f'step("{n}", '):]
+        assert ", null);" not in line[:line.index(";") + 1], n
+    # every Repair pick is described from the recipes with its way back; only the two own-screen files keep a label
+    build = _bodies(java, "private void buildRestore(")[0]
+    assert "legacy == Candidates.Kind.RESTORE || legacy == Candidates.Kind.PROBE ? legacy.label" in build
+    assert 'Recipe.describe(sel) + (sel.stock() ? "" : " " + wayBack(sel))' in build
+    # the probe's result always ends with a next step
+    result = _joined(java)
+    assert "Keep SENSOR.TXT and open an issue on the project's GitHub page with it." in result
+    assert "The probe stays on the camera until you flash another firmware, so flash what the camera ran before." in result
+    gate = GATE.read_text(encoding="utf-8")
+    assert "an early test build the project has withdrawn" in gate and "withdrawn candidate, so" not in gate
+    # Recipe and Identify run on a plain JVM, so they name the screens by hand: the names must be routeTitle's
+    titles = _bodies(java, "private static String routeTitle(")[0]
+    assert 'return "Flash custom firmware";' in titles and 'return "Restore stock firmware";' in titles
+    recipe = (PKG / "Recipe.java").read_text(encoding="utf-8")
+    fix = _joined(_bodies(recipe, "static String fixFor(String sensor)")[0])
+    assert 'base v012 on \\"Flash custom firmware\\"' in fix
+    assert 'stock v006 on \\"Restore stock firmware\\" or Advanced' in fix
+    ident = (PKG / "Identify.java").read_text(encoding="utf-8")
+    step = _joined(_bodies(ident, "static String nextStep(Base b)")[0])
+    assert 'Pick base v012 on \\"Flash custom firmware\\".' in step
+    assert 'Stock v006 is written on \\"Restore stock firmware\\" or Advanced.' in step

@@ -75,7 +75,7 @@ bytes that passed `verify`, which a plain copy to a cheap card through a cheap r
    A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes it
    (`charmera build --base v006 --download --out out/` for an SP140A camera, `charmera build --base v012 --download
    --out out/` for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a chip
-   programmer. Warning instead of refusing was a deliberate choice, made on 2026-11-06.
+   programmer.
 
    `--donor donor.bin` is the donor route, for a camera whose own firmware is gone and doesn't fit it ([Recovery,
    section D](02-RECOVERY.md#the-donor-route)). `--stock` is optional there. Without it a WARN `backup` says nothing
@@ -129,7 +129,8 @@ programmer can bring back ([Recovery](02-RECOVERY.md)). Whether the updater runs
 known.
 
 A 0x1E0000-byte file replaces the photos the camera stores in its own memory with the ones in the file. The
-[flash candidates](03-FLASH-CANDIDATES.md) and any file packed with `--blank-photos` erase them. A 0x169000-byte file
+[flash candidates](03-FLASH-CANDIDATES.md), the files from `build --download` and any file packed with
+`--blank-photos` erase them. A 0x169000-byte file
 leaves the photo data in place, but the camera empties its photo list, so it no longer shows them and the next photo it
 stores overwrites them.
 

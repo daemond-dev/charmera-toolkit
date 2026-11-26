@@ -256,10 +256,19 @@ public final class WriteGateTest {
                 expect(names[i] + " against an SP140A backup: OK with a Wrong sensor? warning, never compared, and it"
                         + " names the backup", onSp.ok && !onSp.compared && sha(stock).equals(onSp.referenceSha256)
                         && l != null && l.level == UpdateCheck.Level.WARN && "Wrong sensor?".equals(l.title)
-                        && l.text.startsWith("the firmware in your backup drives the SP140A, and ")
+                        && l.text.startsWith("the firmware in your chip backup drives the SP140A, and ")
                         && l.text.contains(" drives the OV9732. If the backup is this camera's")
+                        && l.text.contains("can't take photos until you flash stock v006 on \"Restore stock firmware\""
+                        + " or Advanced.")
                         && !onSp.report().contains("Nothing in the file can tell")
                         && WriteGate.refusal(onSp, ov[i], sha(stock), false, false) == null, onSp.report());
+                // The file step and the write dialog show that line as their one sensor warning (it would otherwise
+                // sit under Details, since a backup on record silences the "not confirmed" warning).
+                String shown = UpdateCheck.wrongSensor(onSp);
+                expect(names[i] + " against an SP140A backup: the warning the screen shows is the check's own line",
+                        shown != null && shown.startsWith("Wrong sensor? The firmware in your chip backup drives the"
+                        + " SP140A, and ") && shown.endsWith(l.text.substring(1))
+                        && Recipe.unconfirmed(Recipe.selectionOf(sha(ov[i])), true, null) == null, shown);
                 UpdateCheck.Result onOv = Candidates.check(card, ov[i], factory);
                 l = sensorLine(onOv);
                 expect(names[i] + " against an OV9732 backup: no Wrong sensor? warning, and no line for no backup",
@@ -267,11 +276,12 @@ public final class WriteGateTest {
                         && "Image sensor set-up".equals(l.title) && !onOv.report().contains("Wrong sensor?")
                         && l.text.startsWith("the firmware in your backup drives the OV9732 too, as ")
                         && !onOv.report().contains("Nothing in the file can tell")
+                        && UpdateCheck.wrongSensor(onOv) == null
                         && WriteGate.refusal(onOv, ov[i], sha(factory), false, false) == null, onOv.report());
                 UpdateCheck.Result none = Candidates.check(card, ov[i], null);
                 expect(names[i] + " with no backup keeps its own sensor line and names no backup",
-                        none.ok && none.referenceSha256 == null && !none.report().contains("Wrong sensor?"),
-                        none.report());
+                        none.ok && none.referenceSha256 == null && !none.report().contains("Wrong sensor?")
+                        && UpdateCheck.wrongSensor(none) == null, none.report());
             }
             // the reverse: the v006 builds (compared with the backup) against an OV9732 backup still warn
             byte[] restore = Recipe.build(stock, new Recipe.Selection("v006"));
@@ -279,6 +289,9 @@ public final class WriteGateTest {
             UpdateCheck.Line l = sensorLine(back);
             expect("stock v006 against an OV9732 backup: compared, OK with a Wrong sensor? warning", back.ok
                     && back.compared && l != null && "Wrong sensor?".equals(l.title)
+                    && UpdateCheck.wrongSensor(back) != null
+                    && UpdateCheck.wrongSensor(back).startsWith("Wrong sensor? The firmware in your chip backup drives"
+                    + " the image sensor differently from stock v006")
                     && WriteGate.refusal(back, restore, sha(factory), false, false) == null, back.report());
             // a v006 build against a backup of a camera running v0.24 (the same SP140A table, but the OV9732 port
             // in its code): the same table, another sensor, so the loud warning too
@@ -293,7 +306,8 @@ public final class WriteGateTest {
             UpdateCheck.Result probeOn = Candidates.check(Candidates.Kind.PROBE.fileNameFor(sha(probe)), probe, factory);
             expect("the sensor-ID probe works on either sensor: no Wrong sensor? warning, and it names the backup",
                     probeOn.ok && !probeOn.compared && sha(factory).equals(probeOn.referenceSha256)
-                    && !probeOn.report().contains("Wrong sensor?"), probeOn.report());
+                    && !probeOn.report().contains("Wrong sensor?") && UpdateCheck.wrongSensor(probeOn) == null
+                    && UpdateCheck.wrongSensor(null) == null, probeOn.report());
         }
         String v008Env = System.getenv("CHARMERA_V008_DUMP");
         if (v008Env == null || v008Env.isEmpty()) {

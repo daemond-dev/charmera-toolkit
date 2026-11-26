@@ -146,6 +146,50 @@ def test_build_writes_the_file_and_verify_names_it(var, tmp_path, capsys):
     by = {c.name: c for c in verify.verify_update(files[0], files[0].read_bytes())}
     assert by["reviewed"].ok and by["reviewed"].severity == "info"
     assert not any(not c.ok and c.severity == "fail" for c in by.values())
+    # the number an older app gave this build, for someone matching a file to old notes
+    old = "v0.26" if entry["build"] == "v012" else "v0.24"
+    assert f"older versions of the app called this {old}" in by["reviewed"].detail
+
+
+def test_build_list_marks_the_dump_download_takes(capsys):
+    """--list and --download go by one rule (build_cmd.public_dump): v008_test's only public file is the one fetched."""
+    build_cmd.print_list(DOC)
+    lines = capsys.readouterr().out.splitlines()
+    for base in ("v006", "v008_test", "v012"):
+        chosen = build_cmd.public_dump(DOC, base)["id"]
+        marked = [l.split()[1] for l in lines if l.startswith("  dump") and l.endswith("downloads with --download")]
+        assert chosen in marked, base
+    assert sum(l.endswith("downloads with --download") for l in lines) == 3
+
+
+def test_an_eased_line_of_a_reviewed_build_does_not_talk_about_refusing(monkeypatch):
+    """The refusal clause and the donor pointer go together, in each shape verify writes them."""
+    row = {"base": "v012", "mods": ["v012/volume-led"], "dump": "v012-clean", "name": "JH_x.bin", "sha256": "0" * 64}
+    monkeypatch.setattr(R, "reviewed", lambda sha, recipes=None: row)
+    shapes = ["can be expected to freeze in photo and video mode after the flash (refusing; no flag accepts it)"
+              + verify.DONOR_ROUTE_AFTER,
+              "cannot be matched to that camera (refusing; no flag accepts it. If this camera's own firmware is gone and "
+              "the file is another, working camera's firmware, that is the donor route, --donor)",
+              "does not see (refusing; no flag accepts it)"]
+    for text in shapes:
+        (c,) = [c for c in verify.reviewed_build(b"\0" * 0x200000, [verify.Check("sensor-table", False, text)],
+                                                 stock=b"\0" * 0x200000) if c.name == "sensor-table"]
+        assert c.ok and c.severity == "warn"
+        assert "refus" not in c.detail and "donor" not in c.detail and "no flag" not in c.detail, c.detail
+        assert c.detail.endswith(" (a reviewed build: this is expected)")
+    assert "freeze in photo and video mode after the flash (a reviewed build" in verify.reviewed_build(
+        b"\0" * 0x200000, [verify.Check("sensor-table", False, shapes[0])])[-1].detail
+
+
+def test_an_unusable_stock_is_not_called_a_backup_of_another_build():
+    """A --stock that is not a read of a chip fails on its own line; the reviewed build's lines say nothing about it."""
+    dump = DUMPS["CHARMERA_FACTORY_DUMP"]
+    if dump is None:
+        pytest.skip("set CHARMERA_FACTORY_DUMP")
+    built = R.make(dump, ["volume-led"], DOC)
+    by = {c.name: c for c in verify.verify_update(Path(built.name), built.data, stock=b"x" * 100)}
+    assert "vector-table-stock" not in by and "wrong-sensor" not in by
+    assert not by["stock"].ok and by["stock"].severity == "fail"
 
 
 # --- verify and the reviewed builds: the sensor gate stays -------------------------------------------------------------

@@ -11,9 +11,6 @@ final class Recipes {
     private Recipes() {
     }
 
-    static final String CATALOG_VERSION = "v0.27";
-    static final String CATALOG_STAMP = "202611170027";
-
     /** Each base and what its stock firmware is, for its name (Recipe.firmwareName). */
     static final String[] BASE_IDS = {"v012", "v006", "v008_test"};
     static final String[] BASE_STOCK = {"the factory firmware, unchanged", "the stock restore file", "the charmera-film-mods restore file, unchanged under a new file name"};
@@ -36,7 +33,7 @@ final class Recipes {
     static final String[] MOD_PHRASES = {"the sensor-ID probe", "the OV9732 port", "Volume and LED rows", "Volume and LED rows", "EXIF dates", "boot to last mode", "capture flash"};
     static final String[] MOD_STATUS = {"tested", "tested", "tested", "tested", "tested", "tested", "tested"};
     static final String[] MOD_DESCRIPTIONS = {
-            "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops as before.",
+            "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops there. It replaces the camera's firmware until you flash another.",
             "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning. It's for an OV9732 camera that was flashed with this build.",
             "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
             "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",

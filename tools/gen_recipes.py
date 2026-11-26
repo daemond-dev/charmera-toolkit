@@ -85,8 +85,6 @@ def java_source(doc) -> str:
            " */",
            "final class Recipes {", "",
            "    private Recipes() {", "    }", "",
-           f"    static final String CATALOG_VERSION = {q(doc['catalog']['version'])};",
-           f"    static final String CATALOG_STAMP = {q(doc['catalog']['stamp'])};", "",
            "    /** Each base and what its stock firmware is, for its name (Recipe.firmwareName). */",
            "    static final String[] BASE_IDS = " + strs([b["id"] for b in doc["bases"]]) + ";",
            "    static final String[] BASE_STOCK = " + strs([b["stock"] for b in doc["bases"]]) + ";", "",

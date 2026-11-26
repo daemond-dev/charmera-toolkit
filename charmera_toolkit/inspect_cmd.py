@@ -165,9 +165,12 @@ def handler(args) -> int:
             "source_tree": m.source_tree, "source_tree_offset": m.source_tree_offset, "source_tree_paths": m.source_tree_paths,
             "sensor_table": None if not m.sensor else {"reset": list(m.sensor.reset), "init": list(m.sensor.init), "pairs": m.sensor.pairs,
                                                        "sha256": m.sensor.sha256, "bus_address": m.sensor.bus_address,
-                                                       "referenced_from": m.sensor.referenced_from, "sensor": m.sensor.sensor},
-            "sensor_programs": [{"init": list(p.init), "pairs": p.pairs, "sha256": p.sha256, "referenced_from": p.referenced_from}
-                                for p in m.sensor_programs],
+                                                       "referenced_from": m.sensor.referenced_from, "sensor": m.sensor.sensor,
+                                                       # what the code drives: OV9732 for a v006 build with our port
+                                                       "drives": sensor_of(image) or m.sensor.sensor},
+            "sensor_programs": [{"init": list(p.init), "pairs": p.pairs, "sha256": p.sha256, "referenced_from": p.referenced_from,
+                                 "sensor": p.sensor}
+                                for p in (m.sensor_programs or m.ov9732_programs)],
             "several_sensor_programs": bool(m.several_sensor_programs),
             "stamp_conflict": list(m.stamp_conflict),
         }

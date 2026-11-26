@@ -3,7 +3,11 @@
 Written 2026-11-06, then brought up to date by a second session that evening and into 11-07. Later entries run to
 2026-11-10. Times are UTC. "I" is the AI assistant that did the work, and "you" is the camera's owner.
 
-## Where things stand
+These notes are kept as written. What came after: the camera has an OV9732 sensor, and it works again on firmware for
+that sensor, flashed from the card. For a camera in the same state, go to
+[Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).
+
+## Where things stood on 2026-11-06
 
 The camera is an original-series Charmera in the 1987 blind-box design, bought in Japan in November 2026. It boots
 normally, and menus, playback and settings work. Photo and video modes freeze, with or without a card: the screen

@@ -3,8 +3,8 @@
 The same recipes the Android app builds from (recipes.json). From a public copy (--download, or --dump with one of the
 listed dumps) the result is written only when it is the reviewed file listed for that combination, so it is byte for
 byte one the project generated and published by SHA-256. --dump also takes your own read of a v006 or v012 chip: the
-mods still check the bytes they replace, but the file carries your camera's own settings, so no published hash matches
-it and it is labelled as not a reviewed file. Either way it is then checked with verify, as any update file is.
+mods still check the bytes they replace, but the file carries your camera's own settings and stored photos, so no
+published hash matches it and it is labelled as not a reviewed file. Either way it is then checked with verify, as any update file is.
 
   charmera build --list
   charmera build --base v012 --mods volume-led,exif --download --out DIR
@@ -54,8 +54,12 @@ def print_list(doc: dict) -> None:
     for base, sets in R.sets_by_base(doc).items():
         dumps = [d for d in doc["dumps"] if d["build"] == base]
         print(f"base {base}")
+        try:
+            chosen = public_dump(doc, base)["id"]       # the one --download takes, by the same rule
+        except R.RecipeError:
+            chosen = None
         for d in dumps:
-            where = "downloads with --download" if d.get("url") and d["copy"] == "clean" else (
+            where = "downloads with --download" if d["id"] == chosen else (
                 "public" if d.get("url") else "private: give it with --dump")
             print(f"  dump  {d['id']:14s} {d['sha256'][:16]}…  {where}")
         for m in R.mods_for(base, doc):
@@ -129,7 +133,8 @@ def handler(args) -> int:
         print(f"sha256 {made.sha256}  (the reviewed file: recipes.json)")
     else:
         print(f"sha256 {made.sha256}  (NOT a reviewed file)")
-        print("WARN   built from your own read, so it carries your camera's settings and no published hash matches it. "
+        print("WARN   built from your own read, so it carries your camera's settings and stored photos, and no published hash "
+              "matches it. "
               + ("The mods checked the bytes they replace. " if made.mods else "")
               + "verify, stage and the app check it as they check any file you made yourself.")
     if made.status != "tested":

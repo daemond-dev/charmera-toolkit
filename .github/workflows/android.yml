@@ -1,6 +1,7 @@
 # Builds the Charmera Card app and publishes it as the release "android-app", so the phone download link stays the
 # same: https://github.com/<owner>/charmera-toolkit/releases/download/android-app/charmera-card.apk
-# Runs on every push to main that touches android/, and from the Actions tab ("Run workflow").
+# Runs on every push to main that touches android/ or the recipes the app is generated from, and from the Actions
+# tab ("Run workflow").
 # Signing: every published APK is signed with the release key held in the repo secrets SIGNING_KEYSTORE_B64,
 # SIGNING_ALIAS and SIGNING_PASS, so each new version installs over the old one. Before publishing, the workflow
 # checks that the APK's certificate matches android/SIGNING_CERT_SHA256 and refuses otherwise. Without the secrets
@@ -9,7 +10,7 @@ name: android app
 on:
   push:
     branches: [main]
-    paths: ["android/**", ".github/workflows/android.yml"]
+    paths: ["android/**", "charmera_toolkit/recipes.json", ".github/workflows/android.yml"]
   workflow_dispatch:
 # One run at a time, so two publishes never race on the release. A run that starts while another is going waits
 # for it instead of cancelling it, so a publish is never cut off half way.
@@ -58,7 +59,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Source and doc checks (the backup gate, the flash docs)
+      - name: Source and doc checks (the write gate, the flash docs)
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"

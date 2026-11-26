@@ -897,6 +897,21 @@ def test_a_clean_copy_over_the_other_sensor_is_called_expected(capsys):
     assert "sensor module" in flat(capsys.readouterr().out)
 
 
+def test_a_clean_copy_over_another_set_up_of_the_same_sensor_says_so(capsys):
+    """Stock v012 over v006 with our OV9732 port: both drive the OV9732. Still DIFFERENT, with the plain reason."""
+    ported = flash.analyze_image(with_our_ov9732_port(make_image(0x00)))["build_marks"]["sensor_table"]
+    v012 = dict(ported, sensor="OV9732", sha256="1" * 64, writes=167, offset="0xF5D3C")
+    ask = flash.print_sensor_comparison(v012, ported, (), flash.CLEAN_V012)
+    text = flat(capsys.readouterr().out)
+    assert "DIFFERENT: the image and the firmware on the chip set up the image sensor in different ways." in text
+    assert "Both drive the OmniVision OV9732." in text and "Write it only if this camera has the OmniVision OV9732" in text
+    assert "The read kept above is the way back." in text and "sensor module" not in text
+    assert ask and ask[-1] == "Write it if this camera has the OmniVision OV9732."
+    # any other image over it keeps the generic caution
+    assert flash.print_sensor_comparison(v012, ported)
+    assert "sensor module" in flat(capsys.readouterr().out)
+
+
 def test_inspect_names_our_ov9732_port(tmp_path, capsys):
     from charmera_toolkit import inspect_cmd
     path = tmp_path / "v024.bin"
@@ -1180,6 +1195,9 @@ def test_restore_help_names_the_read_it_keeps():
     assert "--out DIR" in help_text and "--label NAME" in help_text
     assert "read the chip twice and keep that read in --out as backup does" in help_text
     assert "nothing is written when the reads differ" in help_text
+    # every gate the command has: the vector table, and the second word for a damaged resource pack
+    assert "a vector table a known build carries" in help_text
+    assert "the image's resource pack is damaged or missing" in help_text
     assert "a private copy of the checked image" in help_text
     # a backup file from elsewhere is not taken: it could not prove it came from this chip, now
     assert "--backup" not in help_text and "your own backup" not in help_text

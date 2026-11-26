@@ -45,6 +45,7 @@ way back. A backup read after a flash shows what the camera runs now, not what f
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -465,6 +466,12 @@ def _size_check(n: int, allow_odd_size: bool) -> Check:
                  "warn" if allow_odd_size else "fail")
 
 
+# The donor pointer that follows a sensor-table refusal. reviewed_build drops it with the refusal it belongs to.
+DONOR_ROUTE_AFTER = (". If this camera's own firmware is gone and the file is another, working camera's firmware, that is "
+                     "the donor route (--donor)")
+REFUSING_CLAUSE = re.compile(r" \(refusing;[^)]*\)")
+
+
 def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stock_marks: Optional[BuildMarks],
                    allow_unknown_build: bool) -> List[Check]:
     """The file's image-sensor program against --stock's when given, else against the known builds'. Outside the
@@ -546,8 +553,7 @@ def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stoc
         return [Check("sensor-table", False, f"the image-sensor set-up table DIFFERS from --stock's: {table_where}; "
                       f"--stock has {ref.pairs} writes at {ref.init[0]:#x}, sha256 {ref.sha256[:8]}...{sensors} The file drives the sensor "
                       "differently from the firmware in --stock, and a camera whose sensor is not the one a table drives can be expected "
-                      "to freeze in photo and video mode after the flash (refusing; no flag accepts it). If this camera's own firmware "
-                      "is gone and the file is another, working camera's firmware, that is the donor route (--donor)")]
+                      "to freeze in photo and video mode after the flash (refusing; no flag accepts it)" + DONOR_ROUTE_AFTER)]
     if sensor.sensor == "OV9732" and sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()}:
         return [Check("sensor-table", True, f"the image-sensor set-up table is v012's, for the OmniVision OV9732: {table_where}, "
                       f"sha256 {sensor.sha256[:8]}... It fits a camera only if that camera has an OV9732, which nothing in the "
@@ -847,20 +853,23 @@ def reviewed_build(image: bytes, checks: List[Check], stock: Optional[bytes] = N
             return checks
         label = recipes.label(row["base"], row["mods"])
         status = recipes.set_for(row["base"], row["mods"])["status"]
+        old = recipes.old_name(row["base"], row["mods"])
     except (OSError, ValueError, KeyError):
         return checks
     drives = sensor_of(image)
     probe = any(m.endswith("/sensor-probe") for m in row["mods"])     # the probe is for finding out the sensor
     out = [Check("reviewed", True, f"this is a reviewed file from charmera build: {label}, made from {row['dump']} "
                  f"({row['name']}; {status}" + ("" if status == "tested" else ": not yet tried on a camera") + ")"
-                 + (f"; it drives the {drives}" if drives and not probe else ""), "info")]
+                 + (f"; it drives the {drives}" if drives and not probe else "")
+                 + (f"; older versions of the app called this {old}" if old else ""), "info")]
     if stock is None and donor is None and not probe:
         out.append(Check("unconfirmed", True, "not compared with a backup, so nothing here confirms which firmware the "
                          f"camera runs. This build drives the {drives or 'sensor of its base'}; on a camera with the "
                          "other sensor it boots but cannot take pictures, until it is flashed with firmware that fits. "
                          "charmera identify (from the camera's photos) or --stock with its backup confirms it", "warn"))
     for what, ref in (("--stock", stock), ("--donor", donor)):
-        if ref is None or probe or drives is None:
+        # A reference that is not a read of a chip says nothing about a camera: its own line fails with the reason.
+        if ref is None or probe or drives is None or chip_read_problem(ref, need_sensor_table=False):
             continue
         theirs = sensor_of(ref)
         if theirs and theirs != drives:
@@ -878,8 +887,9 @@ def reviewed_build(image: bytes, checks: List[Check], stock: Optional[bytes] = N
         failed = not c.ok and c.severity == "fail"
         accepted = c.severity == "warn" and ALLOW_MODIFIED_ACCEPTED in c.detail
         if c.name in REVIEWED_WARN_ONLY and (failed or accepted):
-            # A reviewed build needs no --allow-modified: drop the flag's hint, or the note that it accepted the line.
-            detail = c.detail.replace(" (refusing;", " (not refused for this reviewed build;")
+            # A reviewed build is not refused and needs no --allow-modified: drop the refusal clause with its donor
+            # pointer, and the flag's hint or the note that it accepted the line.
+            detail = REFUSING_CLAUSE.sub("", c.detail.replace(DONOR_ROUTE_AFTER, ""))
             for hint in ALLOW_MODIFIED_HINTS + (ALLOW_MODIFIED_ACCEPTED,):
                 detail = detail.replace(hint, "")
             out.append(Check(c.name, True, detail + " (a reviewed build: this is expected)", "warn"))

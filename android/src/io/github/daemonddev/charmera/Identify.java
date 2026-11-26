@@ -552,8 +552,9 @@ final class Identify {
                     + "). If the camera was flashed after them, it runs something else now.");
         }
         lines.addAll(r.notStock);
-        lines.add("Base to build on: " + baseName(r.base) + (r.changes.isEmpty() ? "."
-                : " (from the oldest photos, since photos from before a flash show the stock firmware)."));
+        lines.add("Your base is " + baseName(r.base) + "." + (r.changes.isEmpty() ? ""
+                : " That's from the oldest photos, since photos from before a flash show the stock firmware.")
+                + " " + nextStep(r.base));
         if (r.skippedNewest > 0) {
             r.notes.add(r.skippedNewest == 1 ? "The newest photo file was not the camera's own and was skipped."
                     : String.format(Locale.ROOT, "The newest %d photo files were not the camera's own and were"
@@ -567,6 +568,16 @@ final class Identify {
             lines.add(undatedLine(r.undated) + ".");
         }
         r.conclusion = lines(lines);
+    }
+
+    /**
+     * What to do with the base found, by the app's screen names. Stock v006 is written on Restore stock firmware or
+     * Advanced, never on Flash custom firmware, so the v006 family is sent there for stock and here only for mods.
+     */
+    static String nextStep(Base b) {
+        return b == Base.V012 ? "Pick base v012 on \"Flash custom firmware\"."
+                : "For mods, pick base v006 on \"Flash custom firmware\". Stock v006 is written on \"Restore stock"
+                + " firmware\" or Advanced.";
     }
 
     /** A photo's file time as a date the owner can read, with the year. */

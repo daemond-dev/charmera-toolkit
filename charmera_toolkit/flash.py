@@ -996,6 +996,9 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
     names = {"OV9732": "the OmniVision OV9732", "SP140A": "the SP140A-class sensor"}
     other_sensor = (image_table is not None and chip_table is not None and not chip_several
                     and _drives(image_table) != _drives(chip_table))
+    # Two set-ups of one sensor: stock v012's own driver and our OV9732 port on v006, for example.
+    same_sensor = (image_table is not None and chip_table is not None and not chip_several and not other_sensor
+                   and image_table["sha256"] != chip_table["sha256"])
     if chip_several:
         # Which of them sets up the sensor cannot be told, so the image's table is not the same as the chip's, whichever
         # it is (verify refuses such a --stock).
@@ -1038,6 +1041,14 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
                f"one. Write it only if this camera has {sensor}.",
                "Recovery, section B, says how to tell. The read kept above is the way back."], indent)
         return ask + [f"Write it if this camera has {sensor}."]
+    if same_sensor and image_source in (CLEAN_V006, CLEAN_V012):
+        sensor = names[_drives(image_table)]
+        _note(["DIFFERENT: the image and the firmware on the chip set up the image sensor in different ways.",
+               f"Both drive {sensor}.",
+               f"Expected when you're going back to the stock build. Write it only if this camera has {sensor}.",
+               "Recovery, section B, says how to tell. The read kept above is the way back."], indent)
+        return [f"The image and the firmware on the chip both drive {sensor}, set up in different ways (the sensor",
+                "lines above).", f"Write it if this camera has {sensor}."]
     if other_sensor:
         ask = ask + ["Nothing here can tell whether that firmware fits this camera."]
     _note(first + [
@@ -1201,12 +1212,13 @@ def register(subparsers) -> None:
     restore = subparsers.add_parser(
         "restore",
         help="read the chip twice, then write a full 2 MiB image to it through flashrom (asks for a typed RESTORE)",
-        description="Check the image (2 MiB, SPII magic, Charmera build marks found by content, not several sensor "
-        "programs), read the chip twice and keep that read in --out as backup does (nothing is written when the reads "
-        "differ), show a 64 KiB block diff against it, the two sensor tables, the SHA-256 and the plan, wait for the "
-        "word RESTORE (and DIFFERENT when the sensor tables differ, only one of the two has one, or the chip's code refers "
-        "to several), then run flashrom -w (erase, write, verify) on a private copy of the checked image and read the "
-        "chip back to compare.",
+        description="Check the image. It must be 2 MiB, start with the SPII magic, carry the Charmera build marks and a "
+        "vector table a known build carries, and not refer to several sensor programs. Then read the chip twice and keep "
+        "that read in --out as backup does (nothing is written when the reads differ). Show a 64 KiB block diff against "
+        "it, the two sensor tables, the SHA-256 and the plan, then wait for the word RESTORE. The word DIFFERENT is "
+        "asked too when the sensor tables differ, only one side has one, the chip's code refers to several, or the "
+        "image's resource pack is damaged or missing. Then run flashrom -w (erase, write, verify) on a private copy of "
+        "the checked image and read the chip back to compare.",
     )
     _add_common(restore)
     restore.add_argument("--image", required=True, metavar="FILE", help="full 2 MiB image to write")

@@ -17,7 +17,8 @@ public final class FlashLogTest {
         expect("the time format is the one the log shows", FlashLog.when(T, UTC).equals("11 Nov 13:02"));
 
         FlashLog empty = new FlashLog();
-        expect("an empty log's summary is unknown", empty.summary(UTC).equals("unknown"));
+        expect("an empty log's summary is none yet: nothing was flashed, which is not the same as not knowing",
+                empty.summary(UTC).equals("none yet"));
         expect("null, junk and a headerless text parse as empty", FlashLog.parse(null).size() == 0
                 && FlashLog.parse("nonsense\n1|WRITTEN|a|b|c\n").size() == 0 && FlashLog.parse("").size() == 0);
 
@@ -45,12 +46,19 @@ public final class FlashLogTest {
         expect("written but not seen", one(FlashLog.Event.WRITTEN, "v0.23").equals("v0.23 written 11 Nov 13:02, flash not confirmed"));
         expect("flash not seen", one(FlashLog.Event.FLASH_NOT_SEEN, "v0.23").equals("unknown (v0.23 flash not seen 11 Nov 13:02)"));
         expect("check failed", one(FlashLog.Event.CHECK_FAILED, "").equals("unknown (photo check failed 11 Nov 13:02)"));
-        expect("only a backup is unknown", one(FlashLog.Event.BACKUP_SAVED, "").equals("unknown"));
+        expect("only a backup is none yet", one(FlashLog.Event.BACKUP_SAVED, "").equals("none yet"));
         FlashLog checked = new FlashLog();
         checked.add(T - MIN, FlashLog.Event.FLASH_SEEN, "v0.23", null, null);
         checked.add(T, FlashLog.Event.CHECK_OK, "", null, null);
         expect("a check without a firmware takes the one flashed before it",
                 checked.summary(UTC).equals("v0.23 written, a new photo has the public-build family's header 11 Nov 13:02"));
+        // A check logged with a name passed on that firmware's own header (the factory one, or the EXIF dates one), so
+        // the summary says nothing about the public-build family.
+        FlashLog named = new FlashLog();
+        named.add(T - MIN, FlashLog.Event.FLASH_SEEN, "v012 with Volume and LED rows", "333333333333", null);
+        named.add(T, FlashLog.Event.CHECK_OK, "v012 with Volume and LED rows", "333333333333", "factory header: x.jpg");
+        expect("a check with a firmware name says that firmware passed its photo check",
+                named.summary(UTC).equals("v012 with Volume and LED rows, photo check OK 11 Nov 13:02"));
 
         // the firmware a file name may carry: only a flash seen or a photo check that passed names one
         expect("a passed check names the firmware flashed before it", "v0.23".equals(checked.confirmedFirmware()));
@@ -139,7 +147,7 @@ public final class FlashLogTest {
                 && big.entries().get(FlashLog.MAX - 1).firmware.equals("v0.50"));
         expect("the cap holds through a round-trip", FlashLog.parse(big.serialize()).size() == FlashLog.MAX);
         big.clear();
-        expect("clear empties the log", big.size() == 0 && big.summary(UTC).equals("unknown"));
+        expect("clear empties the log", big.size() == 0 && big.summary(UTC).equals(FlashLog.NONE_YET));
 
         boolean nullEvent;
         try {

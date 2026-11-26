@@ -624,6 +624,9 @@ def detect_build(image: bytes) -> BuildMatch:
                 break
     layout = exact if exact is not None else next(
         (b for b in KNOWN_BUILDS.values() if marks.layout is not None and b.layout == marks.layout), None)
+    # The code and software hashes are compared with the build the image is (or was made from), v006 when it is none.
+    # A build with no hash on record for one of them gets no line for it.
+    ref = build if build is not None else PUBLIC_BUILD
     checks = {
         "build_string": marks.build_string is not None,
         "stamp": marks.stamp is not None,
@@ -631,10 +634,12 @@ def detect_build(image: bytes) -> BuildMatch:
         "sensor_table": marks.sensor is not None,
         "sensor_table_referenced": marks.sensor is not None and marks.sensor.referenced_from is not None,
         "sensor_table_known": marks.sensor is not None and marks.sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()},
-        "code_sha256": len(image) >= 0x100000 and hashlib.sha256(image[0x200:0x100000]).hexdigest() == PUBLIC_BUILD.code_sha256,
-        "software_sha256": len(image) >= SOFTWARE_END and software_sha256(image) == PUBLIC_BUILD.software_sha256,
-        "fingerprint": exact is not None,
     }
+    if ref.code_sha256 is not None:
+        checks["code_sha256"] = len(image) >= 0x100000 and hashlib.sha256(image[0x200:0x100000]).hexdigest() == ref.code_sha256
+    if ref.software_sha256 is not None:
+        checks["software_sha256"] = len(image) >= SOFTWARE_END and software_sha256(image) == ref.software_sha256
+    checks["fingerprint"] = exact is not None
     return BuildMatch(marks, build, modified, checks, layout)
 
 

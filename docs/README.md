@@ -1,12 +1,12 @@
 # Documentation
 
-Read these in order. The first one walks through a flash and links to each of the others at the step that needs it.
+Start with The first flash. It links to each of the others at the step that needs it. You don't need the rest to flash.
 
 ## Before and during a flash
 
 1. [The first flash](01-FIRST-FLASH.md): start here. The whole path from knowing what the camera runs (a backup, or Identify) to a flashed camera, with the point of no return marked.
-2. [Recovery](02-RECOVERY.md): read it before you flash, and go there if a flash went wrong. How to get a camera back through the SD updater or a chip programmer, how to fix firmware for the other sensor from the card, and the donor route.
-3. [Flash candidates](03-FLASH-CANDIDATES.md): the three withdrawn files, what each changed, their hashes, and what the flashes on one camera showed.
+2. [Recovery](02-RECOVERY.md): read "Which situation are you in?" before you flash, and go there if a flash went wrong. How to get a camera back through the SD updater or a chip programmer, how to fix firmware for the other sensor from the card, and the donor route.
+3. [Flash candidates](03-FLASH-CANDIDATES.md): three withdrawn files from the first flash, and the stock restore file. History only.
 4. [Putting the file on the card](04-STAGE.md): how the `stage` command copies an update file to the card, and what each refusal means.
 5. [SD card problems](05-CARDS.md): why Android phones reject a card the camera has used, and the fix.
 6. [Using an Android phone](06-ANDROID.md): what a phone can do (the SD route) and what needs a computer (the CH341A route).
@@ -31,7 +31,7 @@ Read these in order. The first one walks through a flash and links to each of th
 
 ## Also
 
-- [The first flash: what was done and what went wrong](FIRST-FLASH-INCIDENT.md): notes on the 2026-11-06 incident and the open work.
+- [The first flash: what was done and what went wrong](FIRST-FLASH-INCIDENT.md): notes on the 2026-11-06 incident, kept as written.
 - [The camera's buttons and screens](CAMERA-UI.md): photos of every control and stock screen. Check it before you assume a button or menu exists.
 
 Back to the [project README](../README.md).

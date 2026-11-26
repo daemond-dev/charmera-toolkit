@@ -127,6 +127,24 @@ public class RecipeTest {
                         && Recipe.unconfirmed(v026, false, "v006-family").startsWith("Wrong sensor?")
                         && Recipe.unconfirmed(new Recipe.Selection("v006"), false, "v012").startsWith("Wrong sensor?")
                         && Recipe.unconfirmed(probe, false, null) == null);
+        // the warning names the fix by the screen that writes it: stock v006 is never written on Flash custom firmware
+        String onSp = Recipe.unconfirmed(v026, false, null);
+        String onOv = Recipe.unconfirmed(new Recipe.Selection("v006"), false, null);
+        expect("unconfirmed() says what the app doesn't know, and what to flash on a camera with the other sensor",
+                onSp.startsWith("Not confirmed: the app doesn't know which sensor this camera has. No chip backup is"
+                        + " chosen and Identify hasn't been run on this card since the app started.")
+                        && onSp.contains("On an SP140A camera it boots but can't take photos until you flash stock v006"
+                        + " on \"Restore stock firmware\" or Advanced.")
+                        && onOv.contains("This file is for the SP140A. On an OV9732 camera it boots but can't take"
+                        + " photos until you flash base v012 on \"Flash custom firmware\".")
+                        && !onSp.contains("firmware that fits") && !onOv.contains("firmware that fits"));
+        String wrongOnSp = Recipe.unconfirmed(v026, false, "v006-family");
+        String wrongOnOv = Recipe.unconfirmed(new Recipe.Selection("v006"), false, "v012");
+        expect("the Identify mismatch names the fix too", wrongOnSp.contains("Identify found the v006 family in this"
+                + " camera's photos. That's firmware for the SP140A, and this file is for the OV9732.")
+                && wrongOnSp.endsWith("until you flash stock v006 on \"Restore stock firmware\" or Advanced.")
+                && wrongOnOv.contains("Identify found build v012") && wrongOnOv.endsWith("until you flash base v012 on"
+                + " \"Flash custom firmware\"."));
         // a set marked experimental whose mods are each tested alone is still an untried combination
         Recipe.Selection rowsOnly = new Recipe.Selection("v006", "v006/volume-led");
         expect("an experimental set of tested mods is an untried combination, and describe() says so",
@@ -135,10 +153,30 @@ public class RecipeTest {
                         && !Recipe.untriedCombination(v026)
                         && !Recipe.untriedCombination(new Recipe.Selection("v012", "v012/volume-led", "v012/exif",
                                 "v012/boot-last-mode", "v012/capture-flash")));
+        // one mod alone is no combination: it was only tried together with others
+        Recipe.Selection exifOnly = new Recipe.Selection("v012", "v012/exif");
+        Recipe.Selection twoUntried = new Recipe.Selection("v012", "v012/exif", "v012/capture-flash");
+        expect("one experimental-set mod alone isn't called a combination; two or more are",
+                Recipe.untriedCombination(exifOnly) && Recipe.untriedCombination(twoUntried)
+                        && Recipe.untriedNote(exifOnly).equals("Experimental: this mod has only been tried on a camera"
+                        + " together with others.")
+                        && Recipe.untriedNote(rowsOnly).equals(Recipe.untriedNote(exifOnly))
+                        && Recipe.untriedNote(twoUntried).equals("Experimental: each ticked mod has been tried on a"
+                        + " camera, but this combination hasn't.")
+                        && Recipe.describe(exifOnly).endsWith(Recipe.untriedNote(exifOnly))
+                        && !Recipe.describe(exifOnly).contains("combination")
+                        && Recipe.describe(twoUntried).endsWith(Recipe.untriedNote(twoUntried)));
+        String stockV012 = Recipe.describe(new Recipe.Selection("v012"));
+        String stockV006 = Recipe.describe(new Recipe.Selection("v006"));
         expect("describe() names SP140A firmware and the factory firmware, and asks for no backup",
                 Recipe.describe(rowsOnly).contains("SP140A firmware")
                         && !Recipe.describe(rowsOnly).contains("backup")
-                        && Recipe.describe(new Recipe.Selection("v012")).contains("factory firmware of OV9732 cameras"));
+                        && stockV012.equals("This is stock v012 (the factory firmware, unchanged). It's what OV9732"
+                        + " cameras ship with."));
+        expect("describe() says a stock pick is stock once, and which sensor an SP140A pick is for",
+                stockV006.equals("This is stock v006 (the stock restore file). SP140A firmware. It doesn't drive the"
+                        + " OV9732.") && Recipe.describe(new Recipe.Selection("v008_test")).endsWith("SP140A firmware."
+                        + " It doesn't drive the OV9732."));
         expect("the restore file is a reviewed file, compared with a backup when one is on record",
                 Candidates.isReviewedPatch(Candidates.Kind.RESTORE.sha256)
                         && Candidates.isReviewedPatch(Candidates.Kind.RESTORE.cleanSha256)
@@ -161,9 +199,9 @@ public class RecipeTest {
         for (Candidates.Kind k : Candidates.repairVersions()) {
             same &= Recipe.expectedPhoto(Recipe.of(k)) == PhotoId.expectedFor(k);
         }
-        expect("for every preset, the same header PhotoId.expectedFor names", same);
+        expect("for every fixed Repair kind's pick, the same header PhotoId.expectedFor names", same);
 
-        // presets and the remembered pick, with the migration from the old Kind names
+        // Recipe.presets() (the fixed kinds' picks) and the remembered pick, with the migration from the old Kind names
         Recipe.Selection[] presets = Recipe.presets();
         boolean presetsOk = presets.length == Candidates.repairVersions().length;
         for (int i = 0; i < presets.length && presetsOk; i++) {
@@ -171,7 +209,7 @@ public class RecipeTest {
             presetsOk = presets[i].kind() == k && k.firmwareName().equals(presets[i].label())
                     && presets[i].matches(k.sha256) && presets[i].matches(k.cleanSha256);
         }
-        expect("each preset is the set of its version, both copies", presetsOk);
+        expect("each of presets() is the set of its fixed kind, both copies", presetsOk);
         expect("the legacy kinds are sets", Recipe.of(Candidates.Kind.RESTORE).serialize().equals("v006|")
                 && Recipe.of(Candidates.Kind.PROBE).serialize().equals("v006|v006/sensor-probe")
                 && Recipe.of(Candidates.Kind.BRINGUP).serialize().equals("v006|v006/ov9732-port,v006/volume-led"));

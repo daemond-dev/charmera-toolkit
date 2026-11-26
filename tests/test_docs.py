@@ -186,3 +186,14 @@ def test_v024_patch_table_in_docs_15_matches_the_apps_rows_offsets():
         listed += [int(x, 16) for x in re.findall(r"0x[0-9A-Fa-f]+", va_column)]
     assert sorted(listed) == sorted(o - 0x200 for o in offsets), (
         [hex(v) for v in sorted(listed)], [hex(o - 0x200) for o in sorted(offsets)])
+
+
+def test_the_older_build_names_table_matches_the_recipes():
+    """docs/06-ANDROID.md's "Older build names" table is where a reader with an old file maps v0.23..v0.27 to today's
+    names. Each row is a set's old_name and its label, as recipes.json has them."""
+    from charmera_toolkit import recipes as R
+    text = (DOCS / "06-ANDROID.md").read_text(encoding="utf-8")
+    named = [s for s in R.load()["sets"] if "old_name" in s]
+    assert len(named) == 5
+    for s in named:
+        assert f"| {s['old_name']} | {s['label']} |" in text, s["old_name"]

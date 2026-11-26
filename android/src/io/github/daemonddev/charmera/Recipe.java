@@ -163,7 +163,7 @@ final class Recipe {
         }
     }
 
-    /** The fixed kinds that are sets of the table, so a preset builds the same file it always did. */
+    /** The fixed kinds that are sets of the table: a pick that is one of them builds the same file it always did. */
     static final Candidates.Kind[] LEGACY = {Candidates.Kind.RESTORE, Candidates.Kind.PROBE, Candidates.Kind.BRINGUP,
             Candidates.Kind.V025, Candidates.Kind.V026, Candidates.Kind.V027};
 
@@ -231,8 +231,8 @@ final class Recipe {
 
     /**
      * The Repair pick to show: the one remembered (Selection.serialize()) when it is still a reviewed combination;
-     * else the version an older app remembered by its Kind name (V027, V026, V025, BRINGUP), as its set; else the
-     * newest preset.
+     * else the build an older app remembered by its Kind name (V027, V026, V025, BRINGUP), as its set; else the
+     * default pick, presets()[0].
      */
     static Selection remembered(String set, String legacyKind) {
         Selection s = parse(set);
@@ -252,7 +252,10 @@ final class Recipe {
         return selectionOf(kind.sha256);
     }
 
-    /** The Repair route's presets, newest first: one per Candidates.repairVersions() entry. */
+    /**
+     * The picks of the fixed Repair kinds, newest first: one per Candidates.repairVersions() entry. The first is the
+     * default pick; the screen has no list of them.
+     */
     static Selection[] presets() {
         Candidates.Kind[] kinds = Candidates.repairVersions();
         Selection[] out = new Selection[kinds.length];
@@ -614,15 +617,21 @@ final class Recipe {
             if (theirs.equals(mine)) {
                 return null;
             }
-            return "Wrong sensor? Identify says this camera's photos come from " + ("v012".equals(identified)
-                    ? "build v012" : "the v006 family") + ", firmware for the " + theirs + ", but this file drives the "
-                    + mine + ". On an " + theirs + " camera it boots but can't take pictures until you flash firmware"
-                    + " that fits.";
+            return "Wrong sensor? Identify found " + ("v012".equals(identified) ? "build v012" : "the v006 family")
+                    + " in this camera's photos. That's firmware for the " + theirs + ", and this file is for the "
+                    + mine + ". On an " + theirs + " camera it boots but can't take photos until you flash "
+                    + fixFor(theirs) + ".";
         }
-        return "Not confirmed: no backup is chosen and Identify hasn't been run, so the app doesn't know which"
-                + " firmware this camera runs. This file drives the " + mine + ". On an " + other + " camera it boots but"
-                + " can't take pictures until you flash firmware that fits. To check without opening the camera, run"
-                + " \"Identify this camera's firmware\" on its photos.";
+        return "Not confirmed: the app doesn't know which sensor this camera has. No chip backup is chosen and Identify"
+                + " hasn't been run on this card since the app started. This file is for the " + mine + ". On an "
+                + other + " camera it boots but can't take photos until you flash " + fixFor(other) + ". To find out"
+                + " first, run \"Identify this camera's firmware\".";
+    }
+
+    /** What to flash, and where in the app, to get photos back on a camera with this sensor. */
+    static String fixFor(String sensor) {
+        return "OV9732".equals(sensor) ? "base v012 on \"Flash custom firmware\""
+                : "stock v006 on \"Restore stock firmware\" or Advanced";
     }
 
     /** The header the photos of this firmware should have. */
@@ -636,7 +645,7 @@ final class Recipe {
         return PhotoId.Kind.PUBLIC_FAMILY;
     }
 
-    /** The plain words for a selection the app has no fixed kind for: its name and each mod's description. */
+    /** The plain words for a pick: its name, each mod's description, the sensor it is for, and what was tried. */
     static String describe(Selection sel) {
         StringBuilder b = new StringBuilder("This is ").append(sel.label()).append(".");
         for (String m : sel.mods) {
@@ -644,15 +653,22 @@ final class Recipe {
                     .append(": ").append(description(m));
         }
         if (sel.stock() && V012.equals(sel.base)) {
-            b.append(" The factory firmware of OV9732 cameras, unchanged.");
+            b.append(" It's what OV9732 cameras ship with.");
         } else if (!drivesOv9732(sel)) {
-            b.append(sel.stock() ? " The base's stock firmware, unchanged." : " SP140A firmware. It doesn't drive the"
-                    + " OV9732.");
+            b.append(" SP140A firmware. It doesn't drive the OV9732.");
         }
         if (untriedCombination(sel)) {
-            b.append(" Experimental: this combination hasn't been tried on a camera yet, though each of its mods"
-                    + " has.");
+            b.append(" ").append(untriedNote(sel));
         }
         return b.toString();
+    }
+
+    /**
+     * The experimental line for a pick whose mods were each tried on a camera, but never as this set. One mod alone is
+     * no combination: it was only tried together with others.
+     */
+    static String untriedNote(Selection sel) {
+        return sel.mods.size() == 1 ? "Experimental: this mod has only been tried on a camera together with others."
+                : "Experimental: each ticked mod has been tried on a camera, but this combination hasn't.";
     }
 }

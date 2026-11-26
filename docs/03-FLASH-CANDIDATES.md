@@ -11,17 +11,18 @@ restore file below was flashed next and gave the same result. C differs from tha
 the stored photos, and its program code is identical, so C's settings did not cause the freeze. (An earlier version of
 this page said they did.)
 
-The likely cause is that the public firmware does not fit this camera. It drives exactly one image sensor, writes it a
-fixed table of 61 register settings, never reads which sensor is fitted, and carries on when the writes fail. So a
-camera with another sensor boots, shows its menus and freezes when capture starts. That's an inference (about 70
-percent at the time of writing), not something measured on the camera. The other possibility is a loose or damaged
-sensor ribbon. The details are in [the incident notes](FIRST-FLASH-INCIDENT.md).
+The cause is that the public firmware does not fit this camera. It drives the SP140A sensor, and this camera has an
+OmniVision OV9732. The firmware never reads which sensor is fitted and carries on when its writes fail, so the camera
+boots, shows its menus and freezes when capture starts. The camera was brought back later from the card with firmware
+for its sensor ([Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). The details are in
+[the incident notes](FIRST-FLASH-INCIDENT.md).
 
-C, A and B stay withdrawn, but the reason has changed. They're made from the public dump, and no file made from the
-public dump is known to fit a camera whose own firmware hasn't been read. `verify` and the Charmera Card app refuse A
-and B by their SHA-256. They name C but don't refuse it, because C's bytes are also the stock restore file made from
-the public dump's cleaned copy (below), and the stock restore file isn't refused. Treat the stock restore file with the
-same caution: all it's known to do is put the public build back on a camera that already runs it.
+C, A and B stay withdrawn. They're made from the public dump, so they fit only a camera with the SP140A sensor, and
+the recipe below is meant to be run on your own backup instead. `verify` and the Charmera Card app refuse A and B by
+their SHA-256. They name C but don't refuse it, because C's bytes are also the stock restore file made from the public
+dump's cleaned copy (below), and the stock restore file isn't refused. Treat the stock restore file with the same
+caution. It's for a camera you know has the SP140A, from its photos (Identify) or from a backup read before it was
+ever flashed.
 
 ## The stock restore file
 

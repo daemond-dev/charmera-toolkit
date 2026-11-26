@@ -12,13 +12,12 @@ the card.
 
 - Identifies the firmware the camera runs, and so its sensor, from the photos on its card.
 - Builds reviewed firmware and writes it to the card:
-  - for OV9732 cameras: stock v012 (their factory firmware) and v012 with any mix of Volume and LED rows, EXIF
-    dates, boot to last mode and capture flash
-  - v006 with the OV9732 port, with or without Volume and LED rows. It's the public build v006 changed to drive the OV9732 (an OV9732 camera that was flashed with the public build can take it or the v012
-    builds)
-  - for SP140A cameras: the stock restore file (build v006)
-  - the sensor-ID probe, for a camera that can't take photos and can't be identified from its photos
-  - any other reviewed mix of a base and its mods, ticked one by one
+  - for OV9732 cameras, stock v012 (their factory firmware) or v012 with any mix of Volume and LED rows, EXIF dates,
+    boot to last mode and capture flash
+  - for SP140A cameras, the stock restore file (v006), v006 with Volume and LED rows (experimental), or stock
+    v008_test
+  - for an OV9732 camera that was flashed with v006, any v012 build, or v006 with the OV9732 port
+  - the sensor-ID probe, for a camera that can't take photos and has none from before the flash
 - Checks the file against a backup of the camera's flash chip, if you have one.
 - Walks you through ejecting, flashing and removing the update file, then checks a photo taken afterwards.
 - Saves the camera's photos and videos as a zip, with their dates fixed in the copies.
@@ -41,10 +40,8 @@ allow your browser or file manager to install apps when Android asks. Play Prote
 app, because it isn't from the Play Store. You can also download the APK on a computer and copy it to the phone over
 USB.
 
-Check the version. The current build opens on a Home screen with one button per route (Back up photos, Identify this
-camera's firmware, Flash custom firmware, Identify the image sensor, Restore stock firmware, Test shots), and the
-restore route begins with **Choose this camera's backup**. Version 0.4 had no backup step and didn't refuse the
-withdrawn candidates C, A and B. If you still have it installed, don't flash with it.
+The app shows its version at the bottom of Home. Version 0.4 was taken down on 2026-11-06. If you still have it,
+update before you flash.
 
 ## Use
 
@@ -63,8 +60,8 @@ The app opens on **Home**. Each button there opens one route, a screen with only
 result appears right under its button, and **More info** opens the detail behind it. A step that's done shows ✓, and a
 step that needs an earlier one says which. Back, or **‹ Home**, returns to Home. Every screen starts with the drive
 bar, "Camera drive: <name> · Connected ✓ / Not connected · Change". The app remembers the drive and asks again only
-when none is saved or the saved one is gone. Home also shows the camera firmware the flash log last recorded, and
-links to **Flash log**, **Advanced** and **Check for app updates**.
+when none is saved or the saved one is gone. Home also shows the last flash the app recorded ("Last flash from this
+app"), and links to **Flash log**, **Advanced** and **Check for app updates**.
 
 - **Back up photos.** Copies the photos and videos in the card's `DCIM` and `SPIDCIM` folders (never the update file,
   `SENSOR.TXT` or anything else) into a zip. Pick where it goes with **Choose where to save the zip**: a place on the
@@ -102,21 +99,24 @@ links to **Flash log**, **Advanced** and **Check for app updates**.
   Photos moved off the card? Copy the camera's originals (the zip's `originals/` folder when delete was on, or the
   files as they came off the card) back into `DCIM`, or run `charmera identify <folder>` on a computer. Date-fixed
   copies don't count.
-- **Identify the image sensor.** Makes the sensor-ID probe (no backup needed) and writes it. Then eject, flash, remove
+- **Identify the image sensor.** Only for a camera that can't take photos. Makes the sensor-ID probe (no backup needed)
+  and writes it. The probe replaces the camera's firmware until you flash another. Then eject, flash, remove
   the update file, and tap **Read the sensor result from the card** once the camera has opened photo mode
   ([the probe](../docs/06-ANDROID.md#identify-the-image-sensor-the-sensor-id-probe)). If Identify already names the
   family from photos taken before any flash, you don't need it. On an SP140A camera the stock restore file undoes it.
   On an OV9732 camera, undo it with a v012 build, stock or with mods (Flash custom firmware), not the stock restore
   file.
-- **Restore stock firmware.** For SP140A cameras. Needs this camera's backup (step 1), then the stock restore file
+- **Restore stock firmware.** Writes stock v006, for SP140A cameras. Needs a backup of this camera's chip (step 1),
+  then the stock restore file
   (step 2), the drive, the write, eject and flash, and removing the update file. Without a backup, **Advanced** writes
   the same file. On an OV9732 camera, stock is base v012 with no mods ticked, in Flash custom firmware.
 - **Test shots.** Shows the colour card on the phone (or use a printed one), names the lighting, and saves the photos
   taken since then as `Charmera-<firmware>-<lighting>-<date>-<time>.zip` with a `manifest.txt`.
 - **Flash log.** What the app wrote, removed and saved, and what you answered to "Did the camera show Upgrade 100%?",
   newest first, with each file's firmware and SHA-256 prefix. It's kept on the phone only.
-- **Advanced.** The old all-in-one screen as compact steps: the backup, any update file (download, **Use a file on the
-  phone**, **Save a copy to the phone**), the drive, the write, removing update files, reading the sensor result and
+- **Advanced.** Every tool on one page. Use it to write stock v006 without a backup, or an update file you already
+  have. Its steps are the backup (optional), any update file (download, **Use a file on the phone**, **Save a copy to
+  the phone**), the drive, the write, removing update files, reading the sensor result and
   the app update check. A file opened from another app lands here.
 
 The routes share these steps.
@@ -285,8 +285,8 @@ step is called **Write firmware**, and the line under its title names what your 
 as "v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash" or "v006 with the OV9732 port".
 With no mods ticked on v012 it's "stock v012 (the factory firmware, unchanged)". **Make this firmware** makes it, and
 the Flash custom firmware tile on Home shows the same name. A file loaded with **Use a file on the phone** becomes the pick,
-its base and its boxes. The app doesn't pick the base from what **Identify this camera's firmware** found. If the base
-you pick v012 or v006 and it isn't the base it found, the step says so. Experimental mods (not yet tried on a
+its base and its boxes. The app doesn't pick the base from what **Identify this camera's firmware** found. If you
+pick a base for the other sensor than the one Identify found, the write step says so. Experimental mods (not yet tried on a
 camera) are marked and add a warning, but can be ticked. A mod that conflicts with a ticked one is greyed out, with the
 reason.
 
@@ -299,8 +299,9 @@ No pick needs a backup. You decide whether a file fits the camera. When nothing 
 (no backup chosen, and Identify not run or naming the other sensor's family), the file step and the write confirmation
 say so. A chosen backup whose firmware drives the other sensor gives a loud "Wrong sensor?" warning. Neither one
 refuses. Stock v012 (base v012 with no mods ticked) is the factory firmware of OV9732 cameras, written here like any
-other pick, and the way back to stock from every v012 build. Stock v006 (the stock restore file) is made here but
-written on Restore stock firmware, which compares it with your backup, or on Advanced. A combination marked experimental
+other pick, and the way back to stock from every v012 build. Stock v006 (the stock restore file) isn't written here.
+With base v006 and no mods ticked, the step shows **Open Restore stock firmware**, which compares the file with your
+backup, and **Open Advanced**, which writes it without one. A combination marked experimental
 says so even when each of its mods has been tested alone. The pick is remembered as base and mods. Details: [Picking a
 base and mods](../docs/06-ANDROID.md#picking-a-base-and-mods).
 
@@ -361,7 +362,8 @@ no storage permission.
 - 0.3 and 0.4 (2026-11-06): wrote candidate C, then the stock restore file, to one camera's card over the camera's
   USB-C cable. The camera flashed C twice, the second time when the cable was plugged into it while it was switched
   off, which the connection steps above now prevent. The writing, the flashes and the cleanup worked as the app
-  describes them, but neither file fitted that camera.
+  describes them, but neither file fitted that camera. 0.4 had no backup step and didn't refuse the withdrawn
+  candidates A and B. It was taken down the same day. If you still have it, update before you flash.
 - 0.5: added the backup step.
 - 0.7: added the sensor-ID probe and rebuilt the screen as a column of cards.
 - 0.24: split that column into separate routes, one job per screen ([Use](#use)), and added the photo backup, a flash
@@ -380,25 +382,17 @@ no storage permission.
   in the Software tag `v0.26` of photos with EXIF dates, and in flash log entries an older app saved
   ([Older build names](../docs/06-ANDROID.md#older-build-names)).
 
-On 2026-11-11 the app wrote v006 with the OV9732 port and Volume and LED rows, then called v0.24, (Flash custom firmware), to an OV9732 camera over the camera's USB-C cable, and the camera flashed it
-([what the camera showed](../docs/15-OV9732-AE-WB-FLASH-PORT.md#10-v024-volume-and-led-rows-in-the-setup-menu)).
-
-Version 0.4, the one published at the [android-app
-release](https://github.com/daemond-dev/charmera-toolkit/releases/tag/android-app) before 0.5, had no backup step and
-didn't refuse C, A or B. It was taken down on 2026-11-06. If you still have it installed, don't flash with it. The
-plain-Java parts (the checker, the card rules, the file builder and its recipes, WriteGate, the rule the screen asks
-before every write and save, the flash log, the flashing routes' steps, the photo header check, Identify and the date
-repair) compile and pass their tests on a computer's JVM ([Build](#build)). The screen itself needs the Android SDK
-and is built only by the workflow.
+On 2026-11-11 the app wrote v006 with the OV9732 port and Volume and LED rows (then called v0.24) from Flash custom
+firmware to an OV9732 camera over the camera's USB-C cable, and the camera flashed it ([what the camera
+showed](../docs/15-OV9732-AE-WB-FLASH-PORT.md#10-v024-volume-and-led-rows-in-the-setup-menu)).
 
 ## Build
 
 `./build.sh [versionName] [versionCode]` with `SDK` pointing at an Android SDK that has `platforms;android-35` and
 `build-tools;35.0.0`, a JDK 17 or newer, and `zip`. The version name defaults to the one in `VERSION`. It first runs
-the tests of the checker, the card rules, the file builder, the write gate, the flash log, the flashing routes' steps,
-the photo header check and the date repair on the plain JVM (`test/UpdateCheckTest.java`, `test/CardStateTest.java`,
-`test/CandidatesTest.java`, `test/WriteGateTest.java`, `test/FlashLogTest.java`, `test/FlashFlowTest.java`,
-`test/PhotoIdTest.java` and `test/DateFixTest.java`).
+every test in `test/` on the plain JVM. Those cover everything but the screen: the checker, the card rules, the file
+builder and its recipes, the write gate, the flash log, the routes' steps, the photo header check, Identify, the zip
+check and the date repair. The screen itself needs the Android SDK and is built by `build.sh`.
 
 Optional environment variables add checks against real files:
 
@@ -412,7 +406,14 @@ Optional environment variables add checks against real files:
 - `CHARMERA_UPDATE_FILES`, real update files: the tests check those too.
 
 Each test prints how many of its checks passed and failed, and stops the build when one fails. Then the script builds
-and signs `out/charmera-card-<version>.apk`. No Gradle. For every build, the workflow downloads the cleaned v006 and
+and signs `out/charmera-card-<version>.apk`. No Gradle.
+
+A build you make yourself is signed with the test key in `test.keystore`, so it won't install over the published app,
+and the published app won't install over it. Uninstall one before you install the other. That also removes what the
+app keeps on the phone, such as its flash log and downloaded dumps. To use your own key, set `KEYSTORE`, `KS_ALIAS`
+and `KS_PASS`.
+
+For every build, the workflow downloads the cleaned v006 and
 v012 copies and the film-mods restore file from the-dumping-grounds' firmware repositories, checks their SHA-256, and
 runs those checks before it publishes. It doesn't set `CHARMERA_UPDATE_FILES`.
 

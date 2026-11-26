@@ -18,13 +18,15 @@ import java.util.TimeZone;
  * round-trips. parse() never throws: a line it cannot read is skipped, and anything that is not a log reads as empty.
  *
  * The log records what the owner told the app and what the app did. It is not proof of what the camera runs:
- * summary() says the latest state the log knows, or "unknown".
+ * summary() says the latest state the log knows, "unknown", or "none yet" for a log with no flash in it.
  */
 final class FlashLog {
 
     static final int MAX = 200;
     static final String HEADER = "charmera-flash-log 1";
     static final String UNKNOWN = "unknown";
+    /** summary() for a log with no write, flash or check in it: the app has flashed nothing yet. */
+    static final String NONE_YET = "none yet";
 
     enum Event {
         WRITTEN("written to the card"),
@@ -210,7 +212,8 @@ final class FlashLog {
 
     /**
      * The latest camera firmware state the log knows, in one short line, e.g. "v006 with the OV9732 port, flash seen
-     * 11 Nov 13:02", or "unknown". Removing the update file and saving a backup say nothing about the firmware and are passed over.
+     * 11 Nov 13:02", "unknown" after a flash not seen or a failed check, or "none yet" when nothing was written.
+     * Removing the update file and saving a backup say nothing about the firmware and are passed over.
      */
     String summary(TimeZone tz) {
         for (int i = 0; i < entries.size(); i++) {
@@ -224,20 +227,24 @@ final class FlashLog {
                 case WRITTEN:
                     return named(e.firmware, i) + " written " + at + ", flash not confirmed";
                 case CHECK_OK:
-                    // the photo's header shows only the public-build family, not which of its files was written
-                    return named(e.firmware, i) + " written, a new photo has the public-build family's header " + at;
+                    // A check logged with no name passed on the public-build family's header, which shows the family
+                    // and not which of its files was written. One logged with a name passed on that firmware's own.
+                    return e.firmware.isEmpty()
+                            ? named(e.firmware, i) + " written, a new photo has the public-build family's header " + at
+                            : e.firmware + ", photo check OK " + at;
                 case CHECK_FAILED:
                     return UNKNOWN + " (photo check failed " + at + ")";
                 default:
                     break;
             }
         }
-        return UNKNOWN;
+        return NONE_YET;
     }
 
     /**
-     * The firmware the owner saw the camera take, for a file name that carries it (the test-shot zip's): the latest
-     * firmware state must be a flash seen of a named file, or a photo check that passed whose nearest older entry
+     * The firmware the owner saw the camera take, for a file name that carries it (the test-shot zip's). The app reads
+     * the entry itself with confirmed(), which also gives the SHA-256; this is its name alone, and the tests use it.
+     * The latest firmware state must be a flash seen of a named file, or a photo check that passed whose nearest older entry
      * naming a firmware is a flash seen of that same file. The check alone cannot say which file it was (the stock
      * restore file, the probe and the bring-up write the same header), so it names one only after a flash seen. Null
      * when the latest state is a write not yet confirmed, a flash not seen, a failed check or nothing, and for a

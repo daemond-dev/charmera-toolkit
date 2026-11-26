@@ -33,9 +33,6 @@ the firmware, puts it on the card and walks you through the flash. No computer n
 
 More in [the app's README](android/README.md) and [Using an Android phone](docs/06-ANDROID.md).
 
-Don't use app version 0.4. It was taken down on 2026-11-06 because it didn't refuse the withdrawn candidates A and B
-([what they were](docs/03-FLASH-CANDIDATES.md)).
-
 ### On a computer
 
 You need Python 3.9 or newer, on Windows, macOS or Linux. Nothing else to install. Download the repo (Code >
@@ -56,7 +53,8 @@ with examples in the [Command reference](docs/07-USAGE.md#on-a-computer-from-the
 
 If it boots and shows its menus but freezes in photo or video mode, it has firmware for the other sensor. The SD
 updater still runs, so flashing a build that fits its sensor from the card fixes it, without opening the camera.
-Photos it took before the bad flash tell you the sensor (Identify), and so does the sensor-ID probe. See
+That's been done on one OV9732 camera, by way of v006 with the OV9732 port. A v012 build straight over stock v006
+hasn't been tried. Photos it took before the bad flash tell you the sensor (Identify), and so does the sensor-ID probe. See
 [Recovery, section D](docs/02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera).
 
 If it doesn't boot at all, only a chip programmer brings it back: [Recovery, section B](docs/02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly).
@@ -87,14 +85,17 @@ SHA-256. A file made any other way, from your own read for example, isn't one, a
 
 | Your camera | Base | Mods | Back to stock |
 |---|---|---|---|
-| OmniVision OV9732 sensor | v012 (its factory firmware) | Volume and LED rows, EXIF dates, boot to last mode, capture flash, in any mix (a mix not yet tried on a camera is marked experimental) | stock v012 (in the app, base v012 with no mods ticked), or `charmera build --base v012 --download` |
-| SP140A sensor | v006 (public stock) | Volume and LED rows, experimental (tick it on base v006, or `--mods volume-led`) | the stock restore file: Advanced > Download the stock restore file (no backup needed), or Restore stock firmware with your backup. On a computer, `charmera build --base v006 --download` |
-| OV9732 that was flashed with v006 | v012, or v006 with the OV9732 port | on v012, any mix as in the first row. On v006, the OV9732 port, with or without Volume and LED rows. Tried on a camera: v012 with Volume and LED rows went onto one running v006 with the OV9732 port and Volume and LED rows, and it works. | stock v012, as in the first row. The stock restore file can't take pictures on this camera. |
+| OV9732 sensor | v012 | Volume and LED rows, EXIF dates, boot to last mode, capture flash, in any mix | stock v012: base v012 with no mods ticked, or `charmera build --base v012 --download` |
+| SP140A sensor | v006 | Volume and LED rows (experimental) | the stock restore file: Advanced > Download the stock restore file, or `charmera build --base v006 --download` |
+| OV9732 that was flashed with v006 | v012 | as the first row | stock v012. The v006 stock restore file can't take pictures on this camera. |
+
+A mix that hasn't been tried on a camera is marked experimental. An OV9732 camera can also run v006 with the OV9732
+port, with or without Volume and LED rows
+([details](docs/06-ANDROID.md#repair-an-ov9732-camera-the-ov9732-port-on-v006)).
 
 A build is named by its base and mods, such as "v012 with Volume and LED rows and EXIF dates". Older versions of the
-app numbered some builds v0.23 to v0.27. [Older build names](docs/06-ANDROID.md#older-build-names) maps them.
-Don't go by an update file's stamp. Stock v012, stock v008_test and the newer mixes share v0.27's, so load the file in
-the app or run `charmera verify` to see what it is.
+app numbered some builds v0.23 to v0.27. [Older build names](docs/06-ANDROID.md#older-build-names) maps them. To see
+what a file is, load it in the app or run `charmera verify`.
 
 Identify (in the app, or `charmera identify`) reads the photos on the card and says which firmware took them, which
 tells you the sensor. Photos from before a bad flash still count. Photos taken while it ran our OV9732 port on v006
@@ -132,8 +133,10 @@ examples for all of them.
 Flashing:
 
 1. [The first flash](docs/01-FIRST-FLASH.md). Start here.
-2. [Recovery](docs/02-RECOVERY.md). Read it before you flash, and go there if a flash went wrong.
-3. [Flash candidates](docs/03-FLASH-CANDIDATES.md). The three withdrawn files and what happened with them.
+2. [Recovery](docs/02-RECOVERY.md). Read "Which situation are you in?" before you flash, and go there if a flash
+   went wrong.
+3. [Flash candidates](docs/03-FLASH-CANDIDATES.md). Three withdrawn files from the first flash, and the stock restore
+   file. History only.
 4. [Putting the file on the card](docs/04-STAGE.md). What `stage` does and what its errors mean.
 5. [SD card problems](docs/05-CARDS.md). Why phones reject a card the camera has used.
 6. [Using an Android phone](docs/06-ANDROID.md). Everything the app does.

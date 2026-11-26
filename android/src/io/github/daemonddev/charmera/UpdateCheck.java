@@ -427,6 +427,26 @@ public final class UpdateCheck {
         }
     }
 
+    /** The title of the warning a check gives when the backup on record is firmware for the other sensor. */
+    static final String WRONG_SENSOR = "Wrong sensor?";
+
+    /**
+     * A check's "Wrong sensor?" warning as one sentence for the file step and the write dialog ("Wrong sensor? The
+     * firmware in your chip backup drives..."), or null when the check has none. Matched on the title: the other
+     * sensor-table warnings are titled "Image sensor set-up".
+     */
+    static String wrongSensor(Result result) {
+        if (result == null) {
+            return null;
+        }
+        for (Line l : result.lines) {
+            if (l.level == Level.WARN && WRONG_SENSOR.equals(l.title) && !l.text.isEmpty()) {
+                return WRONG_SENSOR + " " + Character.toUpperCase(l.text.charAt(0)) + l.text.substring(1);
+            }
+        }
+        return null;
+    }
+
     public static final class Result {
         public final List<Line> lines;
         /** True when no FAIL line was produced. */
@@ -1089,8 +1109,9 @@ public final class UpdateCheck {
                             + " your backup: the file drives the image sensor another way. A firmware that drives a"
                             + " sensor the camera does not have is the likely cause when a camera freezes in photo and"
                             + " video mode after a flash. Do not use this file on this camera from the app. If this"
-                            + " camera's own firmware is already gone and the file is a working camera's, that donor"
-                            + " route goes through the toolkit on a computer (docs/02-RECOVERY.md, section D).", both));
+                            + " camera's own firmware is already gone and the file is a working camera's, it's written"
+                            + " with the toolkit on a computer (the Recovery guide in the project's docs, section D).",
+                            both));
                 } else if (refBuild != null) {
                     out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", codeSame
                             ? "the same as in the firmware in your backup. That firmware is " + refBuild.name()
@@ -1145,7 +1166,7 @@ public final class UpdateCheck {
                     out.add(new Line(Level.WARN, "software", "Software", "a file whose program differs from the firmware"
                             + " in your backup: a mod that changes the program, or another build. Only put it on the"
                             + " card if you made that change on purpose, or know the file is for this camera. Your"
-                            + " backup is the way back (docs/02-RECOVERY.md).",
+                            + " backup is the way back (the Recovery guide in the project's docs).",
                             "bytes 0 to 0x120000 (boot header, code and data) differ from the backup."));
                 }
             } else if (n >= SOFTWARE_END && sha256Hex(data, 0, SOFTWARE_END).equals(build.softwareSha256)
@@ -1161,7 +1182,7 @@ public final class UpdateCheck {
                 out.add(new Line(Level.WARN, "software", "Software", "a file whose program differs from the public"
                         + " dump's: a mod that changes the program, or another build. Only put it on the card if you"
                         + " made that change on purpose, or know the file is for this camera. Keep a way back ready: a"
-                        + " backup of your camera (docs/02-RECOVERY.md).",
+                        + " backup of your camera (the Recovery guide in the project's docs).",
                         "bytes 0 to 0x120000 (boot header, code and data) differ from the public dump."));
             }
             vectorLine(data, marks, reference, ref, layout, out);

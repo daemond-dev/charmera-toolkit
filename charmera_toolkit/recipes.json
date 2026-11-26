@@ -1,9 +1,5 @@
 {
  "format": 1,
- "catalog": {
-  "version": "v0.27",
-  "stamp": "202611170027"
- },
  "dumps": [
   {
    "id": "v006-original",
@@ -77,7 +73,7 @@
    "name": "sensor-probe",
    "title": "Sensor-ID probe",
    "phrase": "the sensor-ID probe",
-   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops as before.",
+   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops there. It replaces the camera's firmware until you flash another.",
    "status": "tested",
    "conflicts": [
     "v006/ov9732-port",

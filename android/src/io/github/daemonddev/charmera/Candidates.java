@@ -384,9 +384,10 @@ public final class Candidates {
      * The Repair route's fixed kinds (repairVersions(), newest first) are V027, V026 and V025, made from the factory
      * build v012, and BRINGUP (v006 with the OV9732 port and Volume and LED rows, from the public stock dump). Their
      * Java names keep the numbers older versions of the app showed (v0.24 to v0.27). The screen names each by its base
-     * and mods (firmwareName()), and the recipes keep the old number (Recipe.Selection.oldName()). Adding a factory
-     * kind is one entry here (base FACTORY, repair true, label, file name and SHA-256), one Layer in layersOf() and its
-     * place in repairVersions().
+     * and mods (firmwareName()), and the recipes keep the old number (Recipe.Selection.oldName()). These four stay
+     * to recognise their files and to move a pick an older app remembered by Kind name. A new build is not a kind:
+     * it is a set in charmera_toolkit/recipes.json, and the screen describes every Repair pick from the recipes
+     * (Recipe.describe), these four included.
      */
     public enum Kind {
         RESTORE(true, Base.STOCK, false, "The stock restore file is the first part of the public dump (build v006), under its published"
@@ -401,11 +402,12 @@ public final class Candidates {
         PROBE(true, Base.STOCK, false, "The sensor-ID probe is the stock restore file with a small reviewed patch. When the camera enters"
                 + " photo mode, it walks the sensor bus. For each address that answers, it reads the 16-bit chip-ID"
                 + " registers (0x3000..0x301F and 0x3100..0x310F) and writes them to SENSOR.TXT at the root of the"
-                + " card, then stops as the camera does now. It doesn't fix the camera. It reports which image sensor"
+                + " card, then stops there. It doesn't fix the camera, and it replaces the camera's firmware until you"
+                + " flash another. It reports which image sensor"
                 + " is on the bus and at which address, so you can tell a wrong sensor from a dead one and name the"
                 + " exact part. Its boot code, update code and image-sensor table are the stock restore file's byte for"
                 + " byte. Only a dead debug routine and the one call that writes the sensor set-up are changed. The"
-                + " stock restore file (above) puts the camera back.",
+                + " stock restore file puts an SP140A camera back. On an OV9732 camera, flash a v012 build.",
                 "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b",
                 "JH_5408202611082300_0FB74B1C.bin", "02e2729cffa4dd835f2b138b4ff4df9be89baecfb96f473665dc4b3411e7d2d5"),
         BRINGUP(true, Base.STOCK, true, "The OV9732 port makes the public build, made for the SP140A, drive an OmniVision"
@@ -416,39 +418,28 @@ public final class Candidates {
                 + " tuned against a stock camera on a colour card. It adds two setup-menu rows after FORMAT: Volume"
                 + " (system sounds, 0 to 8, which also sets playback volume) and LED (the automatic flash light, On as"
                 + " before or Off). Boot and update code are the stock restore file's, byte for byte. The stock restore"
-                + " file doesn't drive the OV9732, so it stops photo and video working on this camera. The way back is"
-                + " v006 with the OV9732 port (JH_5408202611110023_….bin). The app makes it too, on Flash custom"
-                + " firmware with base v006 and only the OV9732 port ticked. Like any update, the flash itself must not"
-                + " be interrupted.",
+                + " file doesn't drive the OV9732, so it stops photo and video working on an OV9732 camera.",
                 "JH_5408202611120024_0F0613AC.bin", "0919c5d857f855b11424407211a132ac61f4c91852e01af583bd6b76c85b1c69",
                 "JH_5408202611120024_0FB7027B.bin", "8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b"),
-        V025(true, Base.FACTORY, true, "v012 with Volume and LED rows is this camera's own factory firmware"
-                + " (build v012, read off its chip), which drives the OV9732 itself, with two setup-menu rows"
-                + " after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off). The app"
-                + " makes it on the phone from your factory dump, which never leaves the phone. The camera starts with"
-                + " Volume 5 and LED On. Photos carry no EXIF date. The way back is v006 with the OV9732 port and"
-                + " Volume and LED rows (JH_5408202611120024_….bin), which this app makes. Like any update, the"
-                + " flash itself must not be interrupted.",
+        V025(true, Base.FACTORY, true, "v012 with Volume and LED rows is the factory firmware of OV9732 cameras"
+                + " (build v012) with two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the"
+                + " automatic flash light, On or Off). The camera starts with Volume 5 and LED On. Photos carry no EXIF"
+                + " date.",
                 "JH_5408202611130025_0FA3BF37.bin", "a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0",
                 "JH_5408202611130025_0FB76FE9.bin", "bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a"),
-        V026(true, Base.FACTORY, true, "v012 with Volume and LED rows and EXIF dates is this camera's own factory"
-                + " firmware (build v012) with the Volume and LED rows after FORMAT, plus EXIF in every photo:"
+        V026(true, Base.FACTORY, true, "v012 with Volume and LED rows and EXIF dates is the factory firmware of OV9732"
+                + " cameras (build v012) with the Volume and LED rows after FORMAT, plus EXIF in every photo:"
                 + " Make Kodak, Model Charmera, and the date and time from the camera's clock. Set the date in the"
-                + " camera's setup menu first, because an unset clock gives 2025:01:01. The app makes it on the phone from your"
-                + " factory dump, which never leaves the phone. The camera starts with Volume 5 and LED On. The way back"
-                + " is v012 with Volume and LED rows, or v006 with the OV9732 port and Volume and LED rows. The app"
-                + " makes both. Like any update, the flash itself must not be interrupted.",
+                + " camera's setup menu first, because an unset clock gives 2025:01:01. The camera starts with Volume 5"
+                + " and LED On.",
                 "JH_5408202611130026_0FA38C7C.bin", "617770c3f3c9d880f93f06043090d3d07909c845633ca08e9c183deb44fa06d2",
                 "JH_5408202611130026_0FB73D2E.bin", "be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738"),
         V027(true, Base.FACTORY, true, "v012 with Volume and LED rows, EXIF dates, boot to last mode and capture"
-                + " flash is this camera's own factory firmware (build v012) with the Volume and LED rows and EXIF"
+                + " flash is the factory firmware of OV9732 cameras (build v012) with the Volume and LED rows and EXIF"
                 + " dates, plus two changes."
                 + " Power-on goes straight into the mode you last used, photo or video (photo the first time), instead"
                 + " of the SELECT MODE screen. A short press of the power button still opens it. And when you take a photo, the"
-                + " screen flashes black under the icons for a moment, so you can see the shot even at Volume 0. Both"
-                + " were tested in an emulator, then on a camera. The way back is v012 with Volume and LED rows and"
-                + " EXIF dates, which the app makes too."
-                + " Like any update, the flash itself must not be interrupted.",
+                + " screen flashes black under the icons for a moment, so you can see the shot even at Volume 0.",
                 "JH_5408202611170027_0FA38996.bin", "108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968",
                 "JH_5408202611170027_0FB73A48.bin", "89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639"),
         C(false, Base.STOCK, false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings. A camera"
@@ -465,7 +456,11 @@ public final class Candidates {
         public final Base base;
         /** Whether it is one of the Repair route's fixed kinds (repairVersions()). */
         private final boolean repair;
-        /** What the file is, in plain words, for the owner. */
+        /**
+         * What the file is, in plain words. The screen shows it for RESTORE, PROBE and a withdrawn candidate. A Repair
+         * pick is described from the recipes (Recipe.describe) with its way back, so the Repair kinds' labels say only
+         * what the build is.
+         */
         public final String label;
         /** The reviewed file made from the original dump (the public dump, or the owner's factory dump). */
         public final String fileName;
@@ -545,12 +540,15 @@ public final class Candidates {
     private Candidates() {
     }
 
-    /** The Repair route's versions, newest first. */
+    /**
+     * The Repair route's fixed kinds, newest first: the builds older versions of the app numbered. The first is the
+     * default pick (Recipe.presets()).
+     */
     public static Kind[] repairVersions() {
         return new Kind[]{Kind.V027, Kind.V026, Kind.V025, Kind.BRINGUP};
     }
 
-    /** The Repair version with this SHA-256 (a checked file's), or null. */
+    /** The fixed Repair kind with this SHA-256 (a checked file's), or null. */
     public static Kind repairVersion(String sha256) {
         for (Kind k : repairVersions()) {
             if (k.matches(sha256)) {
@@ -558,41 +556,6 @@ public final class Candidates {
             }
         }
         return null;
-    }
-
-    /**
-     * Whether the app can make this kind now: every kind. A stock kind from the public dump's cleaned copy, which
-     * downloads; a factory kind from the factory dump kept on the phone (the owner's own read, picked by hand) or, when
-     * there is none, from the factory build's cleaned copy, which downloads too (CLEAN_FACTORY_DOWNLOAD). factoryDump
-     * says only which of those a factory kind will use.
-     */
-    public static boolean canBuild(Kind kind, boolean factoryDump) {
-        return true;
-    }
-
-    /** The newest Repair version the app can make now. */
-    public static Kind latestAvailable(boolean factoryDump) {
-        for (Kind k : repairVersions()) {
-            if (canBuild(k, factoryDump)) {
-                return k;
-            }
-        }
-        return Kind.BRINGUP;
-    }
-
-    /**
-     * The Repair version to show selected: the one the owner picked or wrote (remembered by its name), even when the
-     * app cannot make it now; with none remembered, the latest available.
-     */
-    public static Kind repairChoice(String remembered, boolean factoryDump) {
-        // A version the owner picked (or wrote) stays picked even when its dump is not on the phone now: the screen
-        // then asks for the dump, and the run of that version keeps its title and its stale-run check.
-        for (Kind k : repairVersions()) {
-            if (k.name().equals(remembered)) {
-                return k;
-            }
-        }
-        return latestAvailable(factoryDump);
     }
 
     /**
@@ -697,17 +660,15 @@ public final class Candidates {
     }
 
     /**
-     * Whether these exact bytes are one of the reviewed patches the app writes without a backup, by SHA-256: the
-     * sensor-ID probe or a Repair version (repairVersions(): the OV9732 bring-up v0.24, and v0.25 and v0.26 made from
-     * the owner's factory dump).
-     * - The probe and the bring-up (Base.STOCK) are built from the public build, and the stock restore file reverses
-     *   them: boot code, update code and the SP140A set-up table are the restore file's byte for byte. The probe patches
-     *   only a dead routine and the one sensor-setup call; the bring-up also patches the AE write tail (AE_HOOK), two
-     *   image-tuning data tables and two AE-target message handlers (TUNE_OFFSETS), and v0.24's setup-menu and LED code
-     *   (ROWS_OFFSETS); its black level is in BRINGUP_STUB's start-up table.
-     * - The factory versions (Base.FACTORY) are the camera's own factory build (v012) with authored patches only
-     *   (Layer); the stock restore file does not reverse them. Their way back is an older Repair version's file, which
-     *   the app makes too: v0.25's or v0.24's for v0.26, v0.24's for v0.25.
+     * Whether these exact bytes are one of the reviewed files the app writes without a backup, by SHA-256: the
+     * sensor-ID probe, a fixed Repair kind (repairVersions()) or any reviewed build of the recipe table.
+     * - The probe and BRINGUP (Base.STOCK) are built from the public build v006: boot code, update code and the SP140A
+     *   set-up table are the restore file's byte for byte. The probe patches only a dead routine and the one
+     *   sensor-setup call; BRINGUP also patches the AE write tail (AE_HOOK), two image-tuning data tables and two
+     *   AE-target message handlers (TUNE_OFFSETS), and the setup-menu and LED code (ROWS_OFFSETS); its black level is
+     *   in BRINGUP_STUB's start-up table.
+     * - V025, V026 and V027 (Base.FACTORY) are the factory build v012, from the owner's own dump or its public cleaned
+     *   copy, with authored patches only (Layer). Stock v012 or another v012 build is their way back.
      * Each is a fixed, reviewed file, so none needs a backup to be checked against.
      */
     public static boolean isReviewedPatch(byte[] data) {
@@ -815,10 +776,10 @@ public final class Candidates {
     /** The sensor line for a file checked alone against the sensor the backup's firmware drives (theirs, or null). */
     static UpdateCheck.Line backupSensorLine(String file, String mine, String theirs, String detail) {
         if (theirs != null && !theirs.equals(mine)) {
-            return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Wrong sensor?", "the firmware in your"
-                    + " backup drives the " + theirs + ", and " + file + " drives the " + mine + ". If the backup is"
-                    + " this camera's, the camera boots with this file but can't take pictures until you flash"
-                    + " firmware that fits. It's a reviewed file, so the app writes it if you go ahead.", detail);
+            return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", UpdateCheck.WRONG_SENSOR, "the firmware"
+                    + " in your chip backup drives the " + theirs + ", and " + file + " drives the " + mine + ". If the"
+                    + " backup is this camera's, the camera boots with this file but can't take photos until you flash "
+                    + Recipe.fixFor(theirs) + ". It's a reviewed file, so the app writes it if you go ahead.", detail);
         }
         if (theirs != null) {
             return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Image sensor set-up", "the firmware"
@@ -869,11 +830,13 @@ public final class Candidates {
         for (UpdateCheck.Line l : r.lines) {
             if (l.level == UpdateCheck.Level.FAIL && "sensor-table".equals(l.name) && !failsAlone(alone, l)) {
                 changed = true;
-                lines.add(new UpdateCheck.Line(UpdateCheck.Level.WARN, l.name, "Wrong sensor?", "the firmware in your"
-                        + " backup drives the image sensor differently from " + s.label() + ", which drives the "
-                        + Recipe.sensorOf(s) + ". If the backup is this camera's, the camera boots with this file but"
-                        + " can't take pictures until you flash firmware that fits. It's a reviewed file, so the app"
-                        + " writes it if you go ahead.", l.text + (l.detail.isEmpty() ? "" : " " + l.detail)));
+                lines.add(new UpdateCheck.Line(UpdateCheck.Level.WARN, l.name, UpdateCheck.WRONG_SENSOR, "the firmware"
+                        + " in your chip backup drives the image sensor differently from " + s.label() + ", which drives"
+                        + " the " + Recipe.sensorOf(s) + ". If the backup is this camera's, the camera boots with this"
+                        + " file but can't take photos until you flash firmware for its sensor (base v012 for the"
+                        + " OV9732, stock v006 for the SP140A). It's a reviewed file, so the app writes it if you go"
+                        + " ahead.",
+                        l.text + (l.detail.isEmpty() ? "" : " " + l.detail)));
             } else {
                 lines.add(l);
             }

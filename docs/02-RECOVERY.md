@@ -501,12 +501,12 @@ need to open the camera or have a backup.
    - OV9732: stock v012, the factory firmware of OV9732 cameras (in the app, base v012 with no mods ticked; on a
      computer, `charmera build --base v012 --download --out out/`), or v012 with any of its mods. v006 with the
      OV9732 port (`--base v006 --mods ov9732-port`), the v006 build changed to drive the OV9732, works too, with or
-     without the Volume and LED rows (`volume-led`). The stock restore file is no way back for this camera. An OV9732
-     camera that ran v006 with the OV9732 port and Volume and LED rows took v012 with Volume and LED rows, and both
-     work on it ([OV9732 exposure, colour and white
+     without the Volume and LED rows (`volume-led`). The stock restore file is no way back for this camera.
+   - An OV9732 camera that ran v006 with the OV9732 port and Volume and LED rows took v012 with Volume and LED rows,
+     and both work on it ([OV9732 exposure, colour and white
      balance](15-OV9732-AE-WB-FLASH-PORT.md#11-v025-the-factory-ov9732-build-with-the-volume-and-led-rows)). The v006
-     port keeps v006's boot and update code byte for byte, so that flash ran v006's own updater. A v012 build flashed over
-     stock v006 itself hasn't been tried, but the same updater does the work (INFERRED).
+     port keeps v006's boot and update code byte for byte, so that flash ran v006's own updater. A v012 build flashed
+     over stock v006 itself hasn't been tried, but the same updater does the work (INFERRED).
    - SP140A: the stock restore file (v006). On a computer, `charmera build --base v006 --download --out out/`. In the
      app, "Restore stock firmware" needs a backup. Without one, use Advanced > Download the stock restore file.
 

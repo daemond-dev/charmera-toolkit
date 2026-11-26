@@ -69,24 +69,28 @@ OWN_READ_BASES = {"public-dump": "v006", "v012": "v012"}
 
 def own_read(data: bytes, recipes: Optional[dict] = None) -> dict:
     """A dumps entry for an owner's own read of a v006 or v012 chip, or RecipeError. The read must be a complete 2 MiB
-    read of the chip whose firmware (bytes 0..0x169000) is that build's unchanged; it is prepared as that base's
-    cleaned copy is."""
+    read of the chip whose firmware (bytes 0..0x169000) is that build's unchanged. It is cut to the update file's
+    length and nothing else: its settings, stored photos and photo directory stay as read (a cleaned public copy has
+    its photos blanked only to keep them out of a published file)."""
     from . import image
     recipes = recipes or load()
     problem = image.chip_read_problem(data)
     if problem:
         raise RecipeError(f"not a dump the recipes start from (SHA-256 {sha256(data)}), and not a read of a v006 or v012 "
-                          f"chip either: {problem}")
+                          f"chip either: {problem}. Give a full read of the chip, or build from the public copy instead "
+                          "(--base v006 or v012 with --download)")
     build = image.match_known_build(data)
     base = OWN_READ_BASES.get(build.key) if build is not None else None
+    if build is not None and build.key == "film-mods":
+        raise RecipeError("not a dump the recipes start from: this read is stock v008_test. Its public file is the whole "
+                          "update, so use charmera build --base v008_test --download")
     if base is None:
         found = image.detect_build(data)
         raise RecipeError("not a dump the recipes start from, and the firmware in this read is not stock v006 or v012 byte "
                           f"for byte (it is {found.identity}: {found.label}). A camera flashed with a mod reads like this. "
                           "Build from the public copy instead (--download), or from a read taken before the camera was "
                           "flashed")
-    clean = next(d for d in recipes["dumps"] if d["build"] == base and d["copy"] == "clean")
-    return {"id": f"{base}-own-read", "build": base, "copy": "own", "prep": clean["prep"], "size": len(data),
+    return {"id": f"{base}-own-read", "build": base, "copy": "own", "prep": "truncate", "size": len(data),
             "sha256": sha256(data), "source": "your own read of the chip", "url": None}
 
 

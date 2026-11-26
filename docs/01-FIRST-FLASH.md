@@ -15,9 +15,7 @@ from the card. A camera that doesn't start at all, or whose flash was cut off, i
 Only have a phone? The [Charmera Card app](../android/README.md) identifies the camera's firmware from its photos,
 builds the reviewed files (the stock restore file, the sensor-ID probe, or a base with the mods you tick)
 and does steps 4 to 7 on the phone. Without the backup from step 1 it still writes. For a reviewed file it warns when
-nothing confirms what the camera runs, and for a file it doesn't know it warns loudly. Version 0.4, published before
-0.5, had no backup step and didn't refuse the withdrawn candidates, so if you still have it installed, don't flash with
-it ([how to tell the two apart](../android/README.md#install)). Read steps 0 and 1 here first.
+nothing confirms what the camera runs, and for a file it doesn't know it warns loudly. Read steps 0 and 1 here first.
 
 Not flashing anything? If you only want the photo and video dates fixed, go to
 [Photo dates (EXIF)](10-EXIF.md). If your phone won't read the camera's card, go to
@@ -61,9 +59,7 @@ Identify route (`charmera identify`, or "Identify this camera's firmware" in the
 `stage` warn, but they don't refuse.
 
 The dump is the better of the two. It's the way back from any flash, one that won't boot included, and the one file
-the checks can compare an update file with. The app writes without one. For a reviewed file it warns when nothing
-confirms what the camera runs. For a file it doesn't know it warns loudly that this project didn't review it and it
-wasn't compared with this camera's firmware. Without `--stock`, `stage` shows a WARN line but still writes a file
+the checks can compare an update file with. Without `--stock`, `stage` shows a WARN line but still writes a file
 that passes ([details](04-STAGE.md#what-it-does-in-order)). Give `--stock <your backup>` to every `verify` and every
 `stage` when you have one.
 
@@ -151,7 +147,7 @@ charmera build --base v012 --mods volume-led,exif --download --out out/
 Take the base Identify gave you (v012 for an OV9732 camera, v006 for an SP140A one). Leave out `--mods` for the stock
 build. `--list` shows every base, mod and combination, each named by its base and mods, such as "v012 with Volume and
 LED rows and EXIF dates". For v012 the mods are Volume and LED rows, EXIF dates, boot to last mode and capture flash,
-in any mix. For v006 they're the sensor-ID probe, Volume/LED and the OV9732 port. v006 with the OV9732 port, with or
+in any mix. For v006 they're the sensor-ID probe, Volume and LED rows and the OV9732 port. v006 with the OV9732 port, with or
 without the Volume and LED rows, is for an OV9732 camera that was flashed with v006. The builds older app versions
 numbered v0.23 to v0.27 are in [Older build names](06-ANDROID.md#older-build-names). `--download` fetches the base's
 cleaned public copy at a fixed commit and checks its SHA-256. The file is written only when it's the reviewed one
@@ -160,11 +156,15 @@ checked but not tried on a camera, and `build` says so. More in
 [Command reference](07-USAGE.md#build-a-firmware-file-from-a-base-and-mods-charmera-build).
 
 With a backup, `--dump <your backup>` builds from your own read instead, when its firmware is still stock v006 or
-v012 byte for byte. The file carries your camera's settings, and it isn't a reviewed file, so `build` labels it that
+v012 byte for byte. The file carries your camera's settings and stored photos, and it isn't a reviewed file, so `build` labels it that
 way and prints the `verify` and `stage` lines to run with `--stock <your backup>`.
 
-Or build the file from your own backup with `pack`. It turns the backup into an update file that puts back exactly
-what the camera runs now, settings and stored photos included. With `--official-size` it makes a 0x169000-byte file
+### Files from your own backup
+
+Got your file from `charmera build`? Skip to step 3.
+
+`pack` turns your backup into an update file that puts back exactly what the camera runs now, settings and stored
+photos included. With `--official-size` it makes a 0x169000-byte file
 instead, which writes the software only and leaves the camera's own area to a factory reset. 0x169000 bytes is the
 size of the film-mods files, and it's where an official update would end by that project author's reading of the
 updater. They also report flashing a file of that size on their own camera (REPORTED). No official update file has
@@ -194,18 +194,17 @@ pictures.
 ## 3. Verify
 
 ```
-charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup>
-charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup> --allow-modified   # a mod of code or resources
-charmera verify out/JH_5408<stamp>_<sum>.bin                                          # no backup
-charmera diff <your backup> out/JH_5408<stamp>_<sum>.bin
+charmera verify out/JH_5408<stamp>_<sum>.bin                           # no backup
+charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup>     # with one
 ```
 
 For a file from `charmera build`, here's what you'll see. An INFO `reviewed` line names it. Without `--stock` there's
 a WARN `backup` and a WARN `unconfirmed`, because nothing confirms which firmware the camera runs. Its `series`,
 `build`, `software-region` and `sensor-table` problems show as WARN (marked as expected for a reviewed build), and a
 backup for the other sensor adds a WARN `wrong-sensor`. It needs no `--allow-modified`. The name, size, checksum and
-vector-table checks still FAIL as they would for any file. The rules below apply in full to every other file, such
-as one from `pack` or the mod commands, or a `build --dump` of your own read.
+vector-table checks still FAIL as they would for any file.
+
+`verify` fails closed: a FAIL line means the file doesn't go on a card.
 
 Give `--stock <your backup>` when you have one. It's the one comparison that says something about your camera, and
 it only says what fits for a backup read before the camera was ever flashed. It must be a complete read of a chip as
@@ -213,7 +212,15 @@ it only says what fits for a backup read before the camera was ever flashed. It 
 file, a cut-off read) is a FAIL. A `--stock` that is byte for byte a public dump is a WARN. It may be this camera's
 own read after a flash with the public restore file, and then it shows what the camera runs, not what fits it.
 
-`verify` fails closed: a FAIL line means the file doesn't go on a card.
+### Files you made yourself
+
+A file from `pack`, from the mod commands or from `build --dump` on your own read isn't a reviewed build, so the rules
+below apply to it in full. The [Command reference](07-USAGE.md#read-only-commands) has them with examples.
+
+```
+charmera verify out/JH_5408<stamp>_<sum>.bin --stock <your backup> --allow-modified   # a mod of code or resources
+charmera diff <your backup> out/JH_5408<stamp>_<sum>.bin
+```
 
 The `sensor-table` line compares the file's image-sensor set-up table with your backup's, found by content in both.
 There are two kinds the toolkit knows: the SP140A table v006 and v008_test carry, and v012's table for the OV9732.
@@ -291,8 +298,8 @@ Before you start:
   boot needs the camera opened.
 - Original 2025 series only: matte body, yellow Kodak boot screen. Never a Millennium Edition (blue boot
   screen) or a CLOT edition ([Recovery, section D](02-RECOVERY.md#d-firmware-that-does-not-fit-the-camera)). The body
-  alone proves nothing, as the incident showed. What does is the comparison in step 3 with a backup read before the
-  camera was ever flashed.
+  alone proves nothing, as the incident showed. What does is Identify on photos from before any flash, or the
+  comparison in step 3 with a backup read before the camera was ever flashed.
 - Charge the battery fully, then unplug the cable. Programming takes about 15 to 20 seconds, and losing power in
   that window leaves a camera that only a chip programmer can bring back
   ([Recovery, section C](02-RECOVERY.md#c-an-interrupted-flash)).

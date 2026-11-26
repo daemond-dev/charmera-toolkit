@@ -8,6 +8,7 @@ folder; no firmware bytes are kept anywhere else.
 """
 import argparse
 import hashlib
+import json
 import os
 import struct
 from pathlib import Path
@@ -158,6 +159,14 @@ def test_inspect_names_v012_and_an_own_read(tmp_path, capsys):
         assert "build:           v012  (the factory build v012 of OV9732 cameras" in out
         assert "167 register writes at 0xf5d3c" in out and "v012's table for the OmniVision OV9732" in out
         assert image.chip_read_problem(data) is None
+        # the code and software hashes are v012's own, so an exact v012 image has no "no" line
+        checks_ = image.detect_build(data).checks
+        assert checks_["code_sha256"] and checks_["software_sha256"] and all(checks_.values())
+        assert "  no" not in "".join(l for l in out.splitlines() if l.lstrip().startswith("check"))
+        assert inspect_cmd.handler(argparse.Namespace(file=str(p), json=True, resources=False, settings=False)) == 0
+        marks = json.loads(capsys.readouterr().out)["marks"]
+        assert marks["sensor_table"]["sensor"] == "OV9732" and marks["sensor_table"]["drives"] == "OV9732"
+        assert [s["sensor"] for s in marks["sensor_programs"]] == ["OV9732"] and marks["sensor_programs"][0]["pairs"] == 167
     changed = bytearray(dump)
     changed[0x60000] ^= 1                                   # a changed program: v012 with changes
     assert image.detect_build(bytes(changed)).identity == "v012-modified"
@@ -230,8 +239,41 @@ def test_build_refuses_an_own_read_of_a_changed_firmware(tmp_path):
     changed[0x60000] ^= 1
     with pytest.raises(recipes.RecipeError, match="not stock v006 or v012 byte for byte"):
         recipes.make(bytes(changed), ["volume-led"], own=True)
-    with pytest.raises(recipes.RecipeError, match="not a read of a v006 or v012 chip"):
+    with pytest.raises(recipes.RecipeError, match="not a read of a v006 or v012 chip") as exc:
         recipes.make(bytes(changed[:0x1E0000]), [], own=True)
+    assert str(exc.value).endswith("build from the public copy instead (--base v006 or v012 with --download)")
+
+
+def test_build_says_what_to_do_with_a_read_of_stock_v008_test(monkeypatch):
+    """v008_test is a base with a public file, so its read is not "a camera flashed with a mod"."""
+    monkeypatch.setattr(image, "chip_read_problem", lambda data, need_sensor_table=True: None)
+    monkeypatch.setattr(image, "match_known_build", lambda data: image.FILM_MODS_BUILD)
+    with pytest.raises(recipes.RecipeError) as exc:
+        recipes.own_read(b"\0" * 0x200000)
+    assert "this read is stock v008_test" in str(exc.value) and "--base v008_test --download" in str(exc.value)
+    assert "flashed with a mod" not in str(exc.value)
+
+
+@needs_factory
+def test_an_own_v012_read_keeps_its_photos_and_directory(tmp_path, capsys):
+    """An own read is only cut to the update file's length: stored photos and their directory stay together, as for
+    v006. (Blanking the photos alone left a directory that listed a photo no longer there.)"""
+    read = bytearray(FACTORY.read_bytes())
+    jpeg = b"\xff\xd8\xff\xe0" + b"J" * 5000
+    read[0x180000: 0x180000 + len(jpeg)] = jpeg
+    read[0x17F000: 0x17F00C] = struct.pack("<III", 1, 1, len(jpeg))
+    assert recipes.own_read(bytes(read))["prep"] == "truncate"
+    made = recipes.make(bytes(read), ["volume-led"], own=True)
+    assert not made.reviewed
+    assert made.data[0x180000: 0x180000 + len(jpeg)] == jpeg
+    assert made.data[0x17F000: 0x180000] == bytes(read[0x17F000: 0x180000])
+    assert made.data[0x170000: 0x1E0000] == bytes(read[0x170000: 0x1E0000])
+    src = tmp_path / "read.bin"
+    src.write_bytes(bytes(read))
+    args = argparse.Namespace(list=False, dump=str(src), download=False, base=None, mods="volume-led",
+                              out=str(tmp_path / "out"), no_verify=True)
+    assert build_cmd.handler(args) == 0
+    assert "it carries your camera's settings and stored photos" in " ".join(capsys.readouterr().out.split())
 
 
 @needs_factory

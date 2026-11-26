@@ -1,4 +1,4 @@
-# Using the toolkit
+# Command reference
 
 Reading order: 7 of 15 · previous: [Using an Android phone](06-ANDROID.md) · next: [Photo frames](08-FRAMES.md) · [all docs](README.md)
 
@@ -267,8 +267,8 @@ charmera build --dump charmera_flash_....bin --mods volume-led,exif,boot-last-mo
   a camera are built with a warning (`[experimental]` in `--list`).
 - From your own read, the firmware in it (bytes 0..0x169000) must be stock v006 or v012 byte for byte, or `build`
   refuses it. A camera that was flashed with a mod reads like that, so build from the public copy instead, or from a
-  read taken before the camera was flashed. The file keeps your read's settings (from a v012 read the photos stored
-  in the camera's own memory are blanked, as in the cleaned copy). No published hash matches it, so `build` prints
+  read taken before the camera was flashed. The file keeps your read's settings and the photos stored in the camera's
+  own memory. No published hash matches it, so `build` prints
   `NOT a reviewed file` and a WARN, and `verify`, `stage` and the app check it as any file you made yourself.
 - Then it runs `verify` on the result and prints the commands to run next. For a reviewed file those are `verify` and
   `stage` with `--stock <your backup>`, and the same two without `--stock` for when you have no backup. For a file
@@ -351,8 +351,8 @@ charmera restore --image my_backup.bin --out backups/                           
 ```
 
 `stage` runs `verify` again, refuses a card that already holds another update file, copies the file to the card
-root, and reads it back to compare hashes. `stage` warns without `--stock` but still writes a file that passes, as
-decided on 2026-11-06 ([details](04-STAGE.md#what-it-does-in-order)).
+root, and reads it back to compare hashes. `stage` warns without `--stock` but still writes a file that passes
+([details](04-STAGE.md#what-it-does-in-order)).
 
 `probe` and `backup` ([Recovery, section
 B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)) only read the chip. Before they
