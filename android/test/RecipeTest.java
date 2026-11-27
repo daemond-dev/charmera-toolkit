@@ -262,7 +262,7 @@ public class RecipeTest {
                 && Recipe.remembered(null, "V025").equals(Recipe.of(Candidates.Kind.V025))
                 && Recipe.remembered(null, "V027").equals(Recipe.of(Candidates.Kind.V027))
                 && Recipe.remembered(null, "BRINGUP").equals(Recipe.of(Candidates.Kind.BRINGUP)));
-        // 0.32: no mod starts ticked. The default was the newest preset (V027, four mods); it is now stock v012.
+        // 0.33: no mod starts ticked. The default was the newest preset (V027, four mods); it is now stock v012.
         expect("nothing, or nothing valid, remembered -> stock v012, no mods ticked", Recipe.remembered(null, null)
                 .equals(Recipe.defaultPick()) && Recipe.remembered("v006|v006/sensor-probe,v006/ov9732-port", "PROBE")
                 .equals(Recipe.defaultPick()) && Recipe.defaultPick().stock()

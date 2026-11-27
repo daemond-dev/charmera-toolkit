@@ -1346,7 +1346,7 @@ def test_app_repair_route_picks_a_base_and_mods():
     refresh = _bodies(java, "private void refreshRepairChoice()")[0]
     assert "customPanel.setVisibility" not in refresh
     assert "box.setOnCheckedChangeListener((v, on) -> chooseRepair(repairSel.with(mod, on)));" in refresh
-    # 0.32: the base is three stacked radio buttons, one per Recipe.BASES entry, no longer a drop-down menu. Each is
+    # 0.33: the base is three stacked radio buttons, one per Recipe.BASES entry, no longer a drop-down menu. Each is
     # in the screen's own colours (dark and light) with a 48dp touch target, and picking another base starts it with no
     # mods. refresh checks the radio of the pick without a change loop: the listener ignores the base already picked.
     assert "Spinner" not in java and "private View menuRow(" not in java

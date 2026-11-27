@@ -57,7 +57,7 @@ file is checked against it. The app still refuses a file that fails its checks, 
 B, a chip backup given as the update file, and a write while a backup is still being read or a check is still
 running (wait, and it checks again). It also saves the camera's photos and videos as a zip.
 
-The current version is 0.32. On 2026-11-11 the app wrote v006 with the OV9732 port and Volume and LED rows (then
+The current version is 0.33. On 2026-11-11 the app wrote v006 with the OV9732 port and Volume and LED rows (then
 called v0.24) from Write custom firmware to an OV9732 camera over the camera's USB-C cable, and the camera wrote
 it. What the camera showed afterwards is in [OV9732 exposure, colour and white balance](15-OV9732-AE-WB-FLASH-PORT.md).
 
@@ -422,7 +422,7 @@ number. `JH_5408202611130026_….bin` is v0.26. Don't name a file by its stamp n
 and every newer mix share the stamp `202611170027` with v0.27. To find out what a file is, load it with **Use a file on
 the phone** or run `charmera verify`. The check names it by its contents. Photos taken with EXIF dates say Software
 `v0.26` whichever build took them, because that text is part of the mod's code. Write log entries an older app saved keep the name they were saved
-with. The app's own version (0.32 and so on) is a separate number.
+with. The app's own version (0.33 and so on) is a separate number.
 
 ## Without the app
 

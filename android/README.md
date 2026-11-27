@@ -382,13 +382,15 @@ no storage permission.
 - 0.30: also writes a file it doesn't know without a backup, with a loud warning.
 - 0.31: knows v012 (factory OV9732 firmware) when it checks a file or backup, so your own v012 read counts
   as a backup. Clearer next steps for SP140A owners going back to stock and for cameras with no photos left.
-- 0.32 (current): Write custom firmware drops its version menu. It shows the three bases as radio buttons and one
-  box per mod, with no mod ticked at first, so you tick the mods you want one by one. Builds are named by their base and mods. Until you pick a base, the pick
-  follows Identify: stock v006 for the v006 family, else stock v012. The app says "write" where it said "flash", so the
-  route is now Write custom firmware and the log is the Write log. The old numbers v0.23 to v0.27
-  still show in a note in the file check details and in `charmera build --list`, in the stamps of update file names,
-  in the Software tag `v0.26` of photos with EXIF dates, and in write log entries an older app saved
+- 0.32: Flash custom firmware drops its version menu. It shows the base menu and one box per mod, so you tick
+  the mods you want one by one. Builds are named by their base and mods. The old numbers v0.23 to v0.27 still show
+  in a note in the file check details and in `charmera build --list`, in the stamps of update file names, in the
+  Software tag `v0.26` of photos with EXIF dates, and in write log entries an older app saved
   ([Older build names](../docs/06-ANDROID.md#older-build-names)).
+- 0.33 (current): the base is three radio buttons, and no mod is ticked at first. Until you pick a base, the pick
+  follows Identify: stock v006 for the v006 family, else stock v012. The app says "write" where it said "flash", so
+  the route is now Write custom firmware and the log is the Write log. Buttons name what they do, and the app says
+  "known file" and "chip backup" where it said "reviewed file" and "dump".
 
 On 2026-11-11 the app wrote v006 with the OV9732 port and Volume and LED rows (then called v0.24) from Flash custom
 firmware (now Write custom firmware) to an OV9732 camera over the camera's USB-C cable, and the camera wrote it ([what the camera
