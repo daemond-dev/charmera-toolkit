@@ -97,7 +97,7 @@ public final class CalibrationActivity extends Activity {
         // Instruction text — the ONLY element that hides (toggled by the ⓘ button below).
         final TextView instr = new TextView(this);
         instr.setTextColor(Color.WHITE);
-        instr.setText("Photograph this after each flash. Use a dark room, turn off auto-brightness and night light,"
+        instr.setText("Photograph this after each write. Use a dark room, turn off auto-brightness and night light,"
                 + " and fill the frame with the card. Set the brightness low enough that the white patch doesn't clip,"
                 + " then leave it there for every shot. The level is printed on the card, so each photo records the"
                 + " brightness it was taken at.");

@@ -4,7 +4,7 @@ The same recipes the Android app builds from (recipes.json). From a public copy 
 listed dumps) the result is written only when it is the reviewed file listed for that combination, so it is byte for
 byte one the project generated and published by SHA-256. --dump also takes your own read of a v006 or v012 chip: the
 mods still check the bytes they replace, but the file carries your camera's own settings and stored photos, so no
-published hash matches it and it is labelled as not a reviewed file. Either way it is then checked with verify, as any update file is.
+published hash matches it and it is labelled as not a known file. Either way it is then checked with verify, as any update file is.
 
   charmera build --list
   charmera build --base v012 --mods volume-led,exif --download --out DIR
@@ -130,16 +130,16 @@ def handler(args) -> int:
     print(f"from   {got}")
     print(f"file   {dest}")
     if made.reviewed:
-        print(f"sha256 {made.sha256}  (the reviewed file: recipes.json)")
+        print(f"sha256 {made.sha256}  (the known file: recipes.json)")
     else:
-        print(f"sha256 {made.sha256}  (NOT a reviewed file)")
+        print(f"sha256 {made.sha256}  (NOT a known file)")
         print("WARN   built from your own read, so it carries your camera's settings and stored photos, and no published hash "
               "matches it. "
               + ("The mods checked the bytes they replace. " if made.mods else "")
               + "verify, stage and the app check it as they check any file you made yourself.")
     if made.status != "tested":
         print("WARN   this combination is experimental: built and checked, but not yet tried on a camera. If something is "
-              f"wrong, flash the stock build of the same base back from the card (`charmera build --base {made.base} "
+              f"wrong, write the stock build of the same base back from the card (`charmera build --base {made.base} "
               "--download`), or the file the camera ran before.")
     if args.no_verify:
         return 0
@@ -174,12 +174,12 @@ def register(subparsers) -> None:
         description=(
             "Make a firmware update file from a base, the stock firmware of one build (v006 and v008_test for SP140A "
             "cameras, v012 for OV9732 cameras: charmera identify says which a camera runs), and the mods chosen. "
-            "From a public copy the file is written only when it is the reviewed one listed for that combination. "
-            "From your own read it is written and labelled as not a reviewed file."),
+            "From a public copy the file is written only when it is the known one listed for that combination. "
+            "From your own read it is written and labelled as not a known file."),
         epilog=("charmera build --list shows every base, mod and combination. --download fetches the base's public "
                 "cleaned copy from the-dumping-grounds' repositories at a fixed commit and checks its SHA-256; "
                 "--dump takes a dump you have: a public copy, or your own read of a v006 or v012 chip (the file made from "
-                "that is not a reviewed file, and says so). Experimental combinations are built with a warning."),
+                "that is not a known file, and says so). Experimental combinations are built with a warning."),
     )
     p.add_argument("--list", action="store_true", help="show the bases, mods and combinations, and exit")
     p.add_argument("--base", choices=("v006", "v008_test", "v012"), help="the base (needed with --download)")

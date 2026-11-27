@@ -591,7 +591,7 @@ def _print_plan(plan: ReplacePlan, source: str) -> None:
     where = "what the slot uses" if not plan.pad_assumed else "assumed; the slot had no uniform padding to copy"
     print(f"  padding: {plan.gap} B of 0x{plan.pad_byte:02X} after the new file ({where}); "
           f"{(e.budget or 0) - len(plan.data)} B of the slot stay free; the directory is not touched")
-    print(f"note: a replaced {e.display_name} has not been tried on a camera. Read docs/09-RESOURCES.md before flashing it,")
+    print(f"note: a replaced {e.display_name} has not been tried on a camera. Read docs/09-RESOURCES.md before writing it,")
     print("      and docs/02-RECOVERY.md if the camera does not boot afterwards.")
 
 
@@ -662,5 +662,5 @@ def register(subparsers) -> None:
     p.add_argument("--strip-metadata", action="store_true",
                    help="replace: drop APP1..APP15 and COM segments from the JPEG first (keeps a JFIF APP0 when the stock file has one)")
     p.add_argument("--overwrite", action="store_true", help="allow --out to replace existing files (never the input)")
-    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="replace: actually write the modified image")
+    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="replace: write the modified image")
     p.set_defaults(func=handler)

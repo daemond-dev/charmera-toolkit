@@ -882,7 +882,7 @@ def test_verify_names_the_build_and_says_what_a_match_proves(tmp_path, synthetic
     by = {c.name: c for c in verify.verify_update(p, payload, allow_modified=True)}
     assert by["series"].ok and "identifies none of them" in by["series"].detail
     assert by["build"].ok and "the public dump's build" in by["build"].detail and "says whether it fits" in by["build"].detail
-    assert by["stamp-in-file"].severity == "info" and "flashes it again at every power-on" in by["stamp-in-file"].detail
+    assert by["stamp-in-file"].severity == "info" and "writes it again at every power-on" in by["stamp-in-file"].detail
     # a file whose marks sit elsewhere is Charmera firmware of an unknown build: a warning, never a stamp-based pass
     moved = bytearray(payload)
     moved[0x218C3: 0x218D1] = b"\x00" * 14
@@ -1062,7 +1062,7 @@ def test_the_donor_route_without_the_cameras_backup_warns_and_passes(tmp_path, s
     checks = verify.verify_update(p, payload, donor=donor)
     assert _failed(checks) == []
     by = {c.name: c for c in checks}
-    assert by["backup"].severity == "warn" and "last flashed with" in by["backup"].detail
+    assert by["backup"].severity == "warn" and "last written to this camera" in by["backup"].detail
     assert by["from-donor"].ok and by["vector-table"].ok and by["sensor-table"].severity == "warn"
     assert "software-region" not in by and "way-back" not in by
     # a broken vector table is still refused without a backup
@@ -1429,7 +1429,7 @@ def test_sizes_other_than_the_two_the_camera_takes_are_refused(tmp_path, synthet
     assert "between the two update sizes" in _checks(tmp_path / "x.bin", payload[:0x1C0000])["size"].detail
     # what the camera holds after a 0x175000-byte flash: the settings record, and an erased photo directory
     by = _checks(tmp_path / "x.bin", payload[:0x175000], allow_odd_size=True)
-    assert not by["photo-directory"].ok and "after the flash" in by["photo-directory"].detail
+    assert not by["photo-directory"].ok and "after the write" in by["photo-directory"].detail
     # exactly 0x170000: the settings block is not touched, the final erase lands on the photo area
     by = _checks(tmp_path / "x.bin", payload[:0x170000], allow_odd_size=True)
     assert "settings stay as they are" in by["own-area"].detail and "0x180000" in by["own-area"].detail
@@ -1452,7 +1452,7 @@ def test_a_reference_of_a_known_build_gives_a_warning_for_a_matching_table(tmp_p
     monkeypatch.setitem(image.KNOWN_BUILDS, known.key, known)
     by = _checks(p, payload, stock=backup)
     assert by["sensor-table"].ok and by["sensor-table"].severity == "warn"
-    assert "proves a fit only if --stock was read before the camera was ever flashed" in by["sensor-table"].detail
+    assert "proves a fit only if --stock was read before the camera was ever written to" in by["sensor-table"].detail
     assert "not what fits it" in by["sensor-table"].detail
     # with another program around the same table it does not even show that the file drives the sensor that way
     code = bytearray(payload)
@@ -1866,7 +1866,7 @@ def test_inspect_says_a_file_named_like_an_update_file_of_another_size_never_goe
     out = capsys.readouterr().out
     assert "DOES NOT MATCH file" in out and "renaming the file to match does not make it safe" in out
     assert "NOT FOR A CARD" in out and "bricks the camera" in out
-    assert "read before it was ever flashed" in out
+    assert "read before it was ever written to" in out
     lower = tmp_path / "jh_5408202611061200_1dd7adf0.BIN"
     lower.write_bytes(img[:0x170000])
     assert cli.main(["inspect", str(lower)]) == 0

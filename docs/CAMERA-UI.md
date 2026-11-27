@@ -1,7 +1,7 @@
 # The camera's buttons and screens
 
 Photos of a stock Kodak Charmera (original 2025 series), taken by its owner on 2026-11-11, with what each control
-does. Check here what the camera really has before you assume a button, menu or setting exists. Firmware text and
+does. Check here what the camera has before you assume a button, menu or setting exists. Firmware text and
 SDK code often name items the camera never shows. The photos carry no metadata.
 
 ## Front
@@ -66,12 +66,12 @@ says nothing.
 If setup page 2 has Volume and LED rows after FORMAT, one of our builds with Volume and LED rows is installed. The
 stock builds have FORMAT alone there ([the rows](15-OV9732-AE-WB-FLASH-PORT.md#10-v024-volume-and-led-rows-in-the-setup-menu)).
 
-If Photo or Video mode freezes after a flash, the firmware doesn't drive this camera's sensor. It's a build for the
-other sensor family (seen with an SP140A build on an OV9732 camera). Photos from before that flash say what fits. A
+If Photo or Video mode freezes after a write, the firmware doesn't drive this camera's sensor. It's a build for the
+other sensor family. This was seen with an SP140A build on an OV9732 camera. Photos from before that write say what fits. A
 photo from after it shows only the firmware that took it.
 
-Setup > Version shows `JH5408  20250520` on every known build (v006, v008_test, v012 and ours all carry the same
-string), so it tells you nothing. This screen isn't in the photos above.
+Setup > Version shows `JH5408  20250520` on every known build. v006, v008_test, v012 and ours all carry the same
+string, so it tells you nothing. This screen isn't in the photos above.
 
 The photos on the card say more. The app's "Identify this camera's firmware" route reads their headers
 ([Android app](06-ANDROID.md#identify-this-cameras-firmware)).

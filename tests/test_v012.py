@@ -215,7 +215,7 @@ def test_build_from_an_own_v012_read_is_not_a_reviewed_file(tmp_path, capsys):
                               out=str(tmp_path / "out"), no_verify=False)
     assert build_cmd.handler(args) == 0
     out = capsys.readouterr().out
-    assert "(NOT a reviewed file)" in out and "built from your own read" in out
+    assert "(NOT a known file)" in out and "built from your own read" in out
     assert "your own read of a v012 chip" in out and "verify 0 failure(s)" in out
     assert "--allow-modified" in out and f"--stock {build_cmd.quote(str(read))}" in out
     f = tmp_path / "out" / made.name
@@ -251,7 +251,7 @@ def test_build_says_what_to_do_with_a_read_of_stock_v008_test(monkeypatch):
     with pytest.raises(recipes.RecipeError) as exc:
         recipes.own_read(b"\0" * 0x200000)
     assert "this read is stock v008_test" in str(exc.value) and "--base v008_test --download" in str(exc.value)
-    assert "flashed with a mod" not in str(exc.value)
+    assert "with a mod written to it" not in str(exc.value)
 
 
 @needs_factory
@@ -282,7 +282,7 @@ def test_a_listed_dump_still_builds_the_reviewed_file(tmp_path, capsys):
                               no_verify=False)
     assert build_cmd.handler(args) == 0
     out = capsys.readouterr().out
-    assert "(the reviewed file: recipes.json)" in out and "NOT a reviewed file" not in out
+    assert "(the known file: recipes.json)" in out and "NOT a known file" not in out
     assert "no backup: charmera verify" in out and "                  charmera stage" in out
 
 
@@ -324,9 +324,9 @@ def test_verify_says_how_a_wrong_sensor_flash_is_undone(tmp_path, capsys, synthe
                               allow_odd_size=False)
     assert verify.handler(args) == 0
     out = " ".join(capsys.readouterr().out.split())
-    assert ("A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes "
+    assert ("A file for the other sensor still boots, and writing the stock build of the right base from the card undoes "
             "it (charmera build --base v006 --download --out out/ for an SP140A camera, charmera build --base v012 --download "
-            "--out out/ for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a "
+            "--out out/ for an OV9732 one). A write that is cut off, or firmware that won't boot, needs a "
             "chip programmer.") in out
     assert "the only way back" not in out and "cannot be undone" not in out
 

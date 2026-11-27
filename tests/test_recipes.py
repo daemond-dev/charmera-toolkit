@@ -166,7 +166,7 @@ def test_an_eased_line_of_a_reviewed_build_does_not_talk_about_refusing(monkeypa
     """The refusal clause and the donor pointer go together, in each shape verify writes them."""
     row = {"base": "v012", "mods": ["v012/volume-led"], "dump": "v012-clean", "name": "JH_x.bin", "sha256": "0" * 64}
     monkeypatch.setattr(R, "reviewed", lambda sha, recipes=None: row)
-    shapes = ["can be expected to freeze in photo and video mode after the flash (refusing; no flag accepts it)"
+    shapes = ["can be expected to freeze in photo and video mode after the write (refusing; no flag accepts it)"
               + verify.DONOR_ROUTE_AFTER,
               "cannot be matched to that camera (refusing; no flag accepts it. If this camera's own firmware is gone and "
               "the file is another, working camera's firmware, that is the donor route, --donor)",
@@ -176,8 +176,8 @@ def test_an_eased_line_of_a_reviewed_build_does_not_talk_about_refusing(monkeypa
                                                  stock=b"\0" * 0x200000) if c.name == "sensor-table"]
         assert c.ok and c.severity == "warn"
         assert "refus" not in c.detail and "donor" not in c.detail and "no flag" not in c.detail, c.detail
-        assert c.detail.endswith(" (a reviewed build: this is expected)")
-    assert "freeze in photo and video mode after the flash (a reviewed build" in verify.reviewed_build(
+        assert c.detail.endswith(" (a known build: this is expected)")
+    assert "freeze in photo and video mode after the write (a known build" in verify.reviewed_build(
         b"\0" * 0x200000, [verify.Check("sensor-table", False, shapes[0])])[-1].detail
 
 
@@ -232,7 +232,7 @@ def test_a_reviewed_build_never_asks_for_allow_modified(monkeypatch):
         for c in verify.reviewed_build(b"\0" * 0x200000, checks):
             assert "--allow-modified" not in c.detail, c.detail
             if c.name == "software-region":
-                assert c.detail.endswith(" (a reviewed build: this is expected)")
+                assert c.detail.endswith(" (a known build: this is expected)")
 
 
 def test_reviewed_files_from_real_dumps_never_mention_allow_modified():

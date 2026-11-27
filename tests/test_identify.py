@@ -57,7 +57,7 @@ def test_one_family_oldest_and_newest(tmp_path, capsys):
     assert f"{first}, {date(T0)}, 0x270-byte header (bare)" in line(out, "oldest:")
     assert f"{last}, {date(T0 + 2 * DAY)}" in line(out, "newest:")
     assert line(out, "photos:").startswith("3 found")
-    assert line(out, "conclusion:") == ("The photos were taken by stock v012 (an OV9732 camera): base v012. If the camera was flashed after these photos, it runs something else now")
+    assert line(out, "conclusion:") == ("The photos were taken by stock v012 (an OV9732 camera): base v012. If firmware was written to the camera after these photos, it runs something else now")
     assert line(out, "base:") == "v012 (stock firmware of OV9732 cameras)"
     assert line(out, "next:") == ("charmera build --list, then charmera build --base v012 --mods <mods> --download "
                                   "--out out/")
@@ -75,7 +75,7 @@ def test_the_v006_family_alone_is_high(tmp_path, capsys):
     code, out = run(capsys, root / "DCIM")
     assert code == 0
     assert line(out, "conclusion:") == ("The photos were taken by stock v006 or v008_test (an SP140A camera): base v006. "
-                                        "If the camera was flashed after these photos, it runs something else now")
+                                        "If firmware was written to the camera after these photos, it runs something else now")
     assert "--base v006 --mods <mods> --download" in line(out, "next:")
     assert line(out, "base:") == "v006 (stock firmware of SP140A cameras)"
     assert line(out, "confidence:").startswith("high:")
@@ -130,7 +130,7 @@ def test_two_families_follow_the_oldest(tmp_path, capsys, older, newer):
     assert code == 0
     assert line(out, "not stock:") == (
         f"This camera does not look stock: photos from two firmware families: {short[older]} up to "
-        f"{date(T0 + 2 * DAY)}, {short[newer]} from {date(T0 + 3 * DAY)}: the camera was flashed in between, or the "
+        f"{date(T0 + 2 * DAY)}, {short[newer]} from {date(T0 + 3 * DAY)}: firmware was written to the camera in between, or the "
         "card holds photos from two cameras")
     assert line(out, "conclusion:").startswith(f"The oldest photos show stock {stock[older]} ")
     assert line(out, "conclusion:").endswith(f"base {older}")
@@ -232,7 +232,7 @@ def test_photos_with_no_file_time_are_left_out_of_the_dating(tmp_path, capsys):
     assert code == 0
     assert line(out, "undated:") == "2 photos have no file time and were left out of the dating"
     assert str(z1) in out and str(z2) in out
-    assert line(out, "conclusion:") == ("The photos were taken by stock v012 (an OV9732 camera): base v012. If the camera was flashed after these photos, it runs something else now")
+    assert line(out, "conclusion:") == ("The photos were taken by stock v012 (an OV9732 camera): base v012. If firmware was written to the camera after these photos, it runs something else now")
     assert "not stock:" not in out and "PICT0001.JPG" in line(out, "oldest:")
     assert line(out, "photos:").startswith("4 found, 2 headers read")
     data = json.loads(run(capsys, root, "--json")[1])

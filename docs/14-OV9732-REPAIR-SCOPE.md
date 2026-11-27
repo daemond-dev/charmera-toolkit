@@ -14,12 +14,12 @@ On the camera flashed on 2026-11-06, photo mode is dead because of a sensor mism
 
 - The stock firmware was built to drive a SuperPix SP140A (1 MP, 1280×720, 1-lane MIPI, 10-bit RAW), over bit-banged
   SCCB with 8-bit register addresses on bus 0x78 (7-bit 0x3C), with `0xFD`-paged register banks.
-- The hardware actually carries an OmniVision OV9732 (same class: 1 MP, 720p, 1-lane MIPI, 10-bit RAW). It answers
+- The hardware carries an OmniVision OV9732 (same class: 1 MP, 720p, 1-lane MIPI, 10-bit RAW). It answers
   with 16-bit register addresses on bus 0x6C (7-bit 0x36), chip ID `0x9732` at registers `0x300A`/`0x300B`.
 
 The firmware never talks to the sensor that is fitted, so the sensor is never initialized and never streams. The repair
 is to point the firmware's sensor control channel at the OV9732 and give it an OV9732 init sequence. The MIPI data path
-(D-PHY → ISP → hardware MJPEG) is shared by the two parts and should carry over unchanged.
+(D-PHY → ISP → hardware MJPEG) is shared by the two parts. It carried over unchanged on the v0.11 bring-up.
 
 ---
 
@@ -42,7 +42,7 @@ The firmware reads no chip ID (see the root cause below), so the identification 
 61-write init table matches the public OpenIPC/Ingenic SP140A driver on 51 of 61 register writes, byte for byte, in the
 same `0xFD`-paged page-0/1/2 structure, and the runtime exposure/gain code matches it in meaning too. A second check,
 looking for any rival from the same family, ruled out the OmniVision OV2735, which matched 6 of 36 (16%). That makes
-a SuperPix SP-series part certain and the SP140A specifically very likely. It is a software fingerprint only: the lens
+a SuperPix SP-series part certain and the SP140A specifically highly likely. It is a software fingerprint only: the lens
 is glued, so the die can't be read.
 
 ### Is the OV9732 "better"?
@@ -99,7 +99,7 @@ pair (17/18). The sensor is reset by the regulator's power-on reset or by the ca
 ## Repair plan
 
 The two sensors share the interface (1-lane MIPI), the format (RAW10) and the resolution (720p), so the capture engine,
-ISP and MJPEG stages should need no changes. The work is in the SCCB control channel and the init sequence.
+ISP and MJPEG stages need no changes. The v0.11 bring-up confirmed this. The work is in the SCCB control channel and the init sequence.
 
 ### 1. Control plane
 
@@ -161,14 +161,14 @@ wired to the flex, and the MCLK is in range. The deepest unknown didn't bite.
    did not swap: blue read pure blue `(0,0,235)` against a colour-bar target across three frames. The Bayer order
    survived the flip and needed no re-phase. (Had it swapped, the fix ready to go was a `±1` ISP-offset
    (`0x3811`/`0x3813`) nudge keeping the output `0x3808–0x380b` at 1280×720.)
-5. White balance: the regions that should be neutral measured R≈G with B low by 1.2–1.5× across three scenes. A blue
+5. White balance: the regions that are neutral in the scene measured R≈G with B low by 1.2–1.5× across three scenes. A blue
    deficit that consistent means the SoC's WB is fixed for the SP140A's spectral response (an auto-WB would vary by
    scene). v0.12 and v0.13 lift blue about 1.31× in the OV9732's own digital-gain block (`0x5184/0x5185`), upstream of
    the SoC. v0.13 was the first flash that could test this, because v0.12's lines hid the colour. It may need a second
    pass. A missing IR-cut filter on the donor module could limit how neutral it gets, and the blue gain would have to
    move to red if a later flip swapped the phase to RGGB.
 6. Exposure / AE: not adaptive. Bright scenes clip and dim ones crush, because the firmware's auto-exposure loop still
-   writes the SP140A's exposure registers, not the OV9732's (`0x3500–0x3502`, `0x350A/0x350B`). Fixing this needs a
+   writes the SP140A's exposure registers. The OV9732's are `0x3500–0x3502` and `0x350A/0x350B`. Fixing this needs a
    second hook on the exposure/gain updater (~`0x7b340`), deferred past v0.13. (The `ov9732_exposurefw` `.rfw` the owner
    supplied is a UVC-webcam-bridge blob for a different chip and can't be applied to the GP SoC, but it may hold OV9732
    AE register hints worth mining.)

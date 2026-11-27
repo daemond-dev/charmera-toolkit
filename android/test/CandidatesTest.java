@@ -22,7 +22,7 @@ public final class CandidatesTest {
     public static void main(String[] args) throws Exception {
         // the stock dump is recognised by its hash only
         byte[] junk = new byte[0x200000];
-        expect("a 2 MiB file that is not the dump is refused", refused(() -> Candidates.stockDump(junk), "not the public stock dump"));
+        expect("a 2 MiB file that is not the dump is refused", refused(() -> Candidates.stockDump(junk), "not the v006 chip backup the app uses"));
         expect("a short file is refused as cut off", refused(() -> Candidates.stockDump(new byte[0x166000]), "cut-off download"));
         expect("isStockDump is false for anything else", !Candidates.isStockDump(junk) && !Candidates.isStockDump(new byte[10]));
 
@@ -72,7 +72,7 @@ public final class CandidatesTest {
             for (Candidates.Kind k : Candidates.Kind.values()) {
                 if (k.base != Candidates.Base.STOCK) {
                     expect("the stock dump never makes " + k, refused(() -> Candidates.build(dump, k),
-                            "not the factory dump"));
+                            "not the factory chip backup"));
                     continue;
                 }
                 byte[] out = Candidates.build(dump, k);   // throws unless the SHA-256 is the published or reviewed one
@@ -131,19 +131,19 @@ public final class CandidatesTest {
                     && rr.verdict().startsWith("OK to put on the card. Read "
                     + (Candidates.isClean(dump) ? "this warning" : "these 2 warnings")   // the clean copy stores no photos
                     + " first. Image sensor set-up:"
-                    + " the same as in the firmware in your backup. That firmware is the public dump's build, unchanged")
+                    + " the same as in the firmware in your backup. That firmware is the public v006 build, unchanged")
                     && (Candidates.isClean(dump) || rr.verdict().contains("Stored photos:")));   // the clean copy has none
             expect("the public dump is refused as a backup of your camera",
                     UpdateCheck.backupProblem(dump, Candidates.PUBLIC_DUMP_SHA256S) != null
                     && UpdateCheck.backupProblem(dump, Candidates.PUBLIC_DUMP_SHA256S).startsWith(
-                    "it is byte for byte the public stock dump"));   // the cleaned copy too: it is what the app downloads
+                    "it is byte for byte the public v006 chip backup"));   // the cleaned copy too: it is what the app downloads
             // A read of a camera flashed with the restore file, once one setting was saved: taken, with the note.
             byte[] read = dump.clone();
             read[0x170100] ^= 1;
             expect("a near copy of the public dump is taken, and noted as the public build",
                     UpdateCheck.backupProblem(read, Candidates.PUBLIC_DUMP_SHA256S) == null
                             && UpdateCheck.backupNotes(read, UpdateCheck.PUBLIC_BUILD).size() == 1
-                            && UpdateCheck.backupNotes(read, UpdateCheck.PUBLIC_BUILD).get(0).contains("the public dump's"
+                            && UpdateCheck.backupNotes(read, UpdateCheck.PUBLIC_BUILD).get(0).contains("the public v006"
                             + " build, unchanged"));
             UpdateCheck.Result plain = UpdateCheck.check(Candidates.Kind.RESTORE.fileNameFor(UpdateCheck.sha256Hex(restore, 0, restore.length)), restore);
             expect("without a backup the restore file's own checks pass, its vector table is the public build's, and"
@@ -158,7 +158,7 @@ public final class CandidatesTest {
             UpdateCheck.Result sr = UpdateCheck.check(named(restamped), restamped);
             expect("the restore file with another stamp inside is a build laid out like the public one, not that build"
                     + " with changes", level(sr, "build") == UpdateCheck.Level.WARN && text(sr, "build").contains(
-                    "laid out like the public dump's build: its stamp is not that build's")
+                    "laid out like the public v006 build: its stamp is not that build's")
                     && !text(sr, "build").contains("with changes"));
             // The compile date and the source folder are build marks too (S15): another one is another build.
             byte[] redated = restore.clone();
@@ -167,21 +167,21 @@ public final class CandidatesTest {
             expect("the restore file with another compile date is a build laid out like the public one, not that build"
                     + " with changes", "Oct 15 2025".equals(UpdateCheck.findMarks(redated).compiled)
                     && level(dr, "build") == UpdateCheck.Level.WARN && text(dr, "build").contains("a build the app does"
-                    + " not know, laid out like the public dump's build: its compile date is not that build's")
+                    + " not know, laid out like the public v006 build: its compile date is not that build's")
                     && !text(dr, "build").contains("with changes") && dr.ok);
             byte[] v007 = replaced(restore, "\\2247\\5408\\v006\\", "\\2247\\5408\\v007\\");
             UpdateCheck.Result fr7 = UpdateCheck.check(named(v007), v007);
             expect("and so is the restore file with v007 for v006 in all 27 source paths",
                     UpdateCheck.findMarks(v007).sourceTrees.equals(java.util.Collections.singletonMap("v007", 27))
                     && level(fr7, "build") == UpdateCheck.Level.WARN && text(fr7, "build").contains("a build the app"
-                    + " does not know, laid out like the public dump's build: its source folder is not that build's")
+                    + " does not know, laid out like the public v006 build: its source folder is not that build's")
                     && !text(fr7, "build").contains("with changes") && fr7.ok);
             byte[] changed = restore.clone();
             changed[0x110000] ^= 1;                 // the zero padding below the resource pack
             UpdateCheck.Result cr = UpdateCheck.check(named(changed), changed);
             expect("while a change that keeps every build mark is the public dump's build with changes",
-                    level(cr, "build") == UpdateCheck.Level.INFO && text(cr, "build").contains("the public dump's build"
-                    + " (the one both public dumps hold, and the one the stock restore file is), with changes"));
+                    level(cr, "build") == UpdateCheck.Level.INFO && text(cr, "build").contains("the public v006 build"
+                    + " (the one both public v006 chip backups hold, and the one the stock restore file is), with changes"));
             byte[] twice = dump.clone();
             put(twice, 0xFFF8, "*.bin\0xx202601010101\0");   // a second stamp after a second *.bin
             UpdateCheck.Marks tm = UpdateCheck.findMarks(twice);
@@ -355,7 +355,7 @@ public final class CandidatesTest {
             expect("the restore file with its vector table destroyed fails against a film-mods backup",
                     !vr.ok && level(vr, "vector-table") == UpdateCheck.Level.FAIL
                             && vr.verdict().contains("Program start: the table the processor starts the program from"
-                            + " differs from the one in the public dump's build"));
+                            + " differs from the one in the public v006 build"));
             vr = UpdateCheck.check(named(brokenFilm), brokenFilm, UpdateCheck.PUBLIC_BUILD, read);
             expect("and the film-mods file with its vector table destroyed fails against a public-build backup",
                     !vr.ok && level(vr, "vector-table") == UpdateCheck.Level.FAIL
@@ -365,7 +365,7 @@ public final class CandidatesTest {
                     + " that says both", vr.ok && vr.compared && level(vr, "sensor-table") == UpdateCheck.Level.WARN
                     && level(vr, "vector-table") == UpdateCheck.Level.PASS
                     && vr.verdict().contains("the program around it differs from that firmware")
-                    && vr.verdict().contains("That firmware is the public dump's build, unchanged"));
+                    && vr.verdict().contains("That firmware is the public v006 build, unchanged"));
         }
         System.out.printf(Locale.ROOT, "CandidatesTest: %d passed, %d failed%n", passes, failures);
         if (failures > 0) {

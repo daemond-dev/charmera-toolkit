@@ -82,7 +82,7 @@ loop drives `N_sp` until luma reaches the target, and whatever `K` maps that to 
 Start at `K≈1` and refine it only for convergence speed. So the redirect needs no precise line-time math and no ported
 AE loop.
 
-- To confirm on hardware: that the GP ISP computes its luma statistics on the OV9732 frames. This is very likely,
+- To confirm on hardware: that the GP ISP computes its luma statistics on the OV9732 frames. This is highly likely,
   because the ISP stages are downstream and don't depend on the sensor (the same reason the CCM at `0xF7582` already
   applies). If those statistics are dead, fall back to an external loop (below). §7 confirms they are live.
 - Fallback, only if needed: `open-tx-isp` (Ingenic T31) ships a readable clean-room AE scalar model
@@ -163,7 +163,7 @@ Why the hook is at `0x7b378` and not the plan's `0x7b340`: the per-frame AE loop
 callback, apply task `0x65330` → fn-ptr `[BASE+0xEB8]` → wrapper `0x7b6e0` → tail branch into the updater `0x7b2e4`. A
 naive BL or word-reference scan of `0x7b2e4` finds only the one-time set-mode call, so it looks as if there is no
 per-frame AE (an earlier mistake the verification pass caught). The live per-frame write tail, the `cmp r0,r1`, is at
-`0x7b378`. Any review should check this first: confirm `0x7b378` is on the live per-frame path through that indirect
+`0x7b378`. Check this first in any review. Confirm `0x7b378` is on the live per-frame path through that indirect
 callback, not on a one-shot setup path.
 
 Why a redirect at all: the OV9732 has no internal AEC. It is manual only (`0x3503` "auto" is Reserved, and there is no
@@ -173,7 +173,7 @@ output is the only way. There's no sensor-side AEC to switch on.
 On the camera (scene-matched against the stock camera, 2026-11-10) the closed loop converges. A dim bottle-and-mug scene
 that read luma ≈5 (black) under v0.19's static 2× gain now reads L118 against stock's L132. Muffins read L101 against
 114, and the water bottle L148 against 143. Real scenes average L122 against stock's L130 (about 6% under), exposure
-adapts from scene to scene, and highlight clipping is 0.5% or less on bright real scenes. That settles the point §2 left
+adapts from scene to scene, and clipping at the bright end is 0.5% or less on bright real scenes. That settles the point §2 left
 open: the GP ISP computes its luma statistics on the OV9732 frames, or the loop could not have converged.
 
 This patch didn't cause the flashed unit's louder, cracklier beeps or the screen flashes during menu navigation. They
@@ -225,9 +225,9 @@ On the camera (flashed 2026-11-10, scene-matched against the stock camera):
   The oven behind the muffins is back with full detail.
 - True black still reaches the floor. The 1st percentile is still 2 on the card shots, so the target of 64 does not
   lift blacks into a grey pedestal.
-- Midtones and highlights sit 3–10% above stock in linear light, which is within the framing differences between the
+- Midtones and bright tones sit 3–10% above stock in linear light, which is within the framing differences between the
   two cameras' shots.
-- Highlight clipping is slightly higher: 4.1% against 2.3% on the muffins scene, 0.4% against 0.1% on the jars.
+- Clipping at the bright end is slightly higher: 4.1% against 2.3% on the muffins scene, 0.4% against 0.1% on the jars.
 - White balance under warm indoor light:
   - White paper renders near neutral (R/G 1.05, B/G 0.99), where stock keeps a warm cast (B/G 0.84).
   - The tile wall shows the same pattern: B/G 0.92–0.96 on v0.22 against 0.79–0.88 on stock.
@@ -282,7 +282,7 @@ The changes (`Candidates.TUNE_OFFSETS`). The build differs from v0.22 in exactly
 - The table and the handler changes only work together. Without the enabled table, `0x66C28` returns early and no
   target is set.
 
-Why indoor shots should stay unchanged: the indoor mid-grey grain is 4.7× daylight's on both cameras, and the mid grey
+Why indoor shots are expected to stay unchanged: the indoor mid-grey grain is 4.7× daylight's on both cameras, and the mid grey
 sits at 72, far below target. AE was at maximum exposure there, in the dim bands.
 
 Expected on the camera:
@@ -373,7 +373,7 @@ itself: blue-magenta in blue daylight, where stock is blue-cyan, and neutral in 
 Daylight is about 0.3 EV darker than stock, which is more than the −0.4 EV target in the brightest band was meant to
 give relative to v0.22.
 
-On normal scenes in direct sun (the owner's photos), v0.24 holds highlight detail and colour on a brown and a black dog,
+On normal scenes in direct sun (the owner's photos), v0.24 holds detail and colour in the bright areas on a brown and a black dog,
 where stock clips. That is judged by eye, not measured.
 
 The owner decided on 2026-11-12 to keep v0.24's neutral rendering of warm indoor light, and not to tune it back toward

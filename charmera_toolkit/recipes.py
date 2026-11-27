@@ -87,9 +87,9 @@ def own_read(data: bytes, recipes: Optional[dict] = None) -> dict:
     if base is None:
         found = image.detect_build(data)
         raise RecipeError("not a dump the recipes start from, and the firmware in this read is not stock v006 or v012 byte "
-                          f"for byte (it is {found.identity}: {found.label}). A camera flashed with a mod reads like this. "
+                          f"for byte (it is {found.identity}: {found.label}). A camera with a mod written to it reads like this. "
                           "Build from the public copy instead (--download), or from a read taken before the camera was "
-                          "flashed")
+                          "written to")
     return {"id": f"{base}-own-read", "build": base, "copy": "own", "prep": "truncate", "size": len(data),
             "sha256": sha256(data), "source": "your own read of the chip", "url": None}
 
@@ -148,7 +148,7 @@ def set_for(base: str, mod_ids: Sequence[str], recipes: Optional[dict] = None) -
         if s["base"] == base and tuple(s["mods"]) == ids:
             return s
     raise RecipeError(f"base {base} with {', '.join(i.split('/')[-1] for i in mod_ids) or 'no mods'} is not one of "
-                      "the reviewed combinations (charmera build --list shows them)")
+                      "the known combinations (charmera build --list shows them)")
 
 
 def prepare(dump: bytes, entry: dict) -> bytearray:
@@ -226,10 +226,10 @@ def make(dump: bytes, names: Iterable[str] = (), recipes: Optional[dict] = None,
     for b in recipes["builds"]:
         if b["base"] == base and tuple(b["mods"]) == ids and b["dump"] == entry["id"]:
             if b["sha256"] != sha:
-                raise RecipeError(f"the file made is not the reviewed one, so it is not written. This should not happen."
-                                  f" Its SHA-256 is {sha}; the reviewed file's is {b['sha256']}.")
+                raise RecipeError(f"the file made is not the known one, so it is not written. That is a bug in the toolkit."
+                                  f" Its SHA-256 is {sha}; the known file's is {b['sha256']}.")
             return Made(data, b["name"], sha, base, ids, entry["id"], s["status"], s["label"])
-    raise RecipeError(f"no reviewed file is listed for {s['label']} from {entry['id']}")
+    raise RecipeError(f"no known file is listed for {s['label']} from {entry['id']}")
 
 
 def reviewed(sha: str, recipes: Optional[dict] = None) -> Optional[dict]:

@@ -59,7 +59,7 @@ PATCHES: Dict[str, Patch] = {p.name: p for p in [
           ((0x2319C, b"\x3c\x00\xa0\xe3", b"\x05\x00\xa0\xe3"), (0x23050, b"\x14\x00\xa0\xe3", b"\x01\x00\xa0\xe3"))),
     Patch("boot-to-photo", "high", "enter the photo state directly instead of the home screen after boot",
           "The literal 0x10D (home state) at file 0x6714 becomes 0x101 (photo state). Only worth trying if the stock "
-          "camera really waits on the home screen for a key press; what posts the mode change at boot is unknown.",
+          "camera waits on the home screen for a key press; what posts the mode change at boot is unknown.",
           ((0x6714, b"\x0d\x01\x00\x00", b"\x01\x01\x00\x00"),)),
 ]}
 
@@ -172,5 +172,5 @@ def register(subparsers) -> None:
     p.add_argument("--out", help="apply: output image path (never named JH_*.bin, never in a folder that holds DCIM or a JH_*.bin)")
     p.add_argument("--accept-high-risk", action="store_true", help="apply: allow tweaks marked high risk")
     p.add_argument("--overwrite", action="store_true", help="allow --out to replace an existing file (never the input)")
-    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the modified image")
+    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="write the modified image")
     p.set_defaults(func=handler)

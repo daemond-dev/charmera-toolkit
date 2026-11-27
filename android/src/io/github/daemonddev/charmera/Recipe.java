@@ -22,7 +22,7 @@ final class Recipe {
     static final String V006 = "v006";
     static final String V008 = "v008_test";
     static final String V012 = "v012";
-    /** The bases, in the order the Repair route's base menu lists them. */
+    /** The bases, in the order the Repair route's base radios list them. */
     static final String[] BASES = {V012, V006, V008};
     /** The mod whose photos carry the EXIF block (PhotoId.Kind.FACTORY_EXIF). */
     static final String EXIF_MOD = "v012/exif";
@@ -232,7 +232,7 @@ final class Recipe {
     /**
      * The Repair pick to show: the one remembered (Selection.serialize()) when it is still a reviewed combination;
      * else the build an older app remembered by its Kind name (V027, V026, V025, BRINGUP), as its set; else the
-     * default pick, presets()[0].
+     * default pick, defaultPick().
      */
     static Selection remembered(String set, String legacyKind) {
         Selection s = parse(set);
@@ -244,7 +244,24 @@ final class Recipe {
                 return of(k);
             }
         }
-        return presets()[0];
+        return defaultPick();
+    }
+
+    /**
+     * The pick before the owner has made one, with no Identify answer: stock v012, the base with no mods ticked. A
+     * remembered pick wins over this.
+     */
+    static Selection defaultPick() {
+        return defaultPick(null);
+    }
+
+    /**
+     * The pick before the owner has made one, from Identify's answer (found, or null for none): stock v006 for the
+     * v006 family (SP140A cameras), else stock v012. No mod is ticked. A remembered pick wins over this, and so does a
+     * pick made this session (MainActivity moves the pick only while nothing is remembered).
+     */
+    static Selection defaultPick(Identify.Base found) {
+        return new Selection(found == Identify.Base.V006_FAMILY ? V006 : V012);
     }
 
     /** The set of a fixed kind (by its reviewed file). */
@@ -253,8 +270,8 @@ final class Recipe {
     }
 
     /**
-     * The picks of the fixed Repair kinds, newest first: one per Candidates.repairVersions() entry. The first is the
-     * default pick; the screen has no list of them.
+     * The picks of the fixed Repair kinds, newest first: one per Candidates.repairVersions() entry. None is the default
+     * pick (defaultPick() is), and the screen has no list of them.
      */
     static Selection[] presets() {
         Candidates.Kind[] kinds = Candidates.repairVersions();
@@ -371,7 +388,7 @@ final class Recipe {
             }
         }
         if (sel.set() == null) {
-            return sel.label() + " is not one of the reviewed combinations";
+            return sel.label() + " is not one of the known combinations";
         }
         return null;
     }
@@ -443,7 +460,7 @@ final class Recipe {
             int to = copies[c][1];
             int n = copies[c][2];
             if (from < 0 || to < 0 || n <= 0 || from + n > dump.length || to + n > out.length) {
-                throw new IllegalStateException(id + ": a copy lies outside the dump or the file.");
+                throw new IllegalStateException(id + ": a copy lies outside the chip backup or the file.");
             }
             if (!UpdateCheck.sha256Hex(out, to, to + n).equals(Recipes.MOD_COPY_OLD[mod][c])) {
                 throw new IllegalStateException(id + ": the bytes at file 0x" + Integer.toHexString(to).toUpperCase(
@@ -487,11 +504,11 @@ final class Recipe {
     static byte[] build(byte[] dump, Selection sel) {
         String[] entry = dumpFor(dump);
         if (entry == null) {
-            throw new IllegalArgumentException("the file is not a dump the app makes firmware from, so the app will not"
+            throw new IllegalArgumentException("the file is not a chip backup the app makes firmware from, so the app will not"
                     + " use it.\nDetail: its SHA-256 is " + UpdateCheck.sha256Hex(dump, 0, dump.length) + ".");
         }
         if (!entry[1].equals(sel.base)) {
-            throw new IllegalArgumentException("the dump is build " + entry[1] + ", but " + sel.label() + " is made"
+            throw new IllegalArgumentException("the chip backup is build " + entry[1] + ", but " + sel.label() + " is made"
                     + " from build " + sel.base + ", so the app will not use it.");
         }
         String why = problem(sel);
@@ -505,14 +522,15 @@ final class Recipe {
             }
         }
         if (row == null) {
-            throw new IllegalStateException("no reviewed file is listed for " + sel.label() + " from " + entry[0]
-                    + ", so the app will not make it. This should not happen. Please report it.");
+            throw new IllegalStateException("no known file is listed for " + sel.label() + " from " + entry[0]
+                    + ", so the app will not make it. That's a bug in the app. Report it at https://github.com/daemond-dev/charmera-toolkit/issues.");
         }
         byte[] out = compose(dump, entry, sel);
         String sha = UpdateCheck.sha256Hex(out, 0, out.length);
         if (!sha.equals(row[4])) {
-            throw new IllegalStateException("the file made from the " + sel.base + " dump is not exactly "
-                    + sel.label() + ", so the app will not use it. This should not happen. Please report it.\nDetail:"
+            throw new IllegalStateException("the file made from the " + sel.base + " chip backup is not exactly "
+                    + sel.label() + ", so the app will not use it. That's a bug in the app. Report it at"
+                    + " https://github.com/daemond-dev/charmera-toolkit/issues.\nDetail:"
                     + " its SHA-256 is " + sha + "; " + sel.label() + " has " + row[4] + ".");
         }
         return out;
@@ -619,18 +637,18 @@ final class Recipe {
             }
             return "Wrong sensor? Identify found " + ("v012".equals(identified) ? "build v012" : "the v006 family")
                     + " in this camera's photos. That's firmware for the " + theirs + ", and this file is for the "
-                    + mine + ". On an " + theirs + " camera it boots but can't take photos until you flash "
+                    + mine + ". On an " + theirs + " camera it boots but can't take photos until you write "
                     + fixFor(theirs) + ".";
         }
-        return "Not confirmed: the app doesn't know which sensor this camera has. No chip backup is chosen and Identify"
+        return "Not confirmed. The app doesn't know which sensor this camera has. No chip backup is chosen and Identify"
                 + " hasn't been run on this card since the app started. This file is for the " + mine + ". On an "
-                + other + " camera it boots but can't take photos until you flash " + fixFor(other) + ". To find out"
+                + other + " camera it boots but can't take photos until you write " + fixFor(other) + ". To find out"
                 + " first, run \"Identify this camera's firmware\".";
     }
 
     /** What to flash, and where in the app, to get photos back on a camera with this sensor. */
     static String fixFor(String sensor) {
-        return "OV9732".equals(sensor) ? "base v012 on \"Flash custom firmware\""
+        return "OV9732".equals(sensor) ? "base v012 on \"Write custom firmware\""
                 : "stock v006 on \"Restore stock firmware\" or Advanced";
     }
 
@@ -668,7 +686,8 @@ final class Recipe {
      * no combination: it was only tried together with others.
      */
     static String untriedNote(Selection sel) {
-        return sel.mods.size() == 1 ? "Experimental: this mod has only been tried on a camera together with others."
-                : "Experimental: each ticked mod has been tried on a camera, but this combination hasn't.";
+        return sel.mods.size() == 1 ? "This pick is experimental. Its mod has only been tried on a camera together with"
+                + " others." : "This pick is experimental. Each ticked mod has been tried on a camera, but this combination"
+                + " hasn't.";
     }
 }

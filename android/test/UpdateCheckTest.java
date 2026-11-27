@@ -89,7 +89,7 @@ public final class UpdateCheckTest {
         r = UpdateCheck.check(name(base, "202611050001"), base, build, chip(base));
         expect("against a backup of a known build the same table is a warning, and the software passes", r.ok
                 && r.compared && line(r, "sensor-table", UpdateCheck.Level.WARN)
-                && text(r, "sensor-table").contains("only if the backup was read before the camera was ever flashed")
+                && text(r, "sensor-table").contains("only if the backup was read before the camera was ever written to")
                 && text(r, "sensor-table").contains("That firmware is synthetic test build, unchanged")
                 && line(r, "software", UpdateCheck.Level.PASS) && line(r, "vector-table", UpdateCheck.Level.PASS)
                 && r.verdict().startsWith("OK to put on the card. Read this warning first. Image sensor set-up: the same"
@@ -121,7 +121,7 @@ public final class UpdateCheckTest {
                         && text(r, "sensor-table").contains("the program around it differs from that firmware")
                         && text(r, "sensor-table").contains("That firmware is synthetic test build, unchanged")
                         && text(r, "sensor-table").contains("only if the backup was read before the camera was ever"
-                        + " flashed"), r);
+                        + " written to"), r);
         m = base.clone();
         m[0xF5C70] ^= 1;
         r = check(m, build);
@@ -226,8 +226,8 @@ public final class UpdateCheckTest {
                         + " updater looks for (202601010101, 202505201029), so which one the camera compares cannot be"
                         + " told.") && detail(r, "series").contains("stamps after *.bin: 202601010101, 202505201029"), r);
         String twoStamps = UpdateCheck.backupProblem(chip(two), new String[0]);
-        expect("nor is a dump with them a backup", twoStamps != null && twoStamps.endsWith("not a complete dump of the"
-                + " chip. 2 different stamps follow the \"*.bin\" the updater looks for (202601010101, 202505201029), so"
+        expect("nor is a dump with them a backup", twoStamps != null && twoStamps.endsWith("not a complete chip"
+                + " backup. 2 different stamps follow the \"*.bin\" the updater looks for (202601010101, 202505201029), so"
                 + " which one the camera compares cannot be told"), null);
         put(two, 0x10000, "202505201029");     // the same stamp after both
         UpdateCheck.Marks agreeing = UpdateCheck.findMarks(two);
@@ -281,7 +281,7 @@ public final class UpdateCheckTest {
         r = check(elsewhere, build);
         expect("a file laid out like no known build: the vector table is not compared, a warning", r.ok
                 && line(r, "vector-table", UpdateCheck.Level.WARN) && line(r, "build", UpdateCheck.Level.WARN)
-                && text(r, "build").contains("a build the app does not know: not the public dump's"), r);
+                && text(r, "build").contains("a build the app does not know: not the public v006 chip backup's"), r);
         r = UpdateCheck.check(name(elsewhere, "202611050001"), elsewhere, build, chip(own));
         expect("against a backup laid out otherwise whose table it has, it passes: the same as the backup's", r.ok
                 && line(r, "vector-table", UpdateCheck.Level.PASS)
@@ -471,16 +471,16 @@ public final class UpdateCheckTest {
         byte[] noString = dump.clone();
         noString[0x18964] = 'X';
         expect("a dump without the build string is not a complete dump", UpdateCheck.backupProblem(noString, noPublic)
-                .contains("not a complete dump of the chip"), null);
+                .contains("not a complete chip backup"), null);
         expect("nothing is not a backup", UpdateCheck.backupProblem(null, noPublic) != null, null);
         String publicProblem = UpdateCheck.backupProblem(dump, new String[]{UpdateCheck.sha256Hex(dump, 0, dump.length)});
         expect("a read identical to the public dump is refused, and the reason allows that it is this camera's", publicProblem
-                .contains("flashed with the public restore file") && publicProblem.contains("not firmware known to fit"), null);
+                .contains("written with the public restore file") && publicProblem.contains("not firmware known to fit"), null);
         String otherPublic = UpdateCheck.backupProblem(dump, new String[]{repeat('0', 64),
                 UpdateCheck.sha256Hex(dump, 0, dump.length)});
         expect("another public dump is not called the stock dump, nor a read after the stock restore file",
-                otherPublic.startsWith("it is byte for byte one of the public dumps, not the stock one:")
-                        && otherPublic.contains("flashed with a file made from that dump")
+                otherPublic.startsWith("it is byte for byte one of the public chip backups, not the v006 one the app uses:")
+                        && otherPublic.contains("written with a file made from that chip backup")
                         && !otherPublic.contains("the public restore file") && otherPublic.contains("not firmware known to"
                         + " fit"), null);
         byte[] cutOff = dump.clone();
@@ -525,7 +525,7 @@ public final class UpdateCheckTest {
         List<String> notes = UpdateCheck.backupNotes(near, build);
         expect("and noted as a known, public build that shows a fit only if read before any flash", notes.size() == 1
                 && notes.get(0).contains("synthetic test build, unchanged")
-                && notes.get(0).contains("only if it was read before the camera was ever flashed"), null);
+                && notes.get(0).contains("only if it was read before the camera was ever written to"), null);
         r = UpdateCheck.check(name(base, "202611050001"), base, build, near);
         expect("against it, the same table is a warning", r.ok && line(r, "sensor-table", UpdateCheck.Level.WARN), r);
         expect("a backup of a build no public image holds gets no note", UpdateCheck.backupNotes(chip(own), build)
@@ -544,8 +544,8 @@ public final class UpdateCheckTest {
         r = check(m, build);
         expect("resource mod warns, passes, says the code area is the public dump's", r.ok
                 && line(r, "software", UpdateCheck.Level.WARN)
-                && text(r, "software").contains("The program itself is the public dump's")
-                && detail(r, "software").contains("(boot header, code and data) match the public dump"), r);
+                && text(r, "software").contains("The program itself is the public v006 chip backup's")
+                && detail(r, "software").contains("(boot header, code and data) match the public v006 chip backup"), r);
         r = UpdateCheck.check(name(m, "202611050001"), m, build, chip(base));
         expect("against the backup a resource mod says the program is the one in the backup", r.ok
                 && line(r, "software", UpdateCheck.Level.WARN)
@@ -746,7 +746,7 @@ public final class UpdateCheckTest {
         expect("a nameless file's verdict says what to do, and that the stock restore file is not everyone's",
                 r.verdict().contains("Name: this is not an update file's name") && r.verdict().contains("Do not make up a"
                 + " name") && r.verdict().contains("The stock restore file is only for a camera whose backup, read before"
-                + " the camera was ever flashed, shows the public build. For any other camera, make the file from its"
+                + " the camera was ever written to, shows the public build. For any other camera, make the file from its"
                 + " own backup with charmera pack on a computer.") && !r.verdict().contains("To restore the camera, tap"), r);
 
         // --- a refused stock restore file: only a name problem is reported as one -----------------------------
@@ -1224,8 +1224,8 @@ public final class UpdateCheckTest {
     }
 
     static boolean codeChange(UpdateCheck.Result r) {
-        return line(r, "software", UpdateCheck.Level.WARN) && text(r, "software").contains("program differs from the public dump's")
-                && detail(r, "software").contains("(boot header, code and data) differ from the public dump");
+        return line(r, "software", UpdateCheck.Level.WARN) && text(r, "software").contains("program differs from the public v006 chip backup's")
+                && detail(r, "software").contains("(boot header, code and data) differ from the public v006 chip backup");
     }
 
     static boolean line(UpdateCheck.Result r, String name, UpdateCheck.Level level) {

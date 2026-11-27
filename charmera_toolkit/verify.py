@@ -219,15 +219,15 @@ WITHDRAWN = {
 # --- The sentences the reference lines carry -----------------------------------------------------------------------
 
 NOT_THE_CAMERA = ("a build match says which public image the file was made from. Only a backup of the camera's own chip, "
-                  "read before it was ever flashed, says whether it fits")
+                  "read before it was ever written to, says whether it fits")
 
 # The way back without a backup, as verify and stage say it.
-WAY_BACK = ("A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes it "
+WAY_BACK = ("A file for the other sensor still boots, and writing the stock build of the right base from the card undoes it "
             "(charmera build --base v006 --download --out out/ for an SP140A camera, charmera build --base v012 --download "
-            "--out out/ for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a chip programmer")
+            "--out out/ for an OV9732 one). A write that is cut off, or firmware that won't boot, needs a chip programmer")
 
 NO_BACKUP = ("no backup of this camera was given (--stock), so nothing here compares the file with the camera's own "
-             "firmware. Know what this camera runs before you flash it: read its chip (docs/01-FIRST-FLASH.md, step 1) "
+             "firmware. Know what this camera runs before you write firmware to it: read its chip (docs/01-FIRST-FLASH.md, step 1) "
              "and give that read as --stock, or run `charmera identify` on its card's photos. " + WAY_BACK)
 
 VECTOR_BROKEN = ("a camera whose reset vector is broken does not start, so the card updater can never run on it again, and "
@@ -308,7 +308,7 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
     n = len(image)
     if stock is None:
         out.append(Check("backup", True, "no --stock: nothing compares the file with what this camera runs now. The way back is the update "
-                         "file this camera was last flashed with, from a card, as long as the new firmware starts far enough to run the "
+                         "file last written to this camera, from a card, as long as the new firmware starts far enough to run the "
                          "card updater; if it does not, only a chip programmer can help", "warn"))
     else:
         problem = chip_read_problem(stock, need_sensor_table=False)
@@ -321,7 +321,7 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
         out.append(Check("donor", False, f"--donor is not a complete read of a camera's chip: {problem}"))
         return out
     if stock is not None and donor[:SOFTWARE_END] == stock[:SOFTWARE_END]:
-        out.append(Check("donor", False, "--donor carries the same firmware as --stock (bytes 0..0x170000 are identical), so the flash "
+        out.append(Check("donor", False, "--donor carries the same firmware as --stock (bytes 0..0x170000 are identical), so the write "
                          "would change nothing on this camera"))
         return out
     donor_match = detect_build(donor)
@@ -426,10 +426,10 @@ def _donor_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], donor
                      "donor's firmware replaces this camera's", "warn"))
     stock_public = public_dump_name(stock)
     out.append(Check("way-back", True, "the way back is --stock, this camera's chip as it is now"
-                     + (f" (byte-identical to {stock_public}, as a camera flashed with the public restore file reads while its "
+                     + (f" (byte-identical to {stock_public}, as a camera with the public restore file written to it reads while its "
                         "settings are unchanged)" if stock_public else "")
                      + ". If the donor's firmware starts far enough to run the card updater, a file made from --stock with pack can be "
-                     "flashed from a card; if it does not start, only a chip programmer can put --stock back (docs/02-RECOVERY.md, "
+                     "written from a card; if it does not start, only a chip programmer can put --stock back (docs/02-RECOVERY.md, "
                      "section B)", "warn"))
     return out
 
@@ -521,20 +521,20 @@ def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stoc
                           f"file is firmware for the {ours} and --stock for the {theirs}: one of them also carries the OV9732 "
                           "driver our OV9732 port adds (on v006), so it drives the OV9732 whatever the table says. If --stock "
                           f"shows the sensor this camera has, the camera boots with the file but can't take pictures until you "
-                          "flash firmware for its sensor. If --stock is a read of a camera that was flashed with firmware for the "
-                          "wrong sensor (an OV9732 camera that ran v006, for example), the file may be the fix", "warn")]
+                          "write firmware for its sensor. If --stock is a read taken after firmware for the wrong sensor was "
+                          "written to the camera (an OV9732 camera that ran v006, for example), the file may be the fix", "warn")]
         if ref.sha256 == sensor.sha256:
             same_program = image[:CODE_AREA_END] == stock[:CODE_AREA_END]
             stock_build = match_known_build(stock)
             if stock_build is not None:
                 drives = ("the file drives the sensor as the firmware in --stock does, which proves a fit only if --stock was read "
-                          "before the camera was ever flashed" if same_program else
+                          "before the camera was ever written to" if same_program else
                           f"the program around it differs from --stock's (bytes 0..{CODE_AREA_END:#x}), and a different program can "
                           "drive the same sensor differently; even the same program would show a fit only if --stock was read "
-                          "before the camera was ever flashed")
+                          "before the camera was ever written to")
                 return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock: {table_where}. --stock carries "
                               f"{stock_build.label}, a public build, so this is that build's table: {drives}. A read taken after a "
-                              "flash with a file made from a public dump shows what the camera runs now, not what fits it", "warn")]
+                              "write of a file made from a public dump shows what the camera runs now, not what fits it", "warn")]
             if same_program:
                 return [Check("sensor-table", True, f"the image-sensor set-up table is the same as in --stock: {table_where}, and so is the "
                               f"program around it (bytes 0..{CODE_AREA_END:#x}): the file drives the image sensor as the firmware in "
@@ -553,23 +553,23 @@ def _sensor_checks(image: bytes, marks: BuildMarks, stock: Optional[bytes], stoc
         return [Check("sensor-table", False, f"the image-sensor set-up table DIFFERS from --stock's: {table_where}; "
                       f"--stock has {ref.pairs} writes at {ref.init[0]:#x}, sha256 {ref.sha256[:8]}...{sensors} The file drives the sensor "
                       "differently from the firmware in --stock, and a camera whose sensor is not the one a table drives can be expected "
-                      "to freeze in photo and video mode after the flash (refusing; no flag accepts it)" + DONOR_ROUTE_AFTER)]
+                      "to freeze in photo and video mode after the write (refusing; no flag accepts it)" + DONOR_ROUTE_AFTER)]
     if sensor.sensor == "OV9732" and sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()}:
         return [Check("sensor-table", True, f"the image-sensor set-up table is v012's, for the OmniVision OV9732: {table_where}, "
                       f"sha256 {sensor.sha256[:8]}... It fits a camera only if that camera has an OV9732, which nothing in the "
                       "file can tell. `charmera identify` on the camera's photos, or --stock <a dump of the camera this file goes "
-                      "into, read before it was ever flashed>, says which sensor it has" + no_code, "warn")]
+                      "into, read before it was ever written to>, says which sensor it has" + no_code, "warn")]
     if sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()} and sensor_of(image) == "OV9732":
         return [Check("sensor-table", True, f"the image-sensor set-up table is the SP140A one v006 and v008_test carry: {table_where}, sha256 "
                       f"{sensor.sha256[:8]}..., but the code also carries our OV9732 port (built on v006), so it drives the "
                       "OV9732. It fits a camera only if that camera has an OV9732, which nothing in the file can tell. `charmera "
                       "identify` on the camera's photos, or --stock <a dump of the camera this file goes into, read before it was "
-                      "ever flashed>, says which sensor it has" + no_code, "warn")]
+                      "ever written to>, says which sensor it has" + no_code, "warn")]
     if sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()}:
         return [Check("sensor-table", True, f"the image-sensor set-up table is the SP140A one v006 and v008_test carry: {table_where}, sha256 "
                       f"{sensor.sha256[:8]}... It fits a camera only if that camera has an SP140A, which nothing in the file can "
                       "tell; on an OV9732 camera it boots but can't take pictures. `charmera identify` on the camera's photos, or "
-                      "--stock <a dump of the camera this file goes into, read before it was ever flashed>, says which sensor it has"
+                      "--stock <a dump of the camera this file goes into, read before it was ever written to>, says which sensor it has"
                       + no_code, "warn")]
     return [Check("sensor-table", allow_unknown_build, f"the image-sensor set-up table is not the known builds': {table_where}, sha256 "
                   f"{sensor.sha256[:8]}... No toolkit mod changes this table, so the file was made from a dump of another build. "
@@ -660,9 +660,9 @@ def _reference_checks(image: bytes, match: BuildMatch, stock: Optional[bytes], n
                              "camera the file goes into, so nothing below compares the file with that camera: give the 2 MiB backup read "
                              "from its chip (docs/01-FIRST-FLASH.md, step 1)"))
         elif stock_public:
-            out.append(Check("stock", True, f"--stock is byte-identical to {stock_public}. A camera flashed with the public restore "
-                             "file reads exactly like this while its settings are unchanged; if this is not a read of the camera the "
-                             "file goes into, the comparisons below say nothing about that camera. And a read taken after a flash "
+            out.append(Check("stock", True, f"--stock is byte-identical to {stock_public}. A camera with the public restore "
+                             "file written to it reads exactly like this while its settings are unchanged; if this is not a read of the camera the "
+                             "file goes into, the comparisons below say nothing about that camera. And a read taken after a write "
                              "shows what the camera runs now, not what fits it", "warn"))
         out.extend(_unverified_read("stock-read", "--stock", stock_name))
         stock_marks = find_marks(stock)
@@ -730,7 +730,7 @@ def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow
                                     "its name, so a camera that runs this file ignores it afterwards (as the film-mods files do)", "info"))
             else:
                 checks.append(Check("stamp-in-file", True, f"the file's own stamp at {marks.stamp_offset:#x} is {marks.stamp}, not the "
-                                    f"{name.stamp} in its name, so a camera that runs this file flashes it again at every power-on while "
+                                    f"{name.stamp} in its name, so a camera that runs this file writes it again at every power-on while "
                                     "the file is on the card: take the card out before the next power-on", "info"))
     except ValueError as exc:
         checks.append(Check("filename", False, str(exc)))
@@ -752,13 +752,13 @@ def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow
     if sha in CLEAN_RESTORE:
         checks.append(Check("withdrawn", True, f"this is {CLEAN_RESTORE[sha]}: the same bytes as the stock restore file made "
                             "from the public dump's cleaned copy (the-dumping-grounds/charmera-firmware-v006). C was withdrawn "
-                            "after the hardware test of 2026-11-06, when a camera flashed with it froze in photo and video mode, "
-                            "and so did one flashed with the stock restore file: it drives only the SP140A-class sensor "
+                            "after the hardware test of 2026-11-06, when a camera it was written to froze in photo and video mode, "
+                            "and so did one the stock restore file was written to: it drives only the SP140A-class sensor "
                             "(docs/03-FLASH-CANDIDATES.md)", severity="info"))
     if withdrawn:
         checks.append(Check("withdrawn", False, f"this is {withdrawn}, withdrawn after the hardware test of 2026-11-06: it is made from "
                             "the public dump, and no file made from it is known to fit a camera whose own firmware has not been read. A "
-                            "camera flashed with C froze in photo and video mode (docs/03-FLASH-CANDIDATES.md). Do not flash it "
+                            "camera C was written to froze in photo and video mode (docs/03-FLASH-CANDIDATES.md). Do not write it "
                             "(refusing; no flag accepts it)"))
 
     # 4. Build identity, read from the content, and the comparisons with the reference. The stamp is not an
@@ -786,7 +786,7 @@ def verify_update(path: Path, image: bytes, stock: Optional[bytes] = None, allow
         checks.append(Check("photo-directory", consistent,
                             "photo directory sector is consistent with the settings state" if consistent
                             else "a valid settings record exists but the photo directory sector at 0x17F000 is 0xFF"
-                            + (" after the flash (the file ends inside that block, and the camera holds 0xFF from the file's end)"
+                            + (" after the write (the file ends inside that block, and the camera holds 0xFF from the file's end)"
                                if len(held) > n else "")
                             + "; the camera would read two bogus photo entries. Zero that sector (pack does this)."))
         photos = stored_photos(held)
@@ -858,14 +858,14 @@ def reviewed_build(image: bytes, checks: List[Check], stock: Optional[bytes] = N
         return checks
     drives = sensor_of(image)
     probe = any(m.endswith("/sensor-probe") for m in row["mods"])     # the probe is for finding out the sensor
-    out = [Check("reviewed", True, f"this is a reviewed file from charmera build: {label}, made from {row['dump']} "
+    out = [Check("reviewed", True, f"this is a known file from charmera build: {label}, made from {row['dump']} "
                  f"({row['name']}; {status}" + ("" if status == "tested" else ": not yet tried on a camera") + ")"
                  + (f"; it drives the {drives}" if drives and not probe else "")
                  + (f"; older versions of the app called this {old}" if old else ""), "info")]
     if stock is None and donor is None and not probe:
         out.append(Check("unconfirmed", True, "not compared with a backup, so nothing here confirms which firmware the "
                          f"camera runs. This build drives the {drives or 'sensor of its base'}; on a camera with the "
-                         "other sensor it boots but cannot take pictures, until it is flashed with firmware that fits. "
+                         "other sensor it boots but cannot take pictures, until firmware that fits is written to it. "
                          "charmera identify (from the camera's photos) or --stock with its backup confirms it", "warn"))
     for what, ref in (("--stock", stock), ("--donor", donor)):
         # A reference that is not a read of a chip says nothing about a camera: its own line fails with the reason.
@@ -875,9 +875,9 @@ def reviewed_build(image: bytes, checks: List[Check], stock: Optional[bytes] = N
         if theirs and theirs != drives:
             out.append(Check("wrong-sensor", True, f"{what} is firmware for the {theirs}, and this build drives the "
                              f"{drives}. If {what} is this camera's chip as it left the factory, this build cannot take "
-                             "pictures on it (the camera boots and the card updater still works, so it can be flashed "
-                             "back). If it was read after a flash with the wrong firmware, it says nothing about the "
-                             "sensor: check that with charmera identify (photos from before the flash) or the "
+                             "pictures on it (the camera boots and the card updater still works, so firmware can be written "
+                             "back). If it was read after a write of the wrong firmware, it says nothing about the "
+                             "sensor: check that with charmera identify (photos from before the write) or the "
                              "sensor-ID probe", "warn"))
         if what == "--stock" and ref[0x200:0x240] != image[0x200:0x240]:
             out.append(Check("vector-table-stock", True, "the ARM vector table (0x200..0x240) differs from --stock's: "
@@ -892,7 +892,7 @@ def reviewed_build(image: bytes, checks: List[Check], stock: Optional[bytes] = N
             detail = REFUSING_CLAUSE.sub("", c.detail.replace(DONOR_ROUTE_AFTER, ""))
             for hint in ALLOW_MODIFIED_HINTS + (ALLOW_MODIFIED_ACCEPTED,):
                 detail = detail.replace(hint, "")
-            out.append(Check(c.name, True, detail + " (a reviewed build: this is expected)", "warn"))
+            out.append(Check(c.name, True, detail + " (a known build: this is expected)", "warn"))
         else:
             out.append(c)
     return out
@@ -943,10 +943,10 @@ def handler(args) -> int:
     elif stock is None:
         print("        No --stock was given, so nothing above compares the file with that camera's own firmware.")
     if donor is None:
-        print("        Know what that camera runs before you flash it (a backup of its chip, or `charmera identify`).")
-        print("        A file for the other sensor still boots, and flashing the stock build of the right base from the")
+        print("        Know what that camera runs before you write firmware to it (a backup of its chip, or `charmera identify`).")
+        print("        A file for the other sensor still boots, and writing the stock build of the right base from the")
         print("        card undoes it (charmera build --base v006 --download --out out/ for an SP140A camera, charmera")
-        print("        build --base v012 --download --out out/ for an OV9732 one). A flash that is cut off, or firmware")
+        print("        build --base v012 --download --out out/ for an OV9732 one). A write that is cut off, or firmware")
         print("        that won't boot, needs a chip programmer.")
     return 0
 
@@ -956,7 +956,7 @@ def register(subparsers) -> None:
     p.add_argument("file")
     p.add_argument("--stock", help="a complete 2 MiB read of the chip of the camera this file goes into (your backup): the sensor table, "
                                    "the vector table and the software region are compared with it. Only a read made before the camera was "
-                                   "ever flashed says whether a firmware fits it")
+                                   "ever written to says whether a firmware fits it")
     p.add_argument("--allow-modified", action="store_true",
                    help="accept a software region that differs from the reference (that line then shows WARN); never a changed vector table. "
                         "With --donor, accept a mod built on the donor's firmware that keeps its boot header, vector table (0..0x240) and "

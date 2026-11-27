@@ -258,7 +258,7 @@ public final class WriteGateTest {
                         && l != null && l.level == UpdateCheck.Level.WARN && "Wrong sensor?".equals(l.title)
                         && l.text.startsWith("the firmware in your chip backup drives the SP140A, and ")
                         && l.text.contains(" drives the OV9732. If the backup is this camera's")
-                        && l.text.contains("can't take photos until you flash stock v006 on \"Restore stock firmware\""
+                        && l.text.contains("can't take photos until you write stock v006 on \"Restore stock firmware\""
                         + " or Advanced.")
                         && !onSp.report().contains("Nothing in the file can tell")
                         && WriteGate.refusal(onSp, ov[i], sha(stock), false, false) == null, onSp.report());

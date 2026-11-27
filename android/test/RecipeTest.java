@@ -127,29 +127,29 @@ public class RecipeTest {
                         && Recipe.unconfirmed(v026, false, "v006-family").startsWith("Wrong sensor?")
                         && Recipe.unconfirmed(new Recipe.Selection("v006"), false, "v012").startsWith("Wrong sensor?")
                         && Recipe.unconfirmed(probe, false, null) == null);
-        // the warning names the fix by the screen that writes it: stock v006 is never written on Flash custom firmware
+        // the warning names the fix by the screen that writes it: stock v006 is never written on Write custom firmware
         String onSp = Recipe.unconfirmed(v026, false, null);
         String onOv = Recipe.unconfirmed(new Recipe.Selection("v006"), false, null);
         expect("unconfirmed() says what the app doesn't know, and what to flash on a camera with the other sensor",
-                onSp.startsWith("Not confirmed: the app doesn't know which sensor this camera has. No chip backup is"
+                onSp.startsWith("Not confirmed. The app doesn't know which sensor this camera has. No chip backup is"
                         + " chosen and Identify hasn't been run on this card since the app started.")
-                        && onSp.contains("On an SP140A camera it boots but can't take photos until you flash stock v006"
+                        && onSp.contains("On an SP140A camera it boots but can't take photos until you write stock v006"
                         + " on \"Restore stock firmware\" or Advanced.")
                         && onOv.contains("This file is for the SP140A. On an OV9732 camera it boots but can't take"
-                        + " photos until you flash base v012 on \"Flash custom firmware\".")
+                        + " photos until you write base v012 on \"Write custom firmware\".")
                         && !onSp.contains("firmware that fits") && !onOv.contains("firmware that fits"));
         String wrongOnSp = Recipe.unconfirmed(v026, false, "v006-family");
         String wrongOnOv = Recipe.unconfirmed(new Recipe.Selection("v006"), false, "v012");
         expect("the Identify mismatch names the fix too", wrongOnSp.contains("Identify found the v006 family in this"
                 + " camera's photos. That's firmware for the SP140A, and this file is for the OV9732.")
-                && wrongOnSp.endsWith("until you flash stock v006 on \"Restore stock firmware\" or Advanced.")
-                && wrongOnOv.contains("Identify found build v012") && wrongOnOv.endsWith("until you flash base v012 on"
-                + " \"Flash custom firmware\"."));
+                && wrongOnSp.endsWith("until you write stock v006 on \"Restore stock firmware\" or Advanced.")
+                && wrongOnOv.contains("Identify found build v012") && wrongOnOv.endsWith("until you write base v012 on"
+                + " \"Write custom firmware\"."));
         // a set marked experimental whose mods are each tested alone is still an untried combination
         Recipe.Selection rowsOnly = new Recipe.Selection("v006", "v006/volume-led");
         expect("an experimental set of tested mods is an untried combination, and describe() says so",
                 !Recipe.experimental("v006/volume-led") && "experimental".equals(rowsOnly.status())
-                        && Recipe.untriedCombination(rowsOnly) && Recipe.describe(rowsOnly).contains("Experimental")
+                        && Recipe.untriedCombination(rowsOnly) && Recipe.describe(rowsOnly).contains("experimental")
                         && !Recipe.untriedCombination(v026)
                         && !Recipe.untriedCombination(new Recipe.Selection("v012", "v012/volume-led", "v012/exif",
                                 "v012/boot-last-mode", "v012/capture-flash")));
@@ -158,11 +158,11 @@ public class RecipeTest {
         Recipe.Selection twoUntried = new Recipe.Selection("v012", "v012/exif", "v012/capture-flash");
         expect("one experimental-set mod alone isn't called a combination; two or more are",
                 Recipe.untriedCombination(exifOnly) && Recipe.untriedCombination(twoUntried)
-                        && Recipe.untriedNote(exifOnly).equals("Experimental: this mod has only been tried on a camera"
-                        + " together with others.")
+                        && Recipe.untriedNote(exifOnly).equals("This pick is experimental. Its mod has only been"
+                        + " tried on a camera together with others.")
                         && Recipe.untriedNote(rowsOnly).equals(Recipe.untriedNote(exifOnly))
-                        && Recipe.untriedNote(twoUntried).equals("Experimental: each ticked mod has been tried on a"
-                        + " camera, but this combination hasn't.")
+                        && Recipe.untriedNote(twoUntried).equals("This pick is experimental. Each ticked mod has"
+                        + " been tried on a camera, but this combination hasn't.")
                         && Recipe.describe(exifOnly).endsWith(Recipe.untriedNote(exifOnly))
                         && !Recipe.describe(exifOnly).contains("combination")
                         && Recipe.describe(twoUntried).endsWith(Recipe.untriedNote(twoUntried)));
@@ -262,14 +262,25 @@ public class RecipeTest {
                 && Recipe.remembered(null, "V025").equals(Recipe.of(Candidates.Kind.V025))
                 && Recipe.remembered(null, "V027").equals(Recipe.of(Candidates.Kind.V027))
                 && Recipe.remembered(null, "BRINGUP").equals(Recipe.of(Candidates.Kind.BRINGUP)));
-        expect("nothing, or nothing valid, remembered -> the newest preset", Recipe.remembered(null, null)
-                .equals(presets[0]) && Recipe.remembered("v006|v006/sensor-probe,v006/ov9732-port", "PROBE")
-                .equals(presets[0]) && presets[0].kind() == Candidates.Kind.V027);
+        // 0.32: no mod starts ticked. The default was the newest preset (V027, four mods); it is now stock v012.
+        expect("nothing, or nothing valid, remembered -> stock v012, no mods ticked", Recipe.remembered(null, null)
+                .equals(Recipe.defaultPick()) && Recipe.remembered("v006|v006/sensor-probe,v006/ov9732-port", "PROBE")
+                .equals(Recipe.defaultPick()) && Recipe.defaultPick().stock()
+                && Recipe.defaultPick().equals(new Recipe.Selection("v012"))
+                && Recipe.problem(Recipe.defaultPick()) == null);
+        // 2026-11-26: with nothing remembered, the default base follows Identify; still no mod ticked
+        expect("defaultPick(Identify): v012 -> stock v012, v006 family -> stock v006, none or unknown -> stock v012",
+                Recipe.defaultPick(Identify.Base.V012).equals(new Recipe.Selection("v012"))
+                        && Recipe.defaultPick(Identify.Base.V006_FAMILY).equals(new Recipe.Selection("v006"))
+                        && Recipe.defaultPick(Identify.Base.UNKNOWN).equals(Recipe.defaultPick())
+                        && Recipe.defaultPick((Identify.Base) null).equals(Recipe.defaultPick())
+                        && Recipe.defaultPick(Identify.Base.V006_FAMILY).stock()
+                        && Recipe.problem(Recipe.defaultPick(Identify.Base.V006_FAMILY)) == null);
 
         // refusals of build() that need no dump
         byte[] junk = new byte[0x200000];
         String m = messageOf(() -> Recipe.build(junk, v026));
-        expect("a file that is no dump is refused, with a Detail line", m != null && m.startsWith("the file is not a dump")
+        expect("a file that is no dump is refused, with a Detail line", m != null && m.startsWith("the file is not a chip backup")
                 && m.contains("\nDetail: its SHA-256 is "));
 
         // every build from the dumps on hand

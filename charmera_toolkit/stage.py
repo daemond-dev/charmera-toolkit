@@ -56,8 +56,8 @@ CAMERA_STEPS = [
     "3. When the progress has reached 100% and the screen stops changing (the updater waits there; it does not",
     "   restart by itself), take the card out first, then hold the power key about a second to switch off.",
     "4. Delete the update file from the card before the card goes back into the camera: the camera does not",
-    "   delete it and would flash again at every power-on with that card in. Plugging the cable into a",
-    "   switched-off camera switches it on, and with the file on its card it flashes again. So to delete the",
+    "   delete it and would write it again at every power-on with that card in. Plugging the cable into a",
+    "   switched-off camera switches it on, and with the file on its card it writes it again. So to delete the",
     "   file through the camera's own USB drive, connect it in this order: camera off, card out, switch the",
     "   camera on with its power key, wait 10 seconds (it looks for an update file only in the first five",
     "   seconds after power-on), card in, then the cable. A card reader avoids the camera altogether.",
@@ -280,7 +280,7 @@ def inspect_card(given: str, override: bool) -> CardInfo:
     if removable is False:
         msg = f"{given} is not on removable media" + (f" ({device})" if device else "") + ", so it is not a card"
         if not override:
-            raise StageError(f"{msg}. Refusing; pass {OVERRIDE_FLAG} if it really is the card.", 1)
+            raise StageError(f"{msg}. Refusing; pass {OVERRIDE_FLAG} if it is the card.", 1)
         notes.append(f"{msg}; going on because of {OVERRIDE_FLAG}")
     if fstype:
         low = fstype.lower()
@@ -461,26 +461,26 @@ def print_plan(src: Path, image: bytes, info: CardInfo, dest: Path, donor_route:
     print()
     if stock is None:
         print("No backup of this camera's own flash chip was given, so nothing above compares the file with the firmware the")
-        print("camera runs. Before you flash, find out what it runs: read its chip (docs/01-FIRST-FLASH.md, step 1) and pass")
+        print("camera runs. Before you write the file, find out what it runs: read its chip (docs/01-FIRST-FLASH.md, step 1) and pass")
         print("it as --stock, or run `charmera identify` on its photos. A file for the other sensor still boots, and")
-        print("flashing the stock build of the right base from the card undoes it (charmera build --base v006 --download")
+        print("writing the stock build of the right base from the card undoes it (charmera build --base v006 --download")
         print("--out out/ for an SP140A camera, charmera build --base v012 --download --out out/ for an OV9732 one). A")
-        print("flash that is cut off, or firmware that won't boot, needs a chip programmer. stage still writes the file")
+        print("write that is cut off, or firmware that won't boot, needs a chip programmer. stage still writes the file")
         print("if you confirm below.")
     else:
-        print("Keep the --stock file safe. It's the way back if this flash goes wrong. Only a read made before the camera")
-        print("was ever flashed says whether a firmware fits it. A read taken after a flash shows what the camera runs now,")
+        print("Keep the --stock file safe. It's the way back if this write goes wrong. Only a read made before the camera")
+        print("was ever written to says whether a firmware fits it. A read taken after a write shows what the camera runs now,")
         print("and that says nothing about what fits it (see the sensor-table line above).")
     if donor_route:
         print("Donor route: this file is another camera's firmware (--donor), for a camera whose own firmware is gone. Nothing")
         print("here has tested it on this camera. Whether it fits depends on the two cameras having the same image sensor and")
         print("wiring, which only their sensor markings can suggest. If it does not start far enough to run the card updater,")
         print("only a chip programmer can bring the camera back (docs/02-RECOVERY.md, sections B and D); if it does, the")
-        print("update file the camera was last flashed with" + (", or a file made from --stock with pack," if stock is not None else "")
+        print("update file last written to the camera" + (", or a file made from --stock with pack," if stock is not None else "")
               + " puts it back from a card.")
     print("A file made from a public dump is never for a Millennium or CLOT edition, and on an original 2025 series camera")
     print("(matte body, yellow Kodak boot screen) it fits only one whose image sensor its table drives. The body alone")
-    print("proves nothing. A backup of a camera read before it was ever flashed fits that camera whatever its edition,")
+    print("proves nothing. A backup of a camera read before it was ever written to fits that camera whatever its edition,")
     print("made into a file with pack or with charmera build --dump.")
     print("Charge the camera first: a power loss during programming leaves a camera that only a chip programmer can")
     print("recover (docs/02-RECOVERY.md). A 0x1E0000-byte file replaces everything in the camera's own memory, including the")
@@ -568,14 +568,14 @@ def handler(args) -> int:
             return 1
         if identical:
             print(f"{same_name[0]} is already on the card and is byte-identical to {src}; nothing to do.")
-            print("After the camera has flashed it, delete it from the card: the camera does not, and would flash again at every power-on.")
+            print("After the camera has written it, delete it from the card: the camera does not, and would write it again at every power-on.")
             return 0
     if info.update_files:
         print(f"error: {info.given} already holds {len(info.update_files)} update file(s) in its root:")
         for p in info.update_files:
             what = "same name, different content" if p.name.upper() == src.name.upper() else "another update file"
             print(f"  {p}  ({what})")
-        print("       The camera flashes the first JH_5408*.bin it finds, and two of them on one card is an undefined situation.")
+        print("       The camera writes the first JH_5408*.bin it finds, and two of them on one card is an undefined situation.")
         print("       Remove it first. A file left from an earlier update is the usual reason; the camera never deletes it.")
         return 1
     if info.free < len(image) + FREE_SPACE_SLACK:
@@ -636,7 +636,7 @@ def register(subparsers) -> None:
     p.add_argument("--card", required=True,
                    help="the card's mount point (Linux: /run/media/deck/<label>, /media/<user>/<label>) or drive (Windows: E: or E:\\)")
     p.add_argument("--stock", help="a complete 2 MiB read of this camera's own flash chip (your backup): the file's sensor table, vector "
-                                   "table and software are compared with it. Only a read made before the camera was ever flashed says "
+                                   "table and software are compared with it. Only a read made before the camera was ever written to says "
                                    "whether a firmware fits it. Without --stock stage warns that nothing compares the file with this "
                                    "camera's own firmware, and still writes when you confirm")
     p.add_argument("--donor", help="the donor route: a read of another, working camera's chip whose firmware the file is, for a camera whose own "

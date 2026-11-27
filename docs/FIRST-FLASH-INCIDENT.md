@@ -86,7 +86,7 @@ was run on the camera on 2026-11-08; see below.
 ## Timeline
 
 - 11-05 08:38. You asked for a review: "Make sure I'm not going to break my camera first and foremost." The review
-  raised 36 issues and fixed 35. I concluded that nothing in the first-flash path should break the camera. The risks
+  raised 36 issues and fixed 35. I concluded that nothing in the first-flash path would break the camera. The risks
   I named were a battery dying mid-update, a camera from another edition, and the cleanup steps.
 - 11-06 00:05. You asked whether I was confident. I answered: "Yes, for candidate C. I'm confident it won't hurt
   your camera." Again I named only the battery and another edition as risks.
@@ -163,14 +163,14 @@ was run on the camera on 2026-11-08; see below.
    firmware would drive this camera's parts.
 3. **The first flash used a modified file.** C wasn't the plain stock file. It also reset the settings and
    erased the internal photos. Its program code was identical, so this didn't cause the freeze, but a first
-   flash should change as little as possible.
+   flash needs to change as little as possible.
 4. **The update file overwrites more than it needs to.** Our files are 0x1E0000 bytes long. They rewrite the
    firmware, the resources, the settings bank and the internal photo area, and then the camera's updater erases the
    64 KiB block at 0x1F0000. The film-mods files stop after the resources, at 0x169000, so the updater's erase lands
    on the settings block instead. So the flash replaced your camera's settings and photo area with another camera's
    and erased its last block. Anything your unit kept there is gone. One block survived every flash: 0x1E0000 to
    0x1EFFFF, which a 0x1E0000-byte file doesn't write and its final erase doesn't reach. It's blank on every known
-   camera, so it probably holds nothing, but a first read of the chip should keep it.
+   camera, so it probably holds nothing, but the first read of the chip needs to keep it.
 5. **I didn't foresee that the cable powers the camera on.** Plugging the cable into a switched-off camera started it
    and ran the updater again from the card. My instructions caused an unintended second flash of C. It did no harm,
    but it showed the instructions had never been checked against the real hardware.
@@ -185,7 +185,7 @@ was run on the camera on 2026-11-08; see below.
 9. **I got the edition wrong.** I said I didn't know a 1987 edition, when it's the original series.
 10. **I put the blame on you.** The first community draft said "lesson learned", as though the missing backup
     were your mistake. It was mine.
-11. **Smaller process problems:**
+11. **There were smaller process problems too.**
     - The first plan needed both the Steam Deck and the phone, when the phone could do everything.
     - One APK release was lost to a GitHub error between deleting and recreating it, and another got stuck as a
       draft.
@@ -225,8 +225,8 @@ The second session found these in the first session's work:
    After that, its firmware can only be had by reading its chip with a clip. A stock camera gives none of it up over
    USB (VERIFIED: its memory-read commands need an authorisation level that nothing sets). The donor route takes that
    read ([Recovery, section D](02-RECOVERY.md#the-donor-route)). The first candidate is your second camera,
-   unmodified and yours. If its photos match, a read of its chip is the only known copy of a firmware that should fit
-   this camera, though whether it does stays unverified until it's tried.
+   unmodified and yours. If its photos match, a read of its chip is the only known copy of a firmware that is expected to
+   fit this camera. Whether it does stays unverified until it's tried.
 3. The community. Project-Sirius #2 has no reply yet. The film-mods author has a working camera and a reader, but
    their build is a known one. They advised against their files, and your question about when and where they bought
    theirs is open. aschenbecherwespe (recharmera) also runs a known build. isaackwok, a CLOT owner, offered on
@@ -262,7 +262,7 @@ first item was relaxed later: from app 0.29 every reviewed build can be written 
 unknown file too, with a warning when nothing confirms what the camera runs (a loud one for an unknown file).
 
 - Done: "no backup of your own camera, no flash" in every tool that writes. The app writes to the card only while it
-  holds a dump of the camera's own chip and the update file was checked against that very dump. `restore` reads
+  holds a dump of the camera's own chip and the update file was checked against that same dump. `restore` reads
   the chip twice before it writes and keeps that read. `pack` and the mod commands refuse camera cards and
   update-file names. `stage` writes without `--stock` only with a warning, as you decided.
 - Done: a read taken after a flash is never taken as proof of fit. A backup whose firmware is a known public build
@@ -341,7 +341,7 @@ That result was then re-examined and the probe rebuilt to scan the whole bus.
   0x0A/0x0B or 0xFC..0xFF) at 0x6C and 0x90. Registers 0x02/0x03 are SP140A-specific and read 0x00 here, so they
   don't identify it.
 - To name the part, the probe was extended (app 0.9) to dump a window of each responder's 8-bit ID registers
-  (0x00..0x1F and 0xF0..0xFF), not just the first responder's 0x02/0x03. File `JH_5408202611082100_0F065AEE.bin`,
+  (0x00..0x1F and 0xF0..0xFF). Before, it read only the first responder's 0x02/0x03. File `JH_5408202611082100_0F065AEE.bin`,
   SHA-256 `190a8d0fba3b3c6fa643692f9a86f69dbd53944436dcc523908a68b11ecd1dda`. Run on the camera 2026-11-08.
 - The 0.9 result was all zeros. Both responders (0x36 and 0x48) answered, but every one of their 48 ID-register bytes
   read 0x00. That wasn't a dead read: the probe pre-fills 0xFF and only overwrites on a successful read, so 0x00 means
@@ -392,7 +392,7 @@ That result was then re-examined and the probe rebuilt to scan the whole bus.
   frames:
   1. The image was rotated 180 degrees (lamps point up, person inverted), because the OV9732 module is mounted
      rotated compared with the SP140A.
-  2. A yellow-green cast, measured as a blue deficit in the regions that should be neutral and bright (R~=G, B low
+  2. A yellow-green cast, measured as a blue deficit in the regions that are neutral and bright in the scene (R~=G, B low
      by 1.2-1.5x, consistent across three different scenes). So the SoC white balance is fixed for the SP140A's
      spectral response, and isn't an auto-WB that would vary by scene.
   3. Exposure wasn't adaptive (lamps blow out, shadows crush), because the firmware's AE loop still writes SP140A

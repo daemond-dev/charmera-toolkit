@@ -1,7 +1,7 @@
 """photo-id: what the header of a photo says about the firmware that took it.
 
 tests/fixtures/original-photo-header.jpg-header is the owner's camera's header: the first 624 bytes of a photo
-that camera took on its original firmware, before it was ever flashed, cut at the end of the SOS header, so it
+that camera took on its original firmware, before it was ever written to, cut at the end of the SOS header, so it
 holds no image data. The other headers are built here, from the parts the templates share (the JPEG standard's
 tables, no firmware bytes; the EXIF mod's block from its authored names and lengths only), and, when
 CHARMERA_STOCK_IMAGE points at the public dump, from the templates and the two stored photos in it, and when
@@ -417,7 +417,7 @@ def test_help_explains_what_the_conclusions_mean():
                   "does not tell the builds apart (INFERRED), any other frame header is not the one they write",
                   "a JUNK text other than 'GP$322 Generalplus AviPackerV3 20140916', the packer text v006, v008_test and "
                   "v012 all carry, shows that other code wrote the file",
-                  "a photo taken after a flash shows the flashed firmware", "not a frame taken out of a video",
+                  "a photo taken after a write shows the firmware that was written", "not a frame taken out of a video",
                   "Nothing here says whether a firmware fits a camera", "use identify"):
         assert words in text, words
     assert "USB" not in text                                   # the bare template's USB-camera role is not shown

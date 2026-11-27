@@ -30,8 +30,8 @@ final class FlashLog {
 
     enum Event {
         WRITTEN("written to the card"),
-        FLASH_SEEN("flash seen"),
-        FLASH_NOT_SEEN("flash not seen"),
+        FLASH_SEEN("Upgrade 100% seen"),
+        FLASH_NOT_SEEN("Upgrade 100% not seen"),
         FILE_REMOVED("update file removed"),
         CHECK_OK("photo check OK"),
         CHECK_FAILED("photo check failed"),
@@ -221,11 +221,11 @@ final class FlashLog {
             String at = when(e.timeMs, tz);
             switch (e.event) {
                 case FLASH_SEEN:
-                    return named(e.firmware, i) + ", flash seen " + at;
+                    return named(e.firmware, i) + ", Upgrade 100% seen " + at;
                 case FLASH_NOT_SEEN:
-                    return UNKNOWN + " (" + named(e.firmware, i) + " flash not seen " + at + ")";
+                    return UNKNOWN + " (" + named(e.firmware, i) + " Upgrade 100% not seen " + at + ")";
                 case WRITTEN:
-                    return named(e.firmware, i) + " written " + at + ", flash not confirmed";
+                    return named(e.firmware, i) + " written " + at + ", Upgrade 100% not confirmed";
                 case CHECK_OK:
                     // A check logged with no name passed on the public-build family's header, which shows the family
                     // and not which of its files was written. One logged with a name passed on that firmware's own.

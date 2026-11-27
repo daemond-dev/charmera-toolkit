@@ -1282,5 +1282,5 @@ def register(subparsers) -> None:
     p.add_argument("--thumb", help="replace: a 112x80 PNG for the frame menu (default: made from the frame)")
     p.add_argument("--overwrite", action="store_true",
                    help="extract: replace files already in --out; preview, replace: allow --out to replace an existing file (never the input)")
-    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="replace: actually write the modified image")
+    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="replace: write the modified image")
     p.set_defaults(func=handler)

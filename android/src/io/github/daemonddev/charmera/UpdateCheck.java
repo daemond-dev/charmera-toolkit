@@ -145,7 +145,7 @@ public final class UpdateCheck {
             this.sensorOffset = sensorOffset;
         }
 
-        /** The build's name without what the brackets add: "the public dump's build". */
+        /** The build's name without what the brackets add: "the public v006 build". */
         String name() {
             int i = label.indexOf(" (");
             return i < 0 ? label : label.substring(0, i);
@@ -165,7 +165,7 @@ public final class UpdateCheck {
      * paths in it.
      */
     public static final Build PUBLIC_BUILD = new Build(
-            "the public dump's build (the one both public dumps hold, and the one the stock restore file is)",
+            "the public v006 build (the one both public v006 chip backups hold, and the one the stock restore file is)",
             SHARED_STAMP,
             "fe88e8de57e7b1ff1a0856127ee09a21fb3ce2dde2684662c533719b80adc5c8",
             PUBLIC_CODE_AREA_SHA256,
@@ -231,17 +231,17 @@ public final class UpdateCheck {
      * was ever flashed shows that build: a read taken after a flash with it shows the public build too.
      */
     static final String RESTORE_INSTEAD = "The stock restore file is only for a camera whose backup, read before the"
-            + " camera was ever flashed, shows the public build. For any other camera, make the file from its own backup"
+            + " camera was ever written to, shows the public build. For any other camera, make the file from its own backup"
             + " with charmera pack on a computer.";
     /** The same, plus the way to a working mod. */
     static final String INSTEAD = RESTORE_INSTEAD + " For a mod, make the file again with charmera pack on a computer.";
     /** What a build match does and does not prove. Every build line carries it. */
     static final String NOT_THE_CAMERA = "A build match only says which known build the file was made from. Whether it fits"
-            + " your camera shows only in a dump of your camera's own chip, read before it was ever flashed.";
+            + " your camera shows only in a chip backup of your camera, read before it was ever written to.";
     /** The route that names a camera's firmware from its photos, as MainActivity titles it. */
     static final String IDENTIFY_ROUTE = "Identify this camera's firmware";
     /** How the backup gets into the app; the button is named as MainActivity labels it. */
-    static final String BACKUP_STEP = "Choose that dump with \"Choose this camera's backup\" and the app compares them.";
+    static final String BACKUP_STEP = "Choose that chip backup with \"Choose this camera's backup\" and the app compares them.";
     /** The verdict's first sentence for a file that passed its own checks but was compared with no backup. */
     static final String NOT_COMPARED = "Not compared with a backup of this camera's own chip, so nothing here shows that"
             + " the file fits this camera.";
@@ -873,7 +873,7 @@ public final class UpdateCheck {
                         ? "the 12 digits in the name differ from the stamp of the firmware in your backup, so a camera"
                         + " running that firmware will not skip the file."
                         : "the 12 digits in the name are the stamp of the firmware in your backup, so a camera running"
-                        + " that firmware would skip the file and flash nothing. Make the file again with charmera pack"
+                        + " that firmware would skip the file and write nothing. Make the file again with charmera pack"
                         + " on a computer, which gives it another stamp.",
                         "in the name " + stamp + "; in your backup " + ref.stamp + " at " + hex(ref.stampOffset) + "."));
             }
@@ -885,7 +885,7 @@ public final class UpdateCheck {
                     realDate ? "" : "stamp " + stamp + ", read as year, month, day, hour and minute."));
             if (marks.stamp != null && !marks.stamp.equals(stamp)) {
                 out.add(new Line(Level.INFO, "stamp-in-file", "Stamp in the file", "the stamp inside the file is not"
-                        + " the one in its name, so a camera that runs this file flashes it again at every power-on"
+                        + " the one in its name, so a camera that runs this file writes it again at every power-on"
                         + " while the file is on its card. Take the card out before the camera is switched on again,"
                         + " and remove the file from it.",
                         "inside the file " + marks.stamp + "; in the name " + stamp + "."));
@@ -911,7 +911,7 @@ public final class UpdateCheck {
         } else {
             String why;
             if (n == 0x200000) {
-                why = " It is the size of a full 2 MB dump. A dump must never go on the card as it is, because the"
+                why = " It is the size of a full 2 MB chip backup. A chip backup must never go on the card as it is, because the"
                         + " camera's final erase then wraps around and bricks it. charmera pack on a computer makes the update"
                         + " file from it.";
             } else if (n == SOFTWARE_END) {
@@ -992,7 +992,7 @@ public final class UpdateCheck {
                 out.add(new Line(Level.INFO, "build", "Build", build.label + ", unchanged. " + NOT_THE_CAMERA,
                         "bytes 0 to 0x169000 hash to the known build's."));
             } else if (unchanged != null) {
-                out.add(new Line(Level.WARN, "build", "Build", unchanged.label + ", unchanged: not the public dump's. It"
+                out.add(new Line(Level.WARN, "build", "Build", unchanged.label + ", unchanged: not the public v006 chip backup's. It"
                         + " belongs only in a camera that ran it. " + NOT_THE_CAMERA,
                         "bytes 0 to 0x169000 hash to that build's, SHA-256 " + unchanged.officialSha256 + "."));
             } else if (madeFrom == build) {
@@ -1000,7 +1000,7 @@ public final class UpdateCheck {
                         + NOT_THE_CAMERA, kept));
             } else if (madeFrom != null) {
                 out.add(new Line(Level.WARN, "build", "Build", madeFrom.label + ", with changes (see Software below):"
-                        + " not the public dump's. It belongs only in a camera that ran that build. " + NOT_THE_CAMERA,
+                        + " not the public v006 chip backup's. It belongs only in a camera that ran that build. " + NOT_THE_CAMERA,
                         kept));
             } else if (layout != null) {
                 List<String> other = new ArrayList<>();
@@ -1026,11 +1026,11 @@ public final class UpdateCheck {
                 }
                 out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know, laid out like "
                         + layout.name() + ": " + and(other) + (other.size() == 1 ? " is" : " are") + " not that build's."
-                        + " It belongs only in the camera it was dumped from. " + NOT_THE_CAMERA, "the build marks lie"
+                        + " It belongs only in the camera it was read from. " + NOT_THE_CAMERA, "the build marks lie"
                         + " where " + layout.name() + " keeps them; " + join(detail, "; ") + "."));
             } else {
-                out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know: not the public dump's."
-                        + " It belongs only in the camera it was dumped from. " + NOT_THE_CAMERA,
+                out.add(new Line(Level.WARN, "build", "Build", "a build the app does not know: not the public v006 chip backup's."
+                        + " It belongs only in the camera it was read from. " + NOT_THE_CAMERA,
                         "the build marks lie at other offsets than in the known builds."));
             }
 
@@ -1054,12 +1054,12 @@ public final class UpdateCheck {
                 // a complete backup of an OV9732 camera (v012, or a build with the OV9732 port): this file is SP140A code
                 out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "the backup is firmware for the"
                         + " OmniVision OV9732 sensor, and this file drives the SP140A-class sensor: on that camera it boots"
-                        + " but cannot take pictures. Pick firmware for the OV9732 (Flash custom firmware) instead.",
+                        + " but cannot take pictures. Pick firmware for the OV9732 (Write custom firmware) instead.",
                         fileTable + "."));
             } else if (ref != null && ref.sensorStart < 0) {
                 out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "the backup given has no image"
                         + " sensor set-up table, so the file cannot be compared with the firmware in it. Choose a"
-                        + " complete dump of your camera's chip in the backup step.", fileTable + "."));
+                        + " complete chip backup of your camera in the backup step.", fileTable + "."));
             } else if (ref != null && ref.severalPrograms()) {
                 out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "the backup holds more than one"
                         + " image-sensor program that its code refers to, and they differ, so the app cannot tell which"
@@ -1091,7 +1091,7 @@ public final class UpdateCheck {
                             ? "the same set-up table as the firmware in your backup, but that firmware also carries the"
                             + " OV9732 driver our port adds, so it drives the OmniVision OV9732, and this file drives the"
                             + " SP140A-class sensor. On that camera it boots but can't take pictures. Pick firmware for"
-                            + " the OV9732 (Flash custom firmware) instead."
+                            + " the OV9732 (Write custom firmware) instead."
                             : "the same set-up table as the firmware in your backup, but this file also carries the OV9732"
                             + " driver our port adds, so it drives the OmniVision OV9732, and the backup is firmware for"
                             + " the SP140A-class sensor. On that camera it isn't expected to take pictures. Pick firmware"
@@ -1100,7 +1100,7 @@ public final class UpdateCheck {
                     out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", drivesOv9732(reference)
                             ? "the backup is firmware for the OmniVision OV9732 sensor, and this file drives the"
                             + " SP140A-class sensor: on that camera it boots but cannot take pictures. Pick firmware for"
-                            + " the OV9732 (Flash custom firmware) instead."
+                            + " the OV9732 (Write custom firmware) instead."
                             : "the backup is firmware for the SP140A-class sensor, and this file drives the OmniVision"
                             + " OV9732: on that camera it isn't expected to take pictures. Pick firmware for the SP140A"
                             + " instead.", both));
@@ -1108,19 +1108,19 @@ public final class UpdateCheck {
                     out.add(new Line(Level.FAIL, "sensor-table", "Image sensor set-up", "different from the firmware in"
                             + " your backup: the file drives the image sensor another way. A firmware that drives a"
                             + " sensor the camera does not have is the likely cause when a camera freezes in photo and"
-                            + " video mode after a flash. Do not use this file on this camera from the app. If this"
+                            + " video mode after a write. Do not use this file on this camera from the app. If this"
                             + " camera's own firmware is already gone and the file is a working camera's, it's written"
                             + " with the toolkit on a computer (the Recovery guide in the project's docs, section D).",
                             both));
                 } else if (refBuild != null) {
                     out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", codeSame
                             ? "the same as in the firmware in your backup. That firmware is " + refBuild.name()
-                            + ", unchanged. It's a public build, and a camera flashed with a file made from it holds it"
+                            + ", unchanged. It's a public build, and a camera written with a file made from it holds it"
                             + " too, so this shows a fit only if the backup was read before the camera was ever"
-                            + " flashed."
+                            + " written to."
                             : otherProgram + " That firmware is " + refBuild.name() + ", unchanged. It's a public"
-                            + " build, and a camera flashed with a file made from it holds it too, so it shows what fits"
-                            + " this camera only if the backup was read before the camera was ever flashed.",
+                            + " build, and a camera written with a file made from it holds it too, so it shows what fits"
+                            + " this camera only if the backup was read before the camera was ever written to.",
                             both + " The backup's bytes 0 to 0x169000 hash to that build's, SHA-256 "
                                     + refBuild.officialSha256 + "."));
                 } else if (!codeSame) {
@@ -1129,7 +1129,7 @@ public final class UpdateCheck {
                     out.add(new Line(Level.PASS, "sensor-table", "Image sensor set-up", "the same as in the firmware in"
                             + " your backup, and so is the program around it: the file drives the image sensor the way"
                             + " that firmware does. That is your camera's own way only if the backup was read before any"
-                            + " flash.", both));
+                            + " write.", both));
                 }
             } else if (marks.sensorSha256.equals(V012_BUILD.sensorSha256)) {
                 out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "v012's program for the OmniVision"
@@ -1138,12 +1138,12 @@ public final class UpdateCheck {
             } else if (knownTable) {
                 out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "the same program as the public"
                         + " build's: it drives one image sensor and never checks which one is fitted. Nothing in the"
-                        + " file can tell whether your camera has that sensor. After this program was flashed, one"
+                        + " file can tell whether your camera has that sensor. After this program was written, one"
                         + " original-series camera could no longer take pictures. The likely cause is a sensor it"
                         + " doesn't drive." + unreferenced + " " + BACKUP_STEP, fileTable + "."));
             } else {
                 out.add(new Line(Level.WARN, "sensor-table", "Image sensor set-up", "not the public build's program:"
-                        + " the file was made from another build's dump and drives the sensor differently. Nothing in"
+                        + " the file was made from another build's chip backup and drives the sensor differently. Nothing in"
                         + " the file can tell whether that fits your camera." + unreferenced + " " + BACKUP_STEP,
                         fileTable + "; the public build's SHA-256 is " + build.sensorSha256 + "."));
             }
@@ -1172,18 +1172,18 @@ public final class UpdateCheck {
             } else if (n >= SOFTWARE_END && sha256Hex(data, 0, SOFTWARE_END).equals(build.softwareSha256)
                     || n == OFFICIAL_SIZE && exact) {
                 out.add(new Line(Level.PASS, "software", "Software", "the program and its sounds, pictures and menus"
-                        + " are the same as the public dump's, byte for byte.", ""));
+                        + " are the same as the public v006 chip backup's, byte for byte.", ""));
             } else if (codeStock) {
                 out.add(new Line(Level.WARN, "software", "Software", "a modified file. The program itself is the public"
-                        + " dump's, but its sounds, frames, boot logo or menus differ. Only put it on the card if you"
+                        + " v006 chip backup's, but its sounds, frames, boot logo or menus differ. Only put it on the card if you"
                         + " made it yourself or trust who made it.",
-                        "bytes 0 to 0x120000 (boot header, code and data) match the public dump; the resources after them differ."));
+                        "bytes 0 to 0x120000 (boot header, code and data) match the public v006 chip backup; the resources after them differ."));
             } else {
                 out.add(new Line(Level.WARN, "software", "Software", "a file whose program differs from the public"
-                        + " dump's: a mod that changes the program, or another build. Only put it on the card if you"
+                        + " v006 chip backup's: a mod that changes the program, or another build. Only put it on the card if you"
                         + " made that change on purpose, or know the file is for this camera. Keep a way back ready: a"
                         + " backup of your camera (the Recovery guide in the project's docs).",
-                        "bytes 0 to 0x120000 (boot header, code and data) differ from the public dump."));
+                        "bytes 0 to 0x120000 (boot header, code and data) differ from the public v006 chip backup."));
             }
             vectorLine(data, marks, reference, ref, layout, out);
         }
@@ -1198,10 +1198,10 @@ public final class UpdateCheck {
                 }
             }
             int listed = photoDirectoryEntries(data);
-            String copyOff = " If your photos matter, copy the SPIDCIM folder off the card before you flash. That is"
+            String copyOff = " If your photos matter, copy the SPIDCIM folder off the card before the camera writes the file. That is"
                     + " where the camera copies them.";
             if (photos == 0) {
-                out.add(new Line(Level.PASS, "photos", "Stored photos", "the file carries none. The flash erases any"
+                out.add(new Line(Level.PASS, "photos", "Stored photos", "the file carries none. The write erases any"
                         + " photos now in the camera's own memory." + copyOff, ""));
             } else if (listed == 0) {
                 out.add(new Line(Level.WARN, "photos", "Stored photos", "the file carries " + count(photos, "photo")
@@ -1255,10 +1255,10 @@ public final class UpdateCheck {
                     }
                     sb.append('.');
                     out.add(new Line(Level.FAIL, "resource-slots", "Built-in parts, one by one", problems.size()
-                            + " of " + count + " are damaged. The camera does not check them before it flashes. A"
+                            + " of " + count + " are damaged. The camera does not check them before it writes the file. A"
                             + " damaged boot logo or menu can stop the camera starting far enough to update again. Do"
-                            + " not use this file. It was most likely made from a cut-off download or a damaged dump."
-                            + " Making it again from the same source does not help. Start again from a complete dump. "
+                            + " not use this file. It was most likely made from a cut-off download or a damaged chip backup."
+                            + " Making it again from the same source does not help. Start again from a complete chip backup. "
                             + RESTORE_INSTEAD, sb.toString()));
                 }
             }
@@ -1275,7 +1275,7 @@ public final class UpdateCheck {
      * in the backup, is left uncompared, with a warning. No setting turns a failure here into a warning.
      */
     private static void vectorLine(byte[] data, Marks marks, byte[] reference, Marks ref, Build layout, List<Line> out) {
-        String fail = " A camera flashed with it would most likely not start at all, and then the card updater cannot"
+        String fail = " A camera written with it would most likely not start at all, and then the card updater cannot"
                 + " run again: only a chip programmer could bring it back. Do not use this file.";
         String vectors = sha256Hex(data, VECTORS, VECTORS_END);
         String detail = "bytes 0x200 to 0x240 (the ARM vector table), SHA-256 " + vectors;
@@ -1435,42 +1435,42 @@ public final class UpdateCheck {
         }
         if (data.length != 0x200000) {
             return "it is " + bytes(data.length) + ", but a backup of the flash chip is exactly " + bytes(0x200000)
-                    + (data.length == UPDATE_SIZE || data.length == OFFICIAL_SIZE ? ". This is an update file, not a dump of a chip" : "");
+                    + (data.length == UPDATE_SIZE || data.length == OFFICIAL_SIZE ? ". This is an update file, not a chip backup" : "");
         }
         String sha = sha256Hex(data, 0, data.length);
         if (sha.equalsIgnoreCase(Candidates.CLEAN_FACTORY_SHA256)) {
             return "it is byte for byte the public cleaned copy of the OV9732 cameras' factory build v012"
                     + " (" + Candidates.CLEAN_FACTORY_NAME + "): a copy anyone can download, or a read of a camera"
-                    + " flashed with a file made from it that has changed no setting since. Either way it is not a read of"
-                    + " this camera taken before any flash, so the app has nothing to compare a file with";
+                    + " written with a file made from it that has changed no setting since. Either way it is not a read of"
+                    + " this camera taken before any write, so the app has nothing to compare a file with";
         }
         for (int i = 0; i < publicSha256.length; i++) {
             if (publicSha256[i].equalsIgnoreCase(sha)) {
                 boolean stock = i == 0 || sha.equalsIgnoreCase(Candidates.CLEAN_STOCK_SHA256);
-                return (stock ? "it is byte for byte the public stock dump"
+                return (stock ? "it is byte for byte the public v006 chip backup the app uses"
                         + (i == 0 ? "" : " (its cleaned copy, the one the app downloads)")
                         + ": a copy of someone else's camera, or a read of"
-                        + " a camera that was flashed with the public restore file and has changed no setting since"
-                        : "it is byte for byte one of the public dumps, not the stock one: a copy of someone else's"
-                        + " camera, or a read of a camera that was flashed with a file made from that dump and has"
+                        + " a camera that was written with the public restore file and has changed no setting since"
+                        : "it is byte for byte one of the public chip backups, not the v006 one the app uses: a copy of someone else's"
+                        + " camera, or a read of a camera that was written with a file made from that chip backup and has"
                         + " changed no setting since")
                         + ". Either way it is not firmware known to fit your camera, so the app has nothing to compare a"
                         + " file with";
             }
         }
         if (!(data[0] == 'S' && data[1] == 'P' && data[2] == 'I' && data[3] == 'I')) {
-            return "it does not begin as Charmera firmware does, so it is not a readable dump of the chip";
+            return "it does not begin as Charmera firmware does, so it is not a readable chip backup";
         }
         Marks marks = findMarks(data);
         if (marks.onlySensorMissing()) {
             return "the app found no image-sensor set-up table of the kind it knows in it, although the build string and"
-                    + " the stamp are there. It may be a complete dump of a build the app does not know, for another kind"
+                    + " the stamp are there. It may be a complete chip backup of a build the app does not know, for another kind"
                     + " of sensor: keep it, and look at it with charmera inspect on a computer";
         }
         if (!marks.complete()) {
             String conflict = marks.stampConflictNote();
             return "the marks every Charmera firmware carries were not all found (" + marks.missing() + "), so it is not a"
-                    + " complete dump of the chip" + (conflict.isEmpty() ? "" : ". " + conflict);
+                    + " complete chip backup" + (conflict.isEmpty() ? "" : ". " + conflict);
         }
         List<Entry> entries = resourceDirectory(data);
         if (entries.isEmpty()) {
@@ -1515,13 +1515,13 @@ public final class UpdateCheck {
         List<String> out = new ArrayList<>();
         Build known = knownBuildOf(data, knownBuilds(build));
         if (known != null) {
-            out.add("Its firmware is " + known.name() + ", unchanged: a public build, which a camera flashed with a file"
+            out.add("Its firmware is " + known.name() + ", unchanged: a public build, which a camera written with a file"
                     + " made from it holds too. So it shows what fits this camera only if it was read before the camera"
-                    + " was ever flashed. The update file's Image sensor set-up line says so too.");
+                    + " was ever written to. The update file's Image sensor set-up line says so too.");
         }
         if (data.length > UPDATE_SIZE && !allFF(data, UPDATE_SIZE, data.length - UPDATE_SIZE)) {
             out.add("The last 128 KiB of the chip, past the end of every update file, are not blank, although they are"
-                    + " in every known dump. No update file writes the first half of them, so on a camera they hold"
+                    + " in every known chip backup. No update file writes the first half of them, so on a camera they hold"
                     + " whatever the original firmware left there. Data there can also come from a read that went wrong."
                     + " The app still takes the backup. Keep it, and if in doubt read the chip again with the toolkit's"
                     + " backup command, which reads it twice and compares.");

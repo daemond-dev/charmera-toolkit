@@ -73,7 +73,7 @@ public final class FlashFlowTest {
 
     /** The full cycle on each route: write, eject, flash, Yes, reconnect, Remove, the listing, the check or read. */
     static void normalCycleOnEachRoute() {
-        // Flash custom firmware: 1 Before you start, 2 drive, 3 write, 4 eject+flash, 5 Remove, 6 Flash check
+        // Write custom firmware: 1 Before you start, 2 drive, 3 write, 4 eject+flash, 5 Remove, 6 Flash check
         FlashFlow f = new FlashFlow(Route.REPAIR);
         Live l = new Live();
         see("Repair before Continue", f, l, "NOW lock1 lock1 lock1 lock1 lock1");
@@ -97,11 +97,11 @@ public final class FlashFlowTest {
         see("ejected and unplugged to flash: same steps", f, away, "done done done NOW lock4 lock4");
         expect("the drive gone ends the synced claim's mount", !f.syncedClaim());
         expect("unplugged to flash: the drive line says to flash as step 4 says (round 5 #0)",
-                f.unpluggedHint(away).equals("Unplugged: flash the camera as step 4 says, then answer the question."));
+                f.unpluggedHint(away).equals("Unplugged: let the camera write the file as step 4 says, then answer the question."));
         f.answered(true);
         see("Yes: the flash step is done, Remove is current", f, away, "done done done done NOW lock5");
         expect("Yes: the answer line points at Remove, which is open",
-                f.answerLine(away).equals("Logged: flash seen, v0.23. Next: remove the update file."));
+                f.answerLine(away).equals("Logged: Upgrade 100% seen, v0.23. Now remove the update file."));
         expect("Yes, unplugged: the drive line gives the safe order", f.unpluggedHint(away).equals(FlashFlow.SAFE_ORDER));
         expect("Yes, unplugged: reconnect to remove", f.afterUnseenEject(away).equals(FlashFlow.RECONNECT_TO_REMOVE));
         f.mountChanged();
@@ -109,8 +109,8 @@ public final class FlashFlowTest {
         see("reconnected, the file listed: Remove is current", f, l, "done done done done NOW lock5");
         f.removalWorked(Route.REPAIR);
         see("removed, no listing yet: Remove stays open, the check waits", f, l, "done done done done NOW lock5");
-        expect("removed: the folded flash line says no more 'Next: remove' (round 5 #3, #16)",
-                f.flashSummary(l).equals("Logged: flash seen, v0.23.") && f.answerLine(l).equals(f.flashSummary(l)));
+        expect("removed: the folded flash line says no more 'Now remove' (round 5 #3, #16)",
+                f.flashSummary(l).equals("Logged: Upgrade 100% seen, v0.23.") && f.answerLine(l).equals(f.flashSummary(l)));
         expect("removed, not yet listed: an unplug now says to reconnect so the app can see it",
                 f.afterUnseenEject(away).equals("Reconnect the camera, so the app can see that the update file is gone."));
         f.listing();
@@ -294,9 +294,9 @@ public final class FlashFlowTest {
         f.written(PROBE, PROBE_NAME, true, T, "", "probe");
         expect("written: the drive step stays done unplugged", f.view(away).done(Step.DRIVE));
         expect("written, unplugged: flash as step 3 says, never 'switch on and connect'", f.unpluggedHint(away)
-                .equals("Unplugged: flash the camera as step 3 says, then answer the question."));
+                .equals("Unplugged: let the camera write the file as step 3 says, then answer the question."));
         expect("written, ejected with the cable still in: unplug first, then flash as step 3 says",
-                f.unpluggedHint(away, true).equals("Ejected: unplug the cable, then flash the camera as step 3 says"
+                f.unpluggedHint(away, true).equals("Ejected: unplug the cable, then let the camera write the file as step 3 says"
                         + " and answer the question."));
         f.answered(true);
         expect("answered, unplugged: safe order", f.unpluggedHint(away).equals(FlashFlow.SAFE_ORDER));
@@ -339,7 +339,7 @@ public final class FlashFlowTest {
         f.listing();
         see("found, removed without an answer: the check opens", f, l, "done done done done done NOW");
         expect("found and removed unanswered: the folded flash line says so", f.flashSummary(l)
-                .equals("Flash question not answered. The update file is removed."));
+                .equals("Upgrade 100% question not answered. The update file is removed."));
         // found after an earlier answer in the same run: that answer does not carry over (round 1 #10)
         FlashFlow g = cycleTo(Route.REPAIR, Stage.WRITTEN);
         g.answered(false);
@@ -488,7 +488,7 @@ public final class FlashFlowTest {
         see("not seen: the flash step stays open (its More info in sight), Remove open too", f, l,
                 "done done done NOW open lock4");
         expect("not seen: the line sends to More info below, in the same open step", f.answerLine(l)
-                .equals("Logged: flash not seen. Open More info below for what to do."));
+                .equals("Logged: Upgrade 100% not seen. Open More info below for what to do."));
         expect("not seen: the drive line gives the safe order", f.unpluggedHint(unplugged(l)).equals(FlashFlow.SAFE_ORDER));
         f.answered(true);
         see("then Yes (the second try worked): done, Remove current", f, l, "done done done done NOW lock5");
@@ -504,7 +504,7 @@ public final class FlashFlowTest {
         p.checked(true, "A sensor answered");
         see("not seen, removed, then a result read: the write is behind after all", p, l, "done done done done NOW");
         expect("not seen and removed: the folded line has no instruction", f.flashSummary(l)
-                .equals("Logged: flash not seen."));
+                .equals("Logged: Upgrade 100% not seen."));
         FlashFlow n = new FlashFlow(Route.PROBE);
         n.answered(true);
         expect("an answer with nothing written is ignored", n.stage() == Stage.NONE && n.seen() == null);
@@ -564,7 +564,7 @@ public final class FlashFlowTest {
         expect("removed on another route: this run's removal is pending a listing", f.stage() == Stage.REMOVING);
         f.listing();
         expect("then listed: the flash step is behind, unanswered", f.stage() == Stage.REMOVED
-                && f.flashSummary(ready()).equals("Flash question not answered. The update file is removed."));
+                && f.flashSummary(ready()).equals("Upgrade 100% question not answered. The update file is removed."));
         FlashFlow g = cycleTo(Route.PROBE, Stage.ANSWERED);
         g.removalWorked(null);
         g.listing();
@@ -965,10 +965,10 @@ public final class FlashFlowTest {
             }
         }
         expect(where + ": the drive line is one of the known ones", hint.equals(FlashFlow.SAFE_ORDER)
-                || hint.equals(FlashFlow.PLAIN_ORDER) || hint.startsWith("Unplugged: flash the camera as step "));
+                || hint.equals(FlashFlow.PLAIN_ORDER) || hint.startsWith("Unplugged: let the camera write the file as step "));
         expect(where + ": ejected with the cable in, the line says to unplug it first",
                 ejectedHint.equals(FlashFlow.EJECTED_IN) || ejectedHint.startsWith("Ejected: unplug the cable, then"
-                        + " flash the camera as step "));
+                        + " let the camera write the file as step "));
         expect(where + ": the two lines send to the flash step in the same states",
                 hint.startsWith("Unplugged") == ejectedHint.startsWith("Ejected: unplug the cable, then"));
         if (f.mayHoldUpdateFile()) {
@@ -978,8 +978,8 @@ public final class FlashFlowTest {
         if (hint.startsWith("Unplugged")) {
             expect(where + ": 'flash as step N says' only before the answer", f.stage() == Stage.WRITTEN);
         }
-        if (answer.contains("Next: remove")) {
-            expect(where + ": 'Next: remove' only while Remove is open", v.open(Step.REMOVE));
+        if (answer.contains("Now remove")) {
+            expect(where + ": 'Now remove' only while Remove is open", v.open(Step.REMOVE));
         }
         if (answer.contains("More info below")) {
             expect(where + ": 'More info below' only while the flash step is open", v.open(Step.FLASH));

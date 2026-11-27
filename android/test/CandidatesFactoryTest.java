@@ -26,9 +26,9 @@ public final class CandidatesFactoryTest {
 
         // The SHA-256 gate on the input: only the factory dump makes a factory kind.
         expect("a synthetic 2 MiB image is not the factory dump", !Candidates.isFactoryDump(img)
-                && refused(() -> Candidates.factoryDump(img), "not the factory dump"));
+                && refused(() -> Candidates.factoryDump(img), "not the factory chip backup"));
         expect("build() refuses a factory kind from any other dump, before making anything",
-                refused(() -> Candidates.build(img, Candidates.Kind.V025), "not the factory dump"));
+                refused(() -> Candidates.build(img, Candidates.Kind.V025), "not the factory chip backup"));
         expect("a short file is not the factory dump", !Candidates.isFactoryDump(new byte[10])
                 && refused(() -> Candidates.factoryDump(new byte[10]), Candidates.FACTORY_DUMP_NAME));
         expect("the refusal names the dump's SHA-256 on its Detail line",
@@ -100,7 +100,7 @@ public final class CandidatesFactoryTest {
         expect("a patch table needs one offset per entry", refused(() -> new Candidates.Layer(new int[0][],
                 new int[]{1, 2}, new byte[][]{{1}}), "one offset per entry"));
         expect("only factory kinds have layers", refused(() -> Candidates.layersOf(Candidates.Kind.BRINGUP),
-                "not made from the factory dump"));
+                "not made from the factory chip backup"));
 
         // v0.26 = v0.25's layer, then its own: one copy of the vendor template (from the dump), then 332 authored bytes.
         expect("v0.26 is v0.25's layer plus its own", Arrays.equals(Candidates.layersOf(Candidates.Kind.V026),
@@ -166,7 +166,7 @@ public final class CandidatesFactoryTest {
         expect("no v0.26 patch lies in the photo slots or past the update file", outside(Candidates.V026_OFFSETS,
                 Candidates.V026_BYTES));
         expect("build() refuses v0.26 from any other dump", refused(() -> Candidates.build(img, Candidates.Kind.V026),
-                "not the factory dump"));
+                "not the factory chip backup"));
 
         // The fixed Repair kinds (the builds older apps numbered v0.27 to v0.24), newest first.
         Candidates.Kind[] versions = Candidates.repairVersions();

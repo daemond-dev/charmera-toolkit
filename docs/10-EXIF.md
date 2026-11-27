@@ -6,7 +6,7 @@ Reading order: 10 of 15 · previous: [Resource pack and boot logo](09-RESOURCES.
 reads the card. If the computer or phone won't open the card at all, fix that first
 ([SD card problems](05-CARDS.md)).
 
-## The problem
+## What the camera writes wrong
 
 The Generalplus firmware writes an EXIF block that standard tools reject, and a wrong date into every
 video. Two community projects documented and fixed these defects: jphastings/charmera (Go) and
@@ -25,7 +25,7 @@ In every JPEG the known builds write:
   photos under "Generalplus CBB3".
 - Some files carry no usable date at all.
 
-A photo the 2026-11-06 camera took on its original firmware, before it was flashed, has no EXIF block at
+A photo the 2026-11-06 camera took on its original firmware, before anything was written to it, has no EXIF block at
 all (VERIFIED from its header). Nothing in it is wrong, and nothing in it gives a date. `exif-fix` gives
 such a photo a fresh EXIF block dated from the file's modification time, and its line says
 `no EXIF in source`. `photo-id` in the [Command reference](07-USAGE.md) tells you which kind of header a
@@ -35,19 +35,19 @@ In every AVI the public build writes (Motion-JPEG video plus PCM audio in a RIFF
 
 - The recording date inside the file is always 2010-06-29. The public build writes an `INFO` list whose
   `ICRD` (creation date) chunk holds the fixed text `2010-06-29`, next to `ISRC`, `IART` and `ICOP` chunks
-  that hold `Generplus` (sic). It writes no `IDIT` chunk anywhere. (VERIFIED in the public dump by static
-  analysis: the code that builds the list, the strings, and no `IDIT` tag built byte by byte either.) The
-  film-mods build carries the same strings and no `IDIT` string (VERIFIED by search; its code was not
-  traced). Software that takes a video's date from `ICRD` sorts every such video into 2010.
-- The `IDIT` chunk (in the header list `hdrl`, in C `asctime` form, `Tue Jun 29 12:00:00 2010`) comes from
-  the community tools `exif-fix` was ported from. They expect it in Charmera videos and rewrite it when it's
+  that hold `Generplus` (sic). It writes no `IDIT` chunk anywhere. This is VERIFIED in the public dump by static
+  analysis of the code that builds the list and of the strings, and no `IDIT` tag is built byte by byte either. The
+  film-mods build carries the same strings and no `IDIT` string (VERIFIED by search). Its code was not
+  traced. Software that takes a video's date from `ICRD` sorts every such video into 2010.
+- The `IDIT` chunk comes from the community tools `exif-fix` was ported from. They expect it in Charmera
+  videos, in the header list `hdrl` in C `asctime` form (`Tue Jun 29 12:00:00 2010`), and rewrite it when it's
   there. This project hasn't seen the Charmera write one, but `exif-fix` handles it too if a file has it.
 - The real recording time is the file's modification time, which the camera writes correctly to the card
-  (REPORTED by the community tools; not traced in the firmware).
+  (REPORTED by the community tools, not traced in the firmware).
 
-## The fix
+## How exif-fix repairs a copy
 
-For photos, the old EXIF block is never edited in place, because its offsets can't be trusted. Instead:
+For photos, the old EXIF block is never edited in place, because its offsets can't be trusted. `exif-fix` writes a new one:
 
 1. The JPEG's marker segments are walked up to the scan data to find the APP1 Exif segment (if any) and
    the frame header (SOF), which gives the true dimensions.
@@ -73,16 +73,16 @@ For photos, the old EXIF block is never edited in place, because its offsets can
 
 Which JPEGs get this treatment is decided per file, not per folder. A JPEG is a Charmera photo when its
 first 4 KiB contain the Generalplus `GPEncoder` comment, or its salvaged `Make` is `Generalplus`, or one
-of its dates has the all-colons form. Any other JPEG under the source (a phone picture dropped into
-`DCIM`, an export from an editor) is copied unchanged, with the same naming and modification time, and
+of its dates has the all-colons form. Any other JPEG under the source, such as a phone picture dropped into
+`DCIM` or an export from an editor, is copied unchanged, with the same naming and modification time, and
 its line says `not a Charmera photo, copied unchanged`. Rebuilding it would throw away GPS, exposure and
 every other tag this tool doesn't write, and label another camera's picture Kodak/Charmera.
 `--relabel-all` turns the check off and rebuilds every JPEG. It's meant for a folder you know holds only
 Charmera photos whose fingerprints some earlier tool stripped.
 
 For videos, the default, `--video fix-date`, copies the AVI and rewrites the date chunks in the copy, in
-place. It looks for `IDIT` and `ICRD` chunks wherever they sit in the file's lists (it doesn't read the
-frame data, `movi`). Each one that holds the date 2010-06-29 is rewritten with the file's modification time
+place. It looks for `IDIT` and `ICRD` chunks wherever they sit in the file's lists. It doesn't read the
+frame data, `movi`. Each one that holds the date 2010-06-29 is rewritten with the file's modification time
 in the same text form (asctime, EXIF or ISO, trailing newline kept) and the same byte length, NUL-padded,
 so no other byte of the file moves and the RIFF structure stays valid. In a video of the public build that's
 the one `ICRD` chunk. A genuine date is left alone and reported, and a file with neither chunk is copied
@@ -98,7 +98,7 @@ unchanged.
 Output files keep the source's modification time, so the real recording time survives even in tools that
 only look at file dates.
 
-## The command
+## Run exif-fix
 
 ```
 charmera exif-fix [--source DIR] --out DIR [--video {fix-date,transcode,copy}]
@@ -118,8 +118,8 @@ charmera exif-fix [--source DIR] --out DIR [--video {fix-date,transcode,copy}]
   record.
 - `--keep-names` keeps the source names instead. Both known builds write every photo and video straight
   into the card's `DCIM` folder, with no subfolder, each new file numbered one above the highest of its
-  kind there (VERIFIED by static analysis of the public build; the film-mods build carries the same name
-  formats, VERIFIED by search). So the files of one card never share a name. Names do repeat between
+  kind there. This is VERIFIED by static analysis of the public build, and the film-mods build carries the same
+  name formats (VERIFIED by search). So the files of one card never share a name. Names do repeat between
   cards, and on a card that was emptied (INFERRED from that numbering), so a folder of earlier copies can
   hold `card-a/PICT0001.JPG` and `card-b/PICT0001.JPG`. A name that occurs more than once among the sources
   gets the name of its own folder in front (`card-a_PICT0001.JPG`, `card-b_PICT0001.JPG`), so keep the
@@ -129,7 +129,7 @@ charmera exif-fix [--source DIR] --out DIR [--video {fix-date,transcode,copy}]
   (`PICT0001_1.JPG`) and the line says `name taken by a different file, written as ...`. The summary
   counts these name collisions separately from the files already imported.
 - `--relabel-all` rebuilds the EXIF of every JPEG, including ones that don't look like Charmera photos
-  (see "The fix").
+  (see "How exif-fix repairs a copy").
 - Files are `.jpg`, `.jpeg` and `.avi`, in any case. Names starting with `._` (macOS metadata) are
   skipped.
 - `--dry-run` prints the per-file report and writes nothing, not even the output directory.
@@ -142,8 +142,8 @@ charmera exif-fix [--source DIR] --out DIR [--video {fix-date,transcode,copy}]
   rewritten, or why none were. A final line gives the counts. Lines are printed in a form the console can
   show: on a Windows code page that can't encode a file name, the non-ASCII characters appear escaped
   instead of stopping the run.
-- The exit code is 0 when every file was handled, and 1 when any file failed (the others are still
-  processed) or no source could be found.
+- The exit code is 0 when every file was handled, and 1 when any file failed or no source could be found. A
+  failed file doesn't stop the others.
 
 Example:
 
@@ -155,7 +155,7 @@ MOVI0002.AVI -> VID_20260303_121702_a90b3e77c1d2f004.avi: 1440x1080, date 2026:0
 Done: 1 photos fixed, 1 photos copied unchanged (not Charmera), 1 videos date-fixed, 0 skipped (already imported into /home/me/Pictures/charmera), 0 failed
 ```
 
-## Verifying
+## Test exif-fix
 
 `python -m pytest tests/test_exif.py` rebuilds EXIF on generated JPEGs and checks it with the module's own
 reader and with Pillow's independent one (dimensions, dates, Make/Model, FNumber, lens tags, identical
@@ -171,10 +171,10 @@ Set `CHARMERA_STOCK_IMAGE` to the path of a public stock dump to run the same ch
 stored inside it (at `0x180000` and `0x1A5800`). That test is skipped when the variable is unset.
 
 When ffmpeg is on PATH, the suite also generates a real MJPEG/PCM AVI and injects an `IDIT` and an `ICRD`
-chunk the way the C# importer lays them out (the two forms the rewrite handles). It then confirms with
+chunk the way the C# importer lays them out, the two forms the rewrite handles. It then confirms with
 ffprobe that `creation_time` changes from 2010-06-29 to the file time while the file still decodes.
 
-## Limitations
+## Known limits
 
 - What the public build writes into a video (`ICRD` in `INFO` as an ISO date, and no `IDIT`) comes from its
   code, not from a video an actual camera recorded. None has been examined here. The C# importer's code and

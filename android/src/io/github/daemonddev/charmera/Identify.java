@@ -44,10 +44,10 @@ final class Identify {
 
     static final String CAVEAT_V008 = "A photo can't tell v006 from v008_test. Both are stock builds for SP140A"
             + " cameras and write the same header, so the app suggests base v006 for either.";
-    static final String CAVEAT_AFTER_FLASH = "Photos show the firmware that took them. On a camera that was flashed,"
-            + " or that freezes in Photo mode, only photos from before the flash say what fits.";
+    static final String CAVEAT_AFTER_FLASH = "Photos show the firmware that took them. On a camera that was written to,"
+            + " or that freezes in Photo mode, only photos from before the write say what fits.";
     static final String CAVEAT_CLOCK = "Dates and order come from the file times, which come from the camera's clock.";
-    static final String OUR_OV9732_PORT = "If this camera was ever flashed with our OV9732 port on v006, its photos"
+    static final String OUR_OV9732_PORT = "If our OV9732 port on v006 was ever written to this camera, its photos"
             + " look like this too.";
     static final String NOT_STOCK = "This camera does not look stock: ";
 
@@ -463,7 +463,7 @@ final class Identify {
             Run a = r.runs.get(0);
             Run b = r.runs.get(1);
             return "photos from two firmware families, " + familyName(a.family) + " up to " + date(a.last, tz) + " and "
-                    + familyName(b.family) + " from " + date(b.first, tz) + ". Either the camera was flashed in between,"
+                    + familyName(b.family) + " from " + date(b.first, tz) + ". Either firmware was written to the camera in between,"
                     + " or the card holds photos from two cameras.";
         }
         StringBuilder sb = new StringBuilder();
@@ -472,7 +472,7 @@ final class Identify {
                     .append(" to ").append(date(x.last, tz));
         }
         return String.format(Locale.ROOT, "photos from two firmware families, which change %d times by date (%s)."
-                + " Either the camera was flashed more than once, or the card holds photos from more than one camera.",
+                + " Either firmware was written to the camera more than once, or the card holds photos from more than one camera.",
                 r.runs.size() - 1, sb);
     }
 
@@ -549,11 +549,11 @@ final class Identify {
             r.confidenceWhy = whys.isEmpty() ? String.format(Locale.ROOT, "all %d camera-written photos read show the"
                     + " same family, oldest to newest", r.recognised) : joined(whys);
             lines.add("These photos were taken by stock " + stockName(oldestFamily) + " (" + cameraName(oldestFamily)
-                    + "). If the camera was flashed after them, it runs something else now.");
+                    + "). If firmware was written to the camera after them, it runs something else now.");
         }
         lines.addAll(r.notStock);
         lines.add("Your base is " + baseName(r.base) + "." + (r.changes.isEmpty() ? ""
-                : " That's from the oldest photos, since photos from before a flash show the stock firmware.")
+                : " That's from the oldest photos, since photos from before a write show the stock firmware.")
                 + " " + nextStep(r.base));
         if (r.skippedNewest > 0) {
             r.notes.add(r.skippedNewest == 1 ? "The newest photo file was not the camera's own and was skipped."
@@ -572,11 +572,11 @@ final class Identify {
 
     /**
      * What to do with the base found, by the app's screen names. Stock v006 is written on Restore stock firmware or
-     * Advanced, never on Flash custom firmware, so the v006 family is sent there for stock and here only for mods.
+     * Advanced, never on Write custom firmware, so the v006 family is sent there for stock and here only for mods.
      */
     static String nextStep(Base b) {
-        return b == Base.V012 ? "Pick base v012 on \"Flash custom firmware\"."
-                : "For mods, pick base v006 on \"Flash custom firmware\". Stock v006 is written on \"Restore stock"
+        return b == Base.V012 ? "Pick base v012 on \"Write custom firmware\"."
+                : "For mods, pick base v006 on \"Write custom firmware\". Stock v006 is written on \"Restore stock"
                 + " firmware\" or Advanced.";
     }
 

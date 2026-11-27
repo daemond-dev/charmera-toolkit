@@ -32,7 +32,7 @@ public final class FlashLogTest {
         expect("the SHA-256 prefix is 12 lowercase hex digits", log.entries().get(2).sha256Prefix.equals("abcdef012345"));
         expect("missing fields read as empty", log.entries().get(0).sha256Prefix.isEmpty() && log.entries().get(0).note.isEmpty());
         expect("a removed file is passed over: the flash seen is the state",
-                log.summary(UTC).equals("v0.23, flash seen 11 Nov 13:03"));
+                log.summary(UTC).equals("v0.23, Upgrade 100% seen 11 Nov 13:03"));
         boolean readOnly;
         try {
             log.entries().clear();
@@ -43,8 +43,8 @@ public final class FlashLogTest {
         expect("entries() is read-only", readOnly && log.size() == 3);
 
         // summary for each kind of latest event
-        expect("written but not seen", one(FlashLog.Event.WRITTEN, "v0.23").equals("v0.23 written 11 Nov 13:02, flash not confirmed"));
-        expect("flash not seen", one(FlashLog.Event.FLASH_NOT_SEEN, "v0.23").equals("unknown (v0.23 flash not seen 11 Nov 13:02)"));
+        expect("written but not seen", one(FlashLog.Event.WRITTEN, "v0.23").equals("v0.23 written 11 Nov 13:02, Upgrade 100% not confirmed"));
+        expect("flash not seen", one(FlashLog.Event.FLASH_NOT_SEEN, "v0.23").equals("unknown (v0.23 Upgrade 100% not seen 11 Nov 13:02)"));
         expect("check failed", one(FlashLog.Event.CHECK_FAILED, "").equals("unknown (photo check failed 11 Nov 13:02)"));
         expect("only a backup is none yet", one(FlashLog.Event.BACKUP_SAVED, "").equals("none yet"));
         FlashLog checked = new FlashLog();

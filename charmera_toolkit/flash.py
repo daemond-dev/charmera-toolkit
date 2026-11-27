@@ -523,14 +523,14 @@ def public_read_note(source: str) -> List[str]:
     if source == CLEAN_V012:
         return [
             f"this read is byte-identical to {source}: the OV9732 cameras' factory build v012 with only",
-            "its factory settings record and no stored photos. It may be this camera after it was flashed with",
-            "a file made from that copy, or someone else's copy of it. The app does not take it as a backup:",
+            "its factory settings record and no stored photos. It may be this camera after a file made from that",
+            "copy was written to it, or someone else's copy of it. The app does not take it as a backup:",
             "byte for byte it cannot be told from someone else's copy.",
         ]
     return [
-        f"this read is byte-identical to the public dump from {source}. A camera flashed with the",
-        "public restore file, or with another file made from that dump, reads exactly like that until a",
-        "setting changes, so this may be this camera after such a flash. It is then the way back to that",
+        f"this read is byte-identical to the public dump from {source}. A camera with the",
+        "public restore file, or another file made from that dump, written to it reads exactly like that",
+        "until a setting changes, so this may be this camera after such a write. It is then the way back to that",
         "state, not a reference for which image sensor the camera has. The app does not take it as a",
         "backup: byte for byte it cannot be told from someone else's copy of that dump.",
     ]
@@ -552,9 +552,9 @@ def public_image_note(source: str) -> List[str]:
         ]
     return [
         f"this image is byte-identical to the public dump from {source}. It is that dump, or the read",
-        "of a camera flashed with the public restore file (or another file made from that dump) that changed",
-        "no setting since, such as a camera after the stock restore flash, and then the way back to that",
-        "state. Either way it is not firmware known to fit this camera: after it was flashed, one camera could",
+        "of a camera that had the public restore file (or another file made from that dump) written to it and",
+        "changed no setting since, such as a camera after the stock restore write, and then the way back to that",
+        "state. Either way it is not firmware known to fit this camera: after it was written to one camera, that camera could",
         "no longer take pictures; the likely cause is a sensor it does not drive (INFERRED). Its settings and",
         "its two internal photos are that dump's owner's.",
     ]
@@ -742,7 +742,7 @@ def read_and_keep(flashrom: str, version: str, programmer: str, chip: Optional[s
                        else "and the chip is not being read whole, so nothing was written to it")
         kept.problem = (
             f"the read is {info['size']:,} bytes, not {FLASH_SIZE:,}: this file is not a full-flash image\n"
-            f"{consequence}. `probe` should report a 2048 kB chip; a different size usually\n"
+            f"{consequence}. `probe` reports the right chip as 2048 kB; a different size usually\n"
             "means a bad clip contact, a back-powered board (battery still connected) or the wrong --chip.\n"
             f"Fix that and run {command} again. The file above is kept only as a record of what was read."
         )
@@ -1017,7 +1017,7 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
         ask = ["The image and the firmware on the chip drive different image sensors (the sensor lines above)."]
     elif image_table is not None and chip_table is not None and image_table["sha256"] == chip_table["sha256"]:
         _note(["The same table: the image sets up the image sensor as the firmware on the chip does. That",
-               "firmware fits this camera only if it is the one the camera came with, not one flashed onto it since."],
+               "firmware fits this camera only if it is the one the camera came with, not one written to it since."],
               indent)
         return None
     elif chip_table is None:
@@ -1235,7 +1235,7 @@ def register(subparsers) -> None:
         "--allow-unknown-build",
         action="store_true",
         help="write an image that carries no Charmera build marks, or whose ARM vector table (0x200..0x240) no known build "
-        "carries. After a flash, one camera started but froze in photo and "
+        "carries. After a write, one camera started but froze in photo and "
         "video mode; the likely cause, a sensor the firmware does not drive, is INFERRED. It never writes an image whose "
         "code refers to several sensor programs",
     )

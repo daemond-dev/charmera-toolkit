@@ -46,7 +46,7 @@ public final class IdentifyTest {
         expect("the flash caveat says photos show the firmware that took them",
                 Identify.CAVEAT_AFTER_FLASH.startsWith("Photos show the firmware that took them")
                         && Identify.CAVEAT_AFTER_FLASH.contains("freezes in Photo mode")
-                        && Identify.CAVEAT_AFTER_FLASH.contains("only photos from before the flash say what fits"));
+                        && Identify.CAVEAT_AFTER_FLASH.contains("only photos from before the write say what fits"));
 
         // stock v012: bare everywhere, read in time order, not list order
         List<Identify.Entry> card = new ArrayList<>();
@@ -58,7 +58,7 @@ public final class IdentifyTest {
                 && "DCIM/PICT0003.jpg".equals(r.newest.path));
         expect("bare everywhere is stock v012, high", r.base == Identify.Base.V012
                 && r.family == Identify.Base.V012 && r.confidence == Identify.Confidence.HIGH && r.changes.isEmpty()
-                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If the camera was flashed after them, it runs something else now.") && r.notStock.isEmpty()
+                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If firmware was written to the camera after them, it runs something else now.") && r.notStock.isEmpty()
                 && !r.conclusion.contains("does not look stock") && !r.conclusion.contains("OV9732 port on v006"));
         expect("the evidence names both ends", any(r.evidence, "Oldest camera-written: DCIM/PICT0001.jpg")
                 && any(r.evidence, "Newest camera-written: DCIM/PICT0003.jpg"));
@@ -85,9 +85,9 @@ public final class IdentifyTest {
                 && r.confidence == Identify.Confidence.HIGH && r.notStock.isEmpty()
                 && r.conclusion.startsWith("These photos were taken by stock v006 or v008_test (an SP140A camera)."));
         expect("the v006 family's base is v006, as identify.py's, and the line says where each v006 file is written",
-                r.conclusion.contains("\nYour base is v006. For mods, pick base v006 on \"Flash custom firmware\". Stock"
+                r.conclusion.contains("\nYour base is v006. For mods, pick base v006 on \"Write custom firmware\". Stock"
                         + " v006 is written on \"Restore stock firmware\" or Advanced.")
-                && Identify.nextStep(Identify.Base.V012).equals("Pick base v012 on \"Flash custom firmware\".")
+                && Identify.nextStep(Identify.Base.V012).equals("Pick base v012 on \"Write custom firmware\".")
                 && Identify.baseName(Identify.Base.V006_FAMILY).equals("v006")
                 && Identify.stockName(Identify.Base.V006_FAMILY).equals("v006 or v008_test"));
         expect("all read agree: high, and why", r.confidenceWhy.equals("all 2 camera-written photos read show the same"
@@ -103,7 +103,7 @@ public final class IdentifyTest {
         expect("one photo is both the oldest and the newest", r.oldest == r.newest && r.evidence.size() >= 2
                 && !any(r.evidence, "Newest camera-written"));
         expect("a single photo is medium", r.base == Identify.Base.V012 && r.confidence == Identify.Confidence.MEDIUM
-                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If the camera was flashed after them, it runs something else now."));
+                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If firmware was written to the camera after them, it runs something else now."));
 
         // only OTHER photos: no verdict
         card = new ArrayList<>();
@@ -162,7 +162,7 @@ public final class IdentifyTest {
         expect("two families say so, with both dates", r.notStock.size() == 2 && r.notStock.get(0).equals(
                 "This camera does not look stock: photos from two firmware families, the v006 family up to "
                         + Identify.date(card.get(3), UTC) + " and the v012 family from " + Identify.date(card.get(4), UTC)
-                        + ". Either the camera was flashed in between, or the card holds photos from two cameras."));
+                        + ". Either firmware was written to the camera in between, or the card holds photos from two cameras."));
         expect("and the EXIF mod as well, without weakening the base", r.notStock.get(1).contains("our EXIF mod")
                 && r.conclusion.contains("Your base is v006. That's from the oldest photos, since")
                 && !r.conclusion.contains("Your base is v012"));
@@ -191,7 +191,7 @@ public final class IdentifyTest {
                         + " v012 family " + Identify.date(card.get(0), UTC) + " to " + Identify.date(card.get(0), UTC)
                         + "; the v006 family " + Identify.date(card.get(1), UTC) + " to " + Identify.date(card.get(1), UTC)
                         + "; the v012 family " + Identify.date(card.get(2), UTC) + " to " + Identify.date(card.get(2), UTC)
-                        + "). Either the camera was flashed more than once, or the card holds photos from more than one"
+                        + "). Either firmware was written to the camera more than once, or the card holds photos from more than one"
                         + " camera."));
 
         // photos with no file time are left out of the dating: never read, counted and named

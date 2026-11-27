@@ -38,7 +38,7 @@
    "prep": "truncate-blank-photos",
    "size": 2097152,
    "sha256": "08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce",
-   "source": "the owner's own read of a never-flashed camera (private, not published)",
+   "source": "the owner's own read of a camera never written to (private, not published)",
    "url": null
   },
   {
@@ -73,7 +73,7 @@
    "name": "sensor-probe",
    "title": "Sensor-ID probe",
    "phrase": "the sensor-ID probe",
-   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops there. It replaces the camera's firmware until you flash another.",
+   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops there. It replaces the camera's firmware until you write another.",
    "status": "tested",
    "conflicts": [
     "v006/ov9732-port",
@@ -100,7 +100,7 @@
    "name": "ov9732-port",
    "title": "OV9732 port",
    "phrase": "the OV9732 port",
-   "description": "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning. It's for an OV9732 camera that was flashed with this build.",
+   "description": "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning. It's for an OV9732 camera that had this build written to it.",
    "status": "tested",
    "conflicts": [
     "v006/sensor-probe"

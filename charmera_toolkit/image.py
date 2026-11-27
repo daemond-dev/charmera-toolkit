@@ -139,8 +139,8 @@ V012_BUILD = KnownBuild(
     key="v012",
     label=("the factory build v012 of OV9732 cameras (the-dumping-grounds/charmera-firmware-v012, same stamp 202505201029, "
            "compiled Jan 12 2026)"),
-    source=("the-dumping-grounds/charmera-firmware-v012 charmera-v012-2026-01-12-clean.bin (the cleaned copy of a never-flashed "
-            "camera's read; bytes 0..0x170000 are that read's, byte for byte)"),
+    source=("the-dumping-grounds/charmera-firmware-v012 charmera-v012-2026-01-12-clean.bin (the cleaned copy of the read of a "
+            "camera never written to; bytes 0..0x170000 are that read's, byte for byte)"),
     status="VERIFIED",
     stamp="202505201029",
     official_sha1="2cc13517f5b88d3253f5cde7b5fcde9e43df5fce",
@@ -928,9 +928,9 @@ def photos_whose(image: bytes) -> str:
     if public:
         owner = public[0][1]
         return (f"the photos of the camera the {owner} dump was read from: every 0x1E0000-byte file made from that dump "
-                "carries them, so a camera flashed with one holds them too")
+                "carries them, so a camera with one written to it holds them too")
     return ("the photos stored in the camera this was read from: its own only if no 0x1E0000-byte file carrying "
-            "photos was flashed onto it before that read")
+            "photos was written to it before that read")
 
 
 # --- Summary -------------------------------------------------------------------------------------------

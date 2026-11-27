@@ -707,7 +707,7 @@ def register(subparsers) -> None:
             "header is not the one they write, and a JUNK text other than "
             "'GP$322 Generalplus AviPackerV3 20140916', the packer text v006, v008_test and v012 all carry, shows "
             "that other code wrote the file. A photo shows the firmware that took it, not the one that fits the "
-            "camera: a photo taken after a flash shows the flashed firmware. Nothing here says whether a firmware "
+            "camera: a photo taken after a write shows the firmware that was written. Nothing here says whether a firmware "
             "fits a camera."
         ),
     )

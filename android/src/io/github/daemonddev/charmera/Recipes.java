@@ -33,8 +33,8 @@ final class Recipes {
     static final String[] MOD_PHRASES = {"the sensor-ID probe", "the OV9732 port", "Volume and LED rows", "Volume and LED rows", "EXIF dates", "boot to last mode", "capture flash"};
     static final String[] MOD_STATUS = {"tested", "tested", "tested", "tested", "tested", "tested", "tested"};
     static final String[] MOD_DESCRIPTIONS = {
-            "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops there. It replaces the camera's firmware until you flash another.",
-            "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning. It's for an OV9732 camera that was flashed with this build.",
+            "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops there. It replaces the camera's firmware until you write another.",
+            "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning. It's for an OV9732 camera that had this build written to it.",
             "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
             "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
             "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26 (an old build number that's part of the mod's code, so it can't change), and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",

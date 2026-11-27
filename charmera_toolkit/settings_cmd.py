@@ -106,5 +106,5 @@ def register(subparsers) -> None:
     for key, (_off, lo, hi, desc) in FIELDS.items():
         p.add_argument("--" + key.replace("_", "-"), type=int, default=None, metavar=f"{lo}..{hi}", help=f"set: {desc}")
     p.add_argument("--overwrite", action="store_true", help="allow --out to replace an existing file (never the input)")
-    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the modified image")
+    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="write the modified image")
     p.set_defaults(func=handler)

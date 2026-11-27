@@ -36,7 +36,7 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         print("reg init list:   " + ", ".join(f"[{r:#010x}]={v:#x}" for r, v in info["reg_init"]) + "  (INFERRED meaning)")
     print(f"build:           {info['identity']}  ({info['identity_label']})")
     print("                 a build match says which public image this is, not whether it fits a given camera: only a dump of")
-    print("                 that camera's own chip read before it was ever flashed does. The stamp 202505201029 is carried by")
+    print("                 that camera's own chip read before it was ever written to does. The stamp 202505201029 is carried by")
     print("                 every known build (v006, v008_test and v012).")
     for k, v in info["identity_checks"].items():
         print(f"  check {k:24s} {_fmt_bool(v)}")
