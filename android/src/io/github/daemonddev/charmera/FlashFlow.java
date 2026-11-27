@@ -1,7 +1,7 @@
 package io.github.daemonddev.charmera;
 
 /**
- * The progress of one flash run on a flashing route (Flash custom firmware, Identify the image sensor, Restore stock
+ * The progress of one flash run on a flashing route (Write custom firmware, Identify the image sensor, Restore stock
  * firmware) for one camera drive, and what the route's steps show for it. No Android imports, so it runs on a plain
  * JVM in android/test/FlashFlowTest.java; MainActivity keeps one run per drive and route in its preferences, so a run
  * survives Android ending the app's process while the camera is away from the phone.
@@ -47,7 +47,7 @@ final class FlashFlow {
     /** The drive line for a drive ejected with the cable still in, outside the flash: nothing else to do with it now. */
     static final String EJECTED_IN = "Ejected ✓ Unplug the cable.";
     static final String CONNECT_LATER = "Connect it again when you need it.";
-    static final String FLASH_NOW_PREFIX = "Flash the camera now and answer the question in step ";
+    static final String FLASH_NOW_PREFIX = "Let the camera write the file now and answer the question in step ";
     /** Shown only while the update file is on the card, so it carries the safe order itself. */
     static final String RECONNECT_TO_REMOVE = "Reconnect the camera to remove the update file, in this order: "
             + SAFE_ORDER;
@@ -64,7 +64,7 @@ final class FlashFlow {
      * comes from it.
      */
     static final class Live {
-        /** Flash custom firmware: "Continue" was tapped under "Before you start". */
+        /** Write custom firmware: "Continue" was tapped under "Before you start". */
         boolean started;
         /** Restore: a backup of this camera is on record. */
         boolean backupOnRecord;
@@ -665,9 +665,9 @@ final class FlashFlow {
      */
     String unpluggedHint(Live live, boolean ejectedIn) {
         if (stage == Stage.WRITTEN && view(live).open(Step.FLASH)) {
-            return ejectedIn ? "Ejected: unplug the cable, then flash the camera as step " + number(Step.FLASH)
+            return ejectedIn ? "Ejected: unplug the cable, then let the camera write the file as step " + number(Step.FLASH)
                     + " says and answer the question."
-                    : "Unplugged: flash the camera as step " + number(Step.FLASH) + " says, then answer the question.";
+                    : "Unplugged: let the camera write the file as step " + number(Step.FLASH) + " says, then answer the question.";
         }
         return unpluggedHint(mayHoldUpdateFile(), ejectedIn);
     }
@@ -743,16 +743,16 @@ final class FlashFlow {
         if (stage == Stage.ANSWERED) {
             View v = view(live);
             if (seen) {
-                return "Logged: flash seen" + fw + "." + (v.open(Step.REMOVE) ? " Next: remove the update file." : "");
+                return "Logged: Upgrade 100% seen" + fw + "." + (v.open(Step.REMOVE) ? " Now remove the update file." : "");
             }
-            return "Logged: flash not seen." + (v.open(Step.FLASH) ? " Open More info below for what to do." : "");
+            return "Logged: Upgrade 100% not seen." + (v.open(Step.FLASH) ? " Open More info below for what to do." : "");
         }
-        return seen ? "Logged: flash seen" + fw + "." : "Logged: flash not seen.";
+        return seen ? "Logged: Upgrade 100% seen" + fw + "." : "Logged: Upgrade 100% not seen.";
     }
 
     /** The flash step's folded line once it is done. */
     String flashSummary(Live live) {
-        return seen == null ? "Flash question not answered. The update file is removed." : answerLine(live);
+        return seen == null ? "Upgrade 100% question not answered. The update file is removed." : answerLine(live);
     }
 
     /** The write step's folded line when its result is no longer on screen (another route, or a restart). */

@@ -271,10 +271,10 @@ def test_app_says_what_a_backup_of_a_known_build_proves():
     assert "Build refBuild = knownBuildOf(reference, known);" in sensor
     warn = sensor[sensor.index("} else if (refBuild != null) {"):]
     assert warn.index("Level.WARN") < warn.index("Level.PASS")
-    assert "only if the backup was read before the camera was ever flashed" in warn
+    assert "only if the backup was read before the camera was ever written to" in warn
     assert "your camera's own firmware" not in java and "the way its own firmware does" not in java
     problem = _bodies(java, "public static String backupProblem(")[0]
-    assert "a read of a camera that was flashed with the public restore file and has changed no setting since" in problem
+    assert "a read of a camera that was written with the public restore file and has changed no setting since" in problem
     assert "resourceProblems(data, entries)" in problem and "charmera inspect" in problem
     notes = _bodies(java, "public static List<String> backupNotes(")[0]
     assert "knownBuildOf(data, knownBuilds(build))" in notes and "not blank" in notes
@@ -292,10 +292,10 @@ def test_app_offers_the_stock_restore_file_only_for_the_public_build():
         assert "left unable to take pictures by" not in text, path.name
         assert "whose backup shows the public build" not in text, path.name
     java = _joined(SRC.read_text(encoding="utf-8"))
-    assert "The stock restore file is only for a camera whose backup, read before the camera was ever flashed, shows" \
+    assert "The stock restore file is only for a camera whose backup, read before the camera was ever written to, shows" \
            " the public build. For any other camera, make the file from its own backup with charmera pack on a" \
            " computer." in java
-    assert "whose backup, read before the camera was ever flashed, shows the public build" in _joined(
+    assert "whose backup, read before the camera was ever written to, shows the public build" in _joined(
         ACTIVITY.read_text(encoding="utf-8"))
     for path in (PKG / "Candidates.java", ACTIVITY):
         assert "what their cameras ran before isn't known" in _joined(path.read_text(encoding="utf-8")), path.name
@@ -875,7 +875,7 @@ def test_app_flash_steps_open_after_a_missed_eject():
     # be on the card (never "switch on and connect" with the card in); from the run, or the drive's runs off a route
     hint = _bodies(flow, "String unpluggedHint(Live live, boolean ejectedIn)")[0]
     assert re.search(r"stage == Stage\.WRITTEN && view\(live\)\.open\(Step\.FLASH\)", hint)
-    assert '"Unplugged: flash the camera as step " + number(Step.FLASH) + " says, then answer the question."' in \
+    assert '"Unplugged: let the camera write the file as step " + number(Step.FLASH) + " says, then answer the question."' in \
         _joined(hint)
     assert "return mayHoldUpdateFile ? SAFE_ORDER : PLAIN_ORDER;" in flow
     assert "return unpluggedHint(mayHoldUpdateFile(), ejectedIn);" in hint
@@ -890,7 +890,7 @@ def test_app_flash_steps_open_after_a_missed_eject():
     assert "Switch the camera on with its power key" not in _joined(java)
     # the answer line points at Remove or at the flash step's own More info only while that step is open
     answer = _bodies(flow, "String answerLine(Live live)")[0]
-    assert '(v.open(Step.REMOVE) ? " Next: remove the update file." : "")' in answer
+    assert '(v.open(Step.REMOVE) ? " Now remove the update file." : "")' in answer
     assert '(v.open(Step.FLASH) ? " Open More info below for what to do." : "")' in answer
     assert "See More info above" not in _joined(java) + _joined(flow)
     assert 'setStatus(flashAnswerView, f == null ? "" : f.answerLine(live()));' in \
@@ -916,11 +916,13 @@ def test_app_flash_steps_open_after_a_missed_eject():
     assert "freshRunIfStale(flowRoute(to));" in _bodies(java, "private void go(Route to)")[0]
     create = _bodies(java, "protected void onCreate(")[0]
     assert create.index("freshRunIfStale(flowRoute(route));") < create.index("render();")
-    # the definition, go(), onCreate, and the four places the Repair version can change: the owner's pick in its menu
-    # (chooseRepair), a factory dump picked on the Repair route or kept from another route (both in loadFile) and a
-    # Repair-version file loaded for that route (followLoadedRepair); each only after repairSel is set
-    assert java.count("freshRunIfStale(") == 7
-    for opener in ("private void chooseRepair(", "private void loadFile(", "private void followLoadedRepair("):
+    # the definition, go(), onCreate, and the five places the Repair version can change: the owner's pick in its menu
+    # (chooseRepair), a factory dump picked on the Repair route or kept from another route (both in loadFile), a
+    # Repair-version file loaded for that route (followLoadedRepair) and an Identify answer before any pick
+    # (followIdentify); each only after repairSel is set
+    assert java.count("freshRunIfStale(") == 8
+    for opener in ("private void chooseRepair(", "private void loadFile(", "private void followLoadedRepair(",
+                   "private boolean followIdentify("):
         body = _bodies(java, opener)[0]
         assert body.index("repairSel = ") < body.index("freshRunIfStale(FlashFlow.Route.REPAIR);"), opener
     assert "return r == FlashFlow.Route.REPAIR ? repairSel.sha256()" in _bodies(java, "private String wantedSha(")[0]
@@ -933,7 +935,7 @@ def test_app_flash_steps_open_after_a_missed_eject():
     # the "Flash again" link is shown and worded from the run as it stands each time the buttons are refreshed
     shown = _bodies(java, "private void showFlashAgain(FlashFlow f)")[0]
     assert "boolean again = f != null && FlashFlow.finished(f);" in shown
-    assert '(f.view(live()).current() < 0 ? "Done. " : "") + "Flash again: start a new run"' in shown
+    assert '(f.view(live()).current() < 0 ? "Done. " : "") + "Start a new run"' in shown
     assert "showFlashAgain(f);" in _bodies(java, "private void updateButtons()")[0]
     assert "Done. Flash again" not in java and "attach(col, flashAgainLink);" in _bodies(java, "private void header(")[0]
     # before the answer a listing without the written file opens Write again, and the write step says so (and takes
@@ -950,12 +952,12 @@ def test_app_flash_steps_open_after_a_missed_eject():
     # the probe's SENSOR.TXT at the write is the run's, so an old file after a restart is never this probe's result
     read = _bodies(java, "private void readSensorResult()")[0]
     assert "final String before = onRecord ? run.sensorAtWrite() : null;" in read
-    assert "The app can't tell whether the probe wrote this file since the last flash" in _joined(read)
+    assert "The app can't tell whether the probe wrote this file since the last write" in _joined(read)
     # ...and FlashFlowTest is run by build.sh (test_build_runs_every_jvm_test_and_compiles_the_gate)
     assert (REPO / "android" / "test" / "FlashFlowTest.java").exists()
     # every route is named in user text as its header names it
     titles = _bodies(java, "private static String routeTitle(")[0]
-    for name in ("Flash custom firmware", "Identify the image sensor", "Restore stock firmware"):
+    for name in ("Write custom firmware", "Identify the image sensor", "Restore stock firmware"):
         assert f'return "{name}";' in titles and java.count(f'"{name}"') == 1, name
 
 
@@ -1135,7 +1137,7 @@ def test_app_warns_loudly_on_an_unknown_file_with_no_backup():
     the write confirmation both carry the loud warning."""
     java = ACTIVITY.read_text(encoding="utf-8")
     unknown_file = _joined(java[java.index("UNKNOWN_FILE = "):java.index("DOWNLOAD = ")])
-    for fact in ("isn't one of this project's reviewed builds", "with no backup chosen",
+    for fact in ("isn't one of this project's known builds", "with no chip backup chosen",
                  "can't compare it with this camera's firmware", "Only write it if you know it fits."):
         assert fact in unknown_file, fact
     unknown = _bodies(java, "private boolean unknownNoBackup(")[0]
@@ -1310,7 +1312,7 @@ def test_build_runs_every_jvm_test_and_compiles_the_gate():
 
 
 def test_release_workflow_runs_the_source_and_doc_checks_before_it_builds():
-    """critic wf-1: the checks that hold the backup gate (tests/test_android.py) and the flash docs run in the job that
+    """critic wf-1: the checks that hold the write gate (tests/test_android.py) and the flash docs run in the job that
     publishes, before build.sh, with the public dump in place; the publish conditions stay as they were."""
     wf = WORKFLOW.read_text(encoding="utf-8")
     run = wf.index("tests/test_android.py tests/test_flash_docs.py tests/test_docs.py")
@@ -1321,10 +1323,13 @@ def test_release_workflow_runs_the_source_and_doc_checks_before_it_builds():
     assert "if: github.ref == 'refs/heads/main' && steps.key.outputs.release == 'true'" in publish.splitlines()[1]
 
 
-def test_app_repair_route_offers_each_version_from_a_menu():
-    """0.26: the Repair route writes the version picked in its menu (Candidates.repairVersions, newest first), defaulting
-    to the latest the app can make; every Repair version belongs to that route; the menu is off while anything runs, and
-    a pick drops a loaded file of another version; the factory dump is recognised before any other 2 MiB file."""
+def test_app_repair_route_picks_a_base_and_mods():
+    """The Repair route writes the build picked: a base from its radio buttons and one box per mod, remembered as such
+    (a pick an app before 0.28 kept by Kind name is moved once). With nothing remembered, the pick is stock v012: no
+    mod starts ticked. Every Repair file belongs to that route. The radios and boxes are off while anything runs, and a
+    pick drops a loaded file of another build without scrolling away from the boxes.
+    Stock v006 is not made here: its two screens are offered. The factory dump is recognised before any other 2 MiB
+    file."""
     java = ACTIVITY.read_text(encoding="utf-8")
     assert "Kind.BRINGUP" not in java and "bringupFirmwareVersion" not in java and "isBringup" not in java
     assert "Candidates.isRepairFile(sha) ? FlashFlow.Route.REPAIR" in _bodies(java, "private static FlashFlow.Route routeOfFile(")[0]
@@ -1332,22 +1337,77 @@ def test_app_repair_route_offers_each_version_from_a_menu():
     views = _bodies(java, "private void makeViews()")[0]
     # 0.28: the pick is base and mods (Recipe.Selection), remembered as such, with the old Kind name migrated once
     assert "repairSel = Recipe.remembered(picked.getString(KEY_REPAIR_SET, null), picked.getString(KEY_REPAIR_OLD, null));" in views
-    assert "picked.edit().remove(KEY_REPAIR_OLD).putString(KEY_REPAIR_SET, repairSel.serialize())" in views
+    assert "picked.edit().remove(KEY_REPAIR_OLD).remove(KEY_REPAIR_CUSTOM)" in views
     assert 'KEY_REPAIR_OLD = "repairVersion"' in java
-    version_menu = _bodies(java, "private android.widget.Spinner versionMenu()")[0]
-    assert "Recipe.presets()" in version_menu and "rows[presets.length] = CUSTOM_ROW;" in version_menu
-    assert 'CUSTOM_ROW = "Custom: pick base and mods"' in java
-    assert "chooseRepair(customStart(), true);" in version_menu
-    menu = _bodies(java, "private android.widget.Spinner menu(")[0]
-    assert "new android.widget.Spinner(this, android.widget.Spinner.MODE_DROPDOWN)" in menu
-    assert "setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(cardFill))" in menu
-    assert "t.setTextColor(textPrimary);" in _bodies(java, "private View menuRow(")[0]
-    assert "repairChoice.setEnabled(idle && !downloading && !checking);" in _bodies(java, "private void updateButtons()")[0]
+    # 0.32: no preset menu. The step always shows the base menu and one box per mod, so mods are picked one by one.
+    assert "versionMenu()" not in java and "CUSTOM_ROW" not in java and "boolean repairCustom" not in java
+    repair = _bodies(java, "private void renderRepair()")[0]
+    assert "write.add(customPanel);" in repair and "repairChoice" not in repair
+    refresh = _bodies(java, "private void refreshRepairChoice()")[0]
+    assert "customPanel.setVisibility" not in refresh
+    assert "box.setOnCheckedChangeListener((v, on) -> chooseRepair(repairSel.with(mod, on)));" in refresh
+    # 0.33: the base is three stacked radio buttons, one per Recipe.BASES entry, no longer a drop-down menu. Each is
+    # in the screen's own colours (dark and light) with a 48dp touch target, and picking another base starts it with no
+    # mods. refresh checks the radio of the pick without a change loop: the listener ignores the base already picked.
+    assert "Spinner" not in java and "private View menuRow(" not in java
+    radios = _bodies(java, "private android.widget.RadioGroup baseRadios()")[0]
+    assert "g.setOrientation(LinearLayout.VERTICAL);" in radios and "for (String base : Recipe.BASES) {" in radios
+    assert "r.setText(baseText(base));" in radios and "r.setTextColor(textPrimary);" in radios
+    assert "r.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));" in radios
+    assert "r.setMinHeight(dp(48));" in radios
+    assert "if (!base.equals(repairSel.base)) {" in radios and "chooseRepair(new Recipe.Selection(base));" in radios
+    assert "checkBase(baseChoice, repairSel.base);" in refresh
+    assert "g.getCheckedRadioButtonId() != r.getId()" in _bodies(java, "private static void checkBase(")[0]
+    assert '"v012 (factory build, OV9732 sensor)"' in java and '"v006 (public build, SP140A sensor)"' in java \
+        and '"v008_test (later build, SP140A sensor)"' in java
+    # no mod starts ticked: the default pick, and the pick a factory chip backup moves an untouched Repair route to
+    assert "private Recipe.Selection repairSel = Recipe.defaultPick();" in java and "Recipe.presets()[0]" not in java
+    assert "return Recipe.defaultPick();" in _bodies(java, "private static Recipe.Selection factoryDefault()")[0]
+    recipe = (PKG / "Recipe.java").read_text(encoding="utf-8")
+    assert "return defaultPick(null);" in _bodies(recipe, "static Selection defaultPick()")[0]
+    assert "return new Selection(found == Identify.Base.V006_FAMILY ? V006 : V012);" in \
+        _bodies(recipe, "static Selection defaultPick(Identify.Base found)")[0]
+    assert "return defaultPick();" in _bodies(recipe, "static Selection remembered(")[0]
+    # 2026-11-26: with nothing remembered, an Identify answer moves the default base once (stock v006 for the v006
+    # family, else stock v012), unremembered, and never over a pick the owner made (each pick is remembered at once)
+    follow = _bodies(java, "private boolean followIdentify()")[0]
+    assert "getString(KEY_REPAIR_SET, null) != null" in follow and "Recipe.defaultPick(identified())" in follow
+    assert "rememberRepair()" not in follow
+    # it never moves a pick while a make, a check or a dialog is live, or over a loaded Repair file of the pick
+    assert ("if (busy() || downloading || checking || dialog != null" in follow
+            and "(fileFor == Route.REPAIR && fileCheck != null && repairSel.matches(fileCheck.sha256))" in follow)
+    assert follow.index("busy()") < follow.index("repairSel = d;")
+    # another drive chosen, or a single file in its place, follows that drive's answer (none: stock v012)
+    picked = _bodies(java, "protected void onActivityResult(int request, int result, Intent data)")[0]
+    assert picked.count("if (followIdentify() && route == Route.REPAIR) {") == 2
+    assert picked.index("tree = uri;") < picked.rindex("if (followIdentify() && route == Route.REPAIR) {")         < picked.index("inspectCard(note);")
+    assert "followIdentify();" in _bodies(java, "protected void onCreate(Bundle state)")[0]
+    ident = _bodies(java, "private void identifyFirmware()")[0]
+    assert "if (followIdentify() && route != Route.IDENTIFY) {" in ident and "if (s.followIdentify()" in ident
+    assert "boolean pickable = idle && !downloading && !checking;" in _bodies(java, "private void updateButtons()")[0]
     choose = _bodies(java, "private void chooseRepair(")[0]
     assert choose.index("if (busy() || downloading || checking || dialog != null) {") < choose.index("repairSel = sel;")
     assert choose.index("repairSel = sel;") < choose.index("rememberRepair();")
     assert "putString(KEY_REPAIR_SET, repairSel.serialize())" in _bodies(java, "private void rememberRepair()")[0]
-    assert "(fileCheck == null || !sel.matches(fileCheck.sha256))" in choose and "dropFile();" in choose
+    assert "(fileCheck == null || !sel.matches(fileCheck.sha256))" in choose and "dropFile(false);" in choose
+    # a tick must not scroll the boxes away: the quiet drop sets the line without reveal, the plain one still reveals
+    quiet = _bodies(java, "private void dropFile(boolean reveal)")[0]
+    assert "showFile(NO_FILE, null);" in quiet and "setStatus(fileStatus, NO_FILE);" in quiet
+    assert "reveal(" not in quiet[quiet.index("} else {"):]
+    assert "dropFile(true);" in _bodies(java, "private void dropFile()")[0]
+    # the make button never changes its words, and stock v006 gets the buttons to Restore and Advanced in its place
+    assert "repairButton.setText" not in java
+    assert "boolean elsewhere = writtenOnRestore(repairSel);" in refresh
+    assert "repairButton.setVisibility(elsewhere ? View.GONE : View.VISIBLE);" in refresh
+    assert "stockV006Panel.setVisibility(elsewhere ? View.VISIBLE : View.GONE);" in refresh
+    assert "write.add(stockV006Panel);" in repair
+    assert "go(Route.RESTORE)" in views and "go(Route.ADVANCED)" in views
+    assert "return sel.stock() && Recipe.V006.equals(sel.base);" in _bodies(java, "private static boolean writtenOnRestore(")[0]
+    # Identify's answer counts only for the drive it was read from, and v006 found with v008_test picked is no mismatch
+    assert "Identify.Base found = identified();" in refresh
+    assert "!(Recipe.V006.equals(foundBase) && Recipe.V008.equals(repairSel.base))" in refresh
+    assert "Recipe.untriedNote(repairSel)" in refresh and "reviewedAndWayBack(repairSel)" in refresh
+    assert "wayBack(sel)" in _bodies(java, "private static String reviewedAndWayBack(")[0]
     load = _bodies(java, "private void loadFile(")[0]
     assert load.index("Candidates.isFactoryDump(data)") < load.index("Candidates.isStockDump(data)") \
         < load.index("UpdateCheck.backupProblem(name, data, Candidates.PUBLIC_DUMP_SHA256S)")
@@ -1370,30 +1430,42 @@ def test_app_repair_route_offers_each_version_from_a_menu():
     assert "return new Layer[]{V025_LAYER, V026_LAYER};" in _bodies(cand, "static Layer[] layersOf(")[0]
 
 
-def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
-    """0.26 review: a Repair-version file loaded for the Repair route becomes the menu's pick (so the step's title, its
-    check line and the file written name one version); the way-back line fits the version picked; the menu looks off
-    while it is off; a factory dump is kept on every route but made into firmware only where firmware is written; the
-    flash check expects v0.26's EXIF header after a v0.26 write."""
+def test_app_repair_route_keeps_name_pick_and_file_on_one_build():
+    """A Repair file loaded for the Repair route becomes the pick, on the direct path and after a recheck (so the name
+    in bold, the base menu, the mod boxes, the check line and the file written name one build); the way-back line fits
+    the pick; the base radios look off while they are off; a factory dump is kept on every route but made into firmware only
+    where firmware is written; the flash check expects the EXIF header after a write of a build with EXIF dates."""
     java = ACTIVITY.read_text(encoding="utf-8")
     apply = _bodies(java, "private void applyCheck(")[0]
     assert apply.index("fileCheck = result;") < apply.index("followLoadedRepair(result);") \
         < apply.index("showChecked(result, origin, chosen);")
     follow = _bodies(java, "private void followLoadedRepair(")[0]
     assert "if (fileFor != Route.REPAIR || k == null || k.equals(repairSel)) {" in follow
-    assert follow.index("repairSel = k;") < follow.index("rememberRepair();") < follow.index("render();")
-    # the way back: an older version in the menu for a factory version, v0.23's file (made here by Custom) for
-    # v0.24, the restore file for v008_test and the SP140A v006 picks; no "no backup" line for a pick that needs one
+    assert follow.index("repairSel = k;") < follow.rindex("rememberRepair();") < follow.index("render();")
+    # making or loading the default pick's own build remembers it, so a later Identify answer doesn't move it
+    eq = "if (fileFor == Route.REPAIR && k != null && k.equals(repairSel)) {"
+    assert eq in follow and follow.index(eq) < follow.index("rememberRepair();")         < follow.index("if (fileFor != Route.REPAIR || k == null || k.equals(repairSel)) {")
+    # a check made with another backup goes through recheckFile, which follows the loaded file too
+    recheck = _bodies(java, "private void recheckFile()")[0]
+    assert recheck.index("fileCheck = result;") < recheck.index("followLoadedRepair(result);") \
+        < recheck.index("showChecked(result, origin, chosen);")
+    # the way back: another v012 build or stock v012 for a v012 pick, v006 with the OV9732 port (made here with only the
+    # port ticked) for the port with more mods, the restore file for v008_test and the SP140A v006 picks; no "no backup"
+    # line for a pick that needs one
     repair = _bodies(java, "private void renderRepair()")[0]
-    assert "wayBack(repairSel)" in repair and "You don't need a backup." in repair
+    assert "wayBack(repairSel)" in repair and "You don't need a chip backup" in _joined(repair)
     back = _bodies(java, "private static String wayBack(")[0]
     said = _joined(back)
-    assert "an older version, or stock v012" in said and "It's the way back from every v012 version" in said         and "write v0.23's file. The app makes it here too" in said
+    assert "That's another v012 build, or stock v012" in said and "It's the way back from every v012 build" in said \
+        and "write v006 with the OV9732 port. The app makes it here too" in said
+    assert "v0." not in said and "version" not in said
     v008 = back[back.index("if (Recipe.V008.equals(sel.base)) {"):]
     v008 = v008[:v008.index("}")]
     assert "older version" not in v008 and "stock restore file" in v008
-    # the version menu dims while it is off
-    assert "repairChoice.setAlpha(repairChoice.isEnabled() ? 1f : 0.45f);" in _bodies(java, "private void updateButtons()")[0]
+    # the base radios dim while they are off, and each radio is off too (a RadioGroup doesn't pass it on)
+    buttons = _bodies(java, "private void updateButtons()")[0]
+    assert "baseChoice.setAlpha(pickable ? 1f : 0.45f);" in buttons
+    assert "baseChoice.getChildAt(i).setEnabled(pickable);" in buttons
     # a factory dump: kept on every route, built only on Repair and Advanced
     assert "return forRoute == Route.REPAIR || forRoute == Route.ADVANCED;" in _bodies(java, "private static boolean buildsFactory(")[0]
     load = _bodies(java, "private void loadFile(")[0]
@@ -1401,7 +1473,7 @@ def test_app_repair_route_keeps_title_menu_and_file_on_one_version():
     assert load.index("factoryKept = keepFactoryDump(factory);") < load.index("if (fd != null) {")
     assert factory.index("factoryDump = fd;") < factory.index("if (!buildsFactory(forRoute)) {") \
         < factory.index("showFile(factoryKeptOnly(fromFactory), null);") < factory.index("buildRestore(fd, request")
-    assert "makes firmware" in _bodies(java, "private static String factoryKeptOnly(")[0]
+    assert "makes firmware from it when base v012 is picked." in _joined(_bodies(java, "private static String factoryKeptOnly(")[0])
     # the flash check: the header each written firmware's photos should have
     check = _bodies(java, "private void checkPhoto()")[0]
     assert "PhotoId.Kind expected = made != null ? Recipe.expectedPhoto(made) : PhotoId.expectedFor(written);" in check
@@ -1450,13 +1522,25 @@ def test_app_identify_route_reads_the_photos_and_writes_nothing():
     render, run, show = route
     assert 'readDriveStep("1")' in render and "look.add(identifyButton);" in render
     assert "listMedia(t, false)" in run and "readUpTo(in, PhotoId.HEADER_LIMIT + 16)" in run
-    assert "Identify.identify(entries, TimeZone.getDefault())" in run and "identifiedBase = r.base;" in run
-    # the three guided questions, worded from what is known
+    assert "Identify.identify(entries, TimeZone.getDefault())" in run
+    # The base found is an answer about one drive. A run that fails or finds none clears the old one, and it is paired
+    # with the drive's UUID after the try, so a failed read never leaves another drive's base on this one.
+    assert "Identify.Base base = null;" in run and "base = r.base;" in run
+    assert run.index("} catch (IOException | RuntimeException e) {") < run.index("identifiedBase = base;") \
+        < run.index("identifyFor = uuid;")
+    scoped = _bodies(java, "private Identify.Base identified()")[0]
+    assert "drive.equals(treeUuid()) ? identifiedBase : null" in scoped
+    assert java.count("identifiedBase") - java[:java.index("private Identify.Base identified()")].count("identifiedBase") == 2
+    assert "Identify.Base f = identified();" in _bodies(java, "private String unconfirmed(")[0]
+    # the answer names a base, and the button under it opens the screen where the base is picked
+    assert "look.add(identifyNextButton);" in render
+    assert "identifyNextButton.setVisibility(identified() != null ? View.VISIBLE : View.GONE);" in show
+    # the guided questions, worded from what is known, each with what to do
     said = _joined(render)
-    for fact in ("Setup page 2: are there Volume and LED rows after FORMAT? Then one of our mods (v0.24 or later) is"
-                 " installed.",
-                 "Does photo or video mode freeze after a flash? Then that firmware is for the other sensor family and"
-                 " doesn't drive this camera's sensor",
+    for fact in ("1. On the camera, open Setup and go to page 2. If there are Volume and LED rows after FORMAT, the camera"
+                 " runs one of this project's builds with that mod. If not, it's stock, or a build without that mod.",
+                 "2. If photo or video mode freezes after a write, the firmware you wrote is for the other sensor. Write"
+                 " the other base.",
                  "Setup > Version shows JH5408  20250520 on every known build, ours too, so it tells you nothing."):
         assert fact in said, fact
     assert "identifyButton.setEnabled(idle && !zipping && !identifying && listed);" in \
@@ -1465,4 +1549,124 @@ def test_app_identify_route_reads_the_photos_and_writes_nothing():
     ident = (PKG / "Identify.java").read_text(encoding="utf-8")
     assert "r.caveats.add(CAVEAT_V008);" in ident and "r.caveats.add(CAVEAT_AFTER_FLASH);" in ident
     assert "A photo can't tell v006 from v008_test" in _joined(ident)
-    assert "only photos from before the flash say what fits" in _joined(ident)
+    assert "only photos from before the write say what fits" in _joined(ident)
+
+
+def test_app_names_a_build_by_the_same_rule_as_recipes_py():
+    """Parity: Recipe.firmwareName follows recipes.firmware_name (base, then "with" and the mods' phrases in the table's
+    order, joined "a, b and c"; "stock <base> (<what it is>)" with no mods), and the app's table carries the same names
+    and old numbers. RecipeTest runs the Java side on the JVM with the same examples as tests/test_recipes.py."""
+    from charmera_toolkit import recipes as R
+    doc = R.load()
+    recipe = (PKG / "Recipe.java").read_text(encoding="utf-8")
+    body = _bodies(recipe, "static String firmwareName(String base, List<String> mods)")[0]
+    assert 'return "stock " + base + " (" + Recipes.BASE_STOCK[i] + ")";' in body
+    assert "parts.add(Recipes.MOD_PHRASES[i]);" in body and 'return base + " with " + joinAnd(parts);' in body
+    join = _bodies(recipe, "static String joinAnd(List<String> parts)")[0]
+    assert 'i == 0 ? "" : i == parts.size() - 1 ? " and " : ", "' in join
+    assert "return firmwareName(base, mods);" in _bodies(recipe, "String label()")[0]
+    table = (PKG / "Recipes.java").read_text(encoding="utf-8")
+    rows = re.findall(r'\{"(v\w+)", "([^"]*)", "(\d{12})", "(\w+)", "([^"]+)", (null|"[^"]+")\},', table)
+    assert len(rows) == len(doc["sets"])
+    for (base, csv, _, _, label, old), s in zip(rows, doc["sets"]):
+        mods = csv.split(",") if csv else []
+        assert label == R.firmware_name(base, mods, doc) == s["label"]
+        assert (None if old == "null" else old.strip('"')) == R.old_name(base, mods, doc)
+    # the one older-name line, in the file check's details
+    assert '"Older versions of the app called this " + old + "."' in recipe
+    show = _bodies(ACTIVITY.read_text(encoding="utf-8"), "private void showChecked(")[0]
+    assert "String older = Recipe.olderNameNote(result.sha256);" in show
+
+
+def test_app_shows_the_backups_wrong_sensor_warning_where_the_owner_looks():
+    """A chip backup on record that is firmware for the other sensor is stronger evidence than no backup at all, so its
+    "Wrong sensor?" line is the sensor warning in the file step and the write dialog, not only a line under Details
+    (a backup on record silences Recipe.unconfirmed)."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    warn = _bodies(java, "private String sensorWarning(")[0]
+    assert warn.index("UpdateCheck.wrongSensor(result)") < warn.index("unconfirmed(result)")
+    assert "if (!isReviewedPatch(result)) {" in warn
+    assert "String unsure = sensorWarning(result);" in _bodies(java, "private SpannableString checkLine(")[0]
+    assert "final String unsure = sensorWarning(check);" in _bodies(java, "private void confirmWrite()")[0]
+    check = (PKG / "UpdateCheck.java").read_text(encoding="utf-8")
+    assert 'static final String WRONG_SENSOR = "Wrong sensor?";' in check
+    found = _bodies(check, "static String wrongSensor(Result result)")[0]
+    assert "l.level == Level.WARN && WRONG_SENSOR.equals(l.title)" in found
+    cand = (PKG / "Candidates.java").read_text(encoding="utf-8")
+    assert cand.count("UpdateCheck.WRONG_SENSOR, ") == 2 and ', "Wrong sensor?", ' not in cand
+
+
+def test_app_says_what_a_changed_backup_means_for_the_file_written():
+    """When the chip backup changes after a write or a save: a file that was compared with the old one may no longer
+    pass, so it says to remove it unless the file step shows it ready again (never a verdict the file step doesn't
+    print for it). A file checked alone was never compared, so it only points at the file step's sensor line."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    out = _bodies(java, "private void outdated(")[0]
+    said = _joined(out)
+    assert "OK to put on the card" not in said
+    assert "Unless the file step shows the file ready again, tap " in said
+    assert "unless the file step shows the file ready again." in said
+    assert "Candidates.checkedAlone(writtenSha)" in out and "Candidates.checkedAlone(savedSha)" in out
+    assert said.count("The file isn't compared with a backup, but its sensor warning goes by the backup chosen.") == 2
+    assert java.count("writtenSha = ") == 2 and java.count("savedSha = ") == 1
+
+
+def test_app_copy_for_someone_who_only_owns_the_camera():
+    """The screens say up front what a stranger needs: two sensors and what a base is, which stock each restore screen
+    writes, that the probe replaces the firmware, what a chip backup is, and where the brick risk lies."""
+    java = ACTIVITY.read_text(encoding="utf-8")
+    home = _joined(_bodies(java, "private void renderHome()")[0])
+    for fact in ("Stock firmware for your sensor, plus the changes you tick. Now: ",
+                 "Only for a camera that can't take photos. It replaces the camera's firmware with a test build.",
+                 "Stock v006, for SP140A cameras. Needs a chip backup. Without one, use Advanced. OV9732 camera? Write"
+                 " base v012 with no mods.",
+                 "never a Millennium or CLOT edition. Charge the battery fully before any write."):
+        assert fact in home, fact
+    assert "LAST_FLASH + flashLog.summary(" in _bodies(java, "private void renderHome()")[0]
+    assert 'LAST_FLASH = "Last write from this app: "' in java and "Camera firmware: " not in java
+    repair = _joined(_bodies(java, "private void renderRepair()")[0])
+    for fact in ("The Charmera was made with two image sensors, and each needs its own firmware. The base is the stock"
+                 " firmware for your sensor: v012 for the OV9732, v006 for the SP140A. Mods are optional changes on top.",
+                 "Charge the battery fully first. If the write is cut off, only a chip programmer can bring the camera"
+                 " back.",
+                 "never a Millennium (blue boot screen) or CLOT edition.",
+                 "a known file, one whose SHA-256 is on the list published with this project",
+                 "Stock v012 is the factory firmware. Its photos have the factory header (no EXIF block)"):
+        assert fact in repair, fact
+    assert "Your factory dump stays on this phone" not in java and '"the factory dump"' not in java
+    assert "a public copy of the factory firmware" in _bodies(java, "private static String dumpWords(")[0]
+    probe = _joined(_bodies(java, "private void renderProbe()")[0])
+    assert "it replaces the camera's firmware until you write another." in probe and "stops as it does now" not in probe
+    restore = _joined(_bodies(java, "private void renderRestore()")[0])
+    assert "This screen writes stock v006, the firmware of SP140A cameras, and compares it with your chip backup" in restore
+    assert "It isn't the photo zip." in restore and "donor route" not in java
+    assert 'linkText("Recovery guide ↗", DOCS_PAGE + "02-RECOVERY.md")' in _bodies(java, "private void renderRestore()")[0]
+    assert 'linkText("Card help ↗", DOCS_PAGE + "05-CARDS.md")' in _bodies(java, "private Step driveStep(")[0]
+    assert "docs/0" not in java.replace("blob/main/docs/", "")
+    adv = _bodies(java, "private void renderAdvanced()")[0]
+    assert 'step("1", "Chip backup (optional)"' in adv
+    for n in ("2", "4", "6", "7"):
+        assert f'step("{n}", ' in adv and f'step("{n}", "' in adv
+        line = adv[adv.index(f'step("{n}", '):]
+        assert ", null);" not in line[:line.index(";") + 1], n
+    # every Repair pick is described from the recipes with its way back; only the two own-screen files keep a label
+    build = _bodies(java, "private void buildRestore(")[0]
+    assert "legacy == Candidates.Kind.RESTORE || legacy == Candidates.Kind.PROBE ? legacy.label" in build
+    assert 'Recipe.describe(sel) + (sel.stock() ? "" : " " + wayBack(sel))' in build
+    # the probe's result always ends with a next step
+    result = _joined(java)
+    assert "Keep SENSOR.TXT and open an issue on the project's GitHub page with it." in result
+    assert "The probe stays on the camera until you write another firmware, so write what the camera ran before." in result
+    gate = GATE.read_text(encoding="utf-8")
+    assert "an early test build the project has withdrawn" in gate and "withdrawn candidate, so" not in gate
+    # Recipe and Identify run on a plain JVM, so they name the screens by hand: the names must be routeTitle's
+    titles = _bodies(java, "private static String routeTitle(")[0]
+    assert 'return "Write custom firmware";' in titles and 'return "Restore stock firmware";' in titles
+    recipe = (PKG / "Recipe.java").read_text(encoding="utf-8")
+    fix = _joined(_bodies(recipe, "static String fixFor(String sensor)")[0])
+    assert 'base v012 on \\"Write custom firmware\\"' in fix
+    assert 'stock v006 on \\"Restore stock firmware\\" or Advanced' in fix
+    ident = (PKG / "Identify.java").read_text(encoding="utf-8")
+    step = _joined(_bodies(ident, "static String nextStep(Base b)")[0])
+    assert 'Pick base v012 on \\"Write custom firmware\\".' in step
+    assert 'Stock v006 is written on \\"Restore stock firmware\\" or Advanced.' in step

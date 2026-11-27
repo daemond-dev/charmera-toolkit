@@ -254,7 +254,7 @@ def _check_output(src: Path, out: Path, overwrite: bool) -> Optional[str]:
     if out.is_dir():
         return f"{out} is a directory; give a file name for --out"
     if looks_like_update_file(out.name) or looks_like_update_file(created_name(out.name)):
-        return (f"{out.name} is named like an update file (JH_*.bin), the name a camera flashes from its card; a mod "
+        return (f"{out.name} is named like an update file (JH_*.bin), the name a camera updates from on its card; a mod "
                 "is an image, not an update file: give --out another name, then build the update file with pack and check it with verify")
     if not out.parent.is_dir():
         return f"the folder {out.parent} does not exist; create it first or choose another --out"
@@ -267,7 +267,7 @@ def _check_output(src: Path, out: Path, overwrite: bool) -> Optional[str]:
         return (f"{folder} has a DCIM folder, so it looks like a camera card; write the mod to a folder on the computer "
                 "(pack, verify and stage take it to the card from there)")
     if present:
-        return (f"{folder} holds an update file ({', '.join(p.name for p in present)}), as a card set up to flash does; "
+        return (f"{folder} holds an update file ({', '.join(p.name for p in present)}), as a card set up for an update does; "
                 "write the mod to a folder on the computer that holds none")
     if out.exists() and not overwrite:
         return f"{out} already exists; choose another name or pass --overwrite"
@@ -342,5 +342,5 @@ def register(subparsers) -> None:
     p.add_argument("--wav", help="replace: a PCM WAV file")
     p.add_argument("--gain", type=float, default=1.0, help="replace: linear gain applied before conversion")
     p.add_argument("--overwrite", action="store_true", help="allow --out to replace an existing file (never the input)")
-    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the modified image")
+    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="write the modified image")
     p.set_defaults(func=handler)

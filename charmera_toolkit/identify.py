@@ -11,8 +11,8 @@ is (photo_id.CAMERA_KINDS), skipping files another program saved again, exif-fix
 reads the kind of every dated photo, up to a cap (the oldest and newest chosen are always among them).
 
 Families: the "v006 family" is the 0x590-byte Generalplus header (stock v006 or v008_test; SP140A cameras), the
-"v012 family" the bare 0x270-byte one (stock v012; OV9732 cameras). The 0x340-byte EXIF-mod header is ours (v0.26 and
-later, built on v012): the camera is not stock, and it is of the v012 family.
+"v012 family" the bare 0x270-byte one (stock v012; OV9732 cameras). The 0x340-byte EXIF-mod header is ours (every build
+with EXIF dates, built on v012): the camera is not stock, and it is of the v012 family.
 
 - all dated camera-written photos one family: "The photos were taken by stock v012 (an OV9732 camera)" (or "v006 or
   v008_test (an SP140A camera)"), base v012 (or v006), and that a flash after these photos leaves the camera running
@@ -21,7 +21,7 @@ later, built on v012): the camera is not stock, and it is of the v012 family.
   photos before them date the install. Bare and EXIF-mod photos are one family;
 - two families on the card: not stock (a flash in between, or photos from two cameras), base that of the OLDEST
   family, since photos from before a flash show the stock firmware; confidence low;
-- v006-family photos are not doubted for our v0.21-v0.24 writing the same header (the stock assumption); one line
+- v006-family photos are not doubted for our OV9732 port on v006 writing the same header (the stock assumption); one line
   says so.
 
 A photo cannot tell v006 from v008_test, and a photo shows the firmware that took it. The dates are the files'
@@ -67,7 +67,7 @@ SHORT_FAMILY = {
     photo_id.FAMILY_OV9732: "the v012 family (stock v012)",
 }
 NOT_STOCK = "This camera does not look stock: "
-OUR_V021_V024 = "If this camera was ever flashed with our v0.21-v0.24, its photos look like this too."
+OUR_OV9732_PORT = "If our OV9732 port on v006 was ever written to this camera, its photos look like this too."
 CAVEATS = [
     "a photo cannot tell v006 from v008_test (both stock builds for SP140A cameras; either base works the same for "
     "our purposes).",
@@ -280,11 +280,11 @@ def _families_text(family_runs: List[Dict]) -> str:
     if len(family_runs) == 2:
         last = family_runs[1]
         return (f"photos from two firmware families: {SHORT_FAMILY[first['family']]} up to {first['last'].date}, "
-                f"{SHORT_FAMILY[last['family']]} from {last['first'].date}: the camera was flashed in between, or "
+                f"{SHORT_FAMILY[last['family']]} from {last['first'].date}: firmware was written to the camera in between, or "
                 "the card holds photos from two cameras")
     return (f"photos from two firmware families, which change {len(family_runs) - 1} times by date ("
             + "; ".join(f"{SHORT_FAMILY[x['family']]} {x['first'].date} to {x['last'].date}" for x in family_runs)
-            + "): the camera was flashed more than once, or the card holds photos from more than one camera")
+            + "): firmware was written to the camera more than once, or the card holds photos from more than one camera")
 
 
 NO_PHOTOS_PROBE = ("If photo mode freezes and the camera can't take any, the sensor-ID probe finds the sensor instead "
@@ -341,8 +341,8 @@ def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
 
     if mods:
         first_mod = mods[0]
-        text = ("our EXIF mod (v0.26 or later" + (f", Software {first_mod.software!r}" if first_mod.software else "")
-                + ") is installed")
+        text = ("our EXIF mod" + (f" (Software {first_mod.software!r})" if first_mod.software else "")
+                + " is installed")
         before = [m for m in cam if m.kind == "bare" and m.mtime <= first_mod.mtime and m is not first_mod]
         if before:
             text += f", installed between {before[-1].date} and {first_mod.date}"
@@ -352,7 +352,7 @@ def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
         r.not_stock.insert(0, NOT_STOCK + r.families_text)   # it decides the base, so it comes first (as in the app)
         r.stock = False
         newer = next(f for f in families if f != oldest_family)
-        r.conclusion = (f"The oldest photos show stock {STOCK[oldest_family]} (photos from before a flash show the "
+        r.conclusion = (f"The oldest photos show stock {STOCK[oldest_family]} (photos from before a write show the "
                         f"stock firmware), the newer ones {SHORT_FAMILY[newer]}: base {r.base}")
         r.confidence = "low"
         r.confidence_why = ("the card holds photos from two firmware families; the base follows the oldest, from "
@@ -362,13 +362,13 @@ def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
                                  "are approximate")
     elif mods:
         r.stock = False
-        r.conclusion = f"The camera runs our EXIF mod (v0.26 or later), which is built on stock v012: base {r.base}"
+        r.conclusion = f"The camera runs our EXIF mod, which is built on stock v012: base {r.base}"
         r.confidence = "high"
         r.confidence_why = "the EXIF mod's header is ours alone, and the mod is built on v012"
     else:
         r.stock = True
         r.conclusion = (f"The photos were taken by stock {STOCK[oldest_family]} ({SENSOR[oldest_family]}): base {r.base}. "
-                        "If the camera was flashed after these photos, it runs something else now")
+                        "If firmware was written to the camera after these photos, it runs something else now")
         whys = []
         if r.camera_count < 2:
             whys.append("only one camera-written photo was found")
@@ -385,7 +385,7 @@ def build_report(paths: List[Path], cap: int = DEFAULT_CAP) -> Report:
     elif r.skipped_newest:
         r.notes.append(f"the newest {len(r.skipped_newest)} photo file(s) were not the camera's own and were skipped")
     if photo_id.FAMILY_SP140A in families:
-        r.notes.append(OUR_V021_V024)
+        r.notes.append(OUR_OV9732_PORT)
     return r
 
 
@@ -476,7 +476,7 @@ def register(subparsers) -> None:
         help="say which stock firmware a camera runs, from its card's photos, and the base to build on (read-only; "
              "headers only)",
         description=(
-            "Assuming a stock camera that was never flashed or modded, say which stock firmware it runs and so which "
+            "Assuming a stock camera that was never written to or modded, say which stock firmware it runs and so which "
             "base to build on. It finds the photos (*.jpg) and videos (*.avi) on a card (its DCIM folder), in a "
             "folder or among the files given, and reads only their headers. Photos with no file time are left out of "
             "the dating and counted. It picks the oldest and the newest dated photo the camera wrote as it is, "
@@ -484,9 +484,9 @@ def register(subparsers) -> None:
             "(up to --cap, the oldest and newest always among them). When every photo is from one family it says "
             "'The photos were taken by stock v012' (the bare 0x270-byte header; base v012) or 'stock v006 or v008_test' "
             "(the 0x590-byte header; base v006), and prints the build command to run next. It also says when the camera doesn't look stock: when it finds our EXIF "
-            "mod's header (v0.26 or later, base v012, the mod's own base), or photos from two families (a flash in "
+            "mod's header (base v012, the mod's own base), or photos from two families (a write in "
             "between, or two cameras). With two families, the base follows the oldest, since photos from before a "
-            "flash show the stock firmware, and the confidence is low."
+            "write show the stock firmware, and the confidence is low."
         ),
         epilog=(
             "A photo cannot tell v006 from v008_test (both stock builds for SP140A cameras; either base works the "

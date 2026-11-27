@@ -4,12 +4,12 @@ Reading order: 9 of 15 · previous: [Photo frames](08-FRAMES.md) · next: [Photo
 
 The GP+ pack at 0x120000 holds the camera's sounds, its two JPEGs (the boot logo and the recorder
 background), the compressed graphics and the menu text. Every offset and length below was read off the
-stock original-series dump. What the camera does
-with a changed logo is UNTESTED: no custom logo has been flashed, though toolkit-built files have been (see
-[the incident notes](FIRST-FLASH-INCIDENT.md)). The frames in the pack have their own command, `frames`, and
+public chip backup of stock original-series firmware. No custom logo has been written to a camera, so what the camera does with one is
+UNTESTED. Other toolkit-built files have been written, as [the incident notes](FIRST-FLASH-INCIDENT.md) describe.
+The frames in the pack have their own command, `frames`, and
 their own page, [Photo frames](08-FRAMES.md). The sounds have `sounds`, covered in [Image layout](11-FORMAT.md).
 
-## The pack
+## Pack layout
 
 | Where | What |
 |---|---|
@@ -18,14 +18,14 @@ their own page, [Photo frames](08-FRAMES.md). The sounds have `sounds`, covered 
 | 0x120600 .. 0x168E9A | The files, in directory order, each starting on a 512-byte sector. |
 | 0x168E9A .. 0x16E000 | 0xFF. |
 
-There's no checksum over the pack or over any file. The firmware opens a file by name (the lookup strips the
-dot, which is why the directory spells names without one) and clamps reads to the slot, the bytes from the
-entry's sector to the next entry's sector. The toolkit calls that span the entry's *budget*, and the last
-entry's budget runs to the end of the data. A file is usually shorter than its budget, and the rest of the
-slot is padding. In the stock dump that padding is 0xFF in every slot that has any (the erased state of the
-flash), and `replace` keeps whatever byte the slot already uses.
+There's no checksum over the pack or over any file. The firmware opens a file by name. The lookup strips the dot, which is
+why the directory spells names without one. It clamps reads to the slot, the bytes from the entry's sector to the next
+entry's sector. The toolkit calls that span the entry's budget, and the last entry's budget runs to the end of the data.
+A file is usually shorter than its budget, and the rest of the
+slot is padding. In the stock dump that padding is 0xFF in every slot that has any, the erased state of the
+flash, and `replace` keeps whatever byte the slot already uses.
 
-### Kinds
+### Entry kinds
 
 The toolkit reads an entry's kind from its first bytes, not from its name.
 
@@ -69,8 +69,8 @@ charmera resources list my_backup.bin
 
 The `pad` column is `FF` or `00` when every padding byte in the slot is that value, `mix` when it isn't
 uniform, and `-` when the file fills its budget. A line that ends with `BAD:` and a reason names an entry the
-toolkit couldn't read as its kind claims (a GPZP whose CRC doesn't match, a WAV whose RIFF size runs past its
-slot, a JPEG with no end marker inside the slot), and the command then exits 1. Exit 2 means the file isn't
+toolkit couldn't read as its kind claims, and the command then exits 1. Examples are a GPZP whose CRC doesn't
+match, a WAV whose RIFF size runs past its slot and a JPEG with no end marker inside the slot. Exit 2 means the file isn't
 an image with a GP+ pack. `list` never writes.
 
 ## `resources extract IMAGE --out DIR [--name NAME]`
@@ -90,8 +90,8 @@ If any target file already exists, the command refuses before writing anything a
 
 ## `resources replace IMAGE --name NAME --file FILE --out NEW.bin [--strip-metadata] [--overwrite] --i-understand-this-is-a-mod`
 
-This puts a JPEG of your own into a JPEG slot. Without the gate flag it prints the plan (both files'
-properties, what would be stripped, how the slot would be padded) and writes nothing. With it, it writes a
+This puts a JPEG of your own into a JPEG slot. Without the gate flag it prints the plan and writes
+nothing. The plan shows both files' properties, what would be stripped and how the slot would be padded. With it, it writes a
 full image to `--out`. `--out` can't be the input, and an existing file is only replaced with `--overwrite`.
 A full image must not go on a card as it is, so `--out` can't be named like an update file (`JH_*.bin` in any
 letter case, also with trailing dots or spaces) or sit in a folder that holds a DCIM folder or a `JH_*.bin`.
@@ -118,8 +118,8 @@ The checks run in this order. The first property that differs is named, and the 
 6. Size: exactly the width and height of the file it replaces (160x80 for both stock JPEGs).
 7. Components and sampling factors: three components with 2x2,1x1,1x1 (4:2:0). Greyscale, 4:4:4 and 4:2:2
    files are refused.
-8. Restart interval: none, because the stock files have none (a DRI segment or RSTn markers in the scan
-   data are refused). If a stock file had one, any interval would be allowed.
+8. Restart interval: none, because the stock files have none. A DRI segment or RSTn markers in the scan
+   data are refused. If a stock file had one, any interval would be allowed.
 9. Scan layout: one interleaved scan of all three components, like the stock file.
 10. Length, after `--strip-metadata` if given: at most the budget of the slot (3584 bytes for the logo,
     4608 for the recorder background).
@@ -155,9 +155,9 @@ im.save("out.jpg", "JPEG", quality=80, subsampling=2, optimize=True)
 ```
 
 `subsampling=2` is Pillow's name for 4:2:0. `optimize=True` builds smaller Huffman tables and doesn't make
-the file progressive (`progressive=True` would, and that's refused).
+the file progressive. `progressive=True` would, and that's refused.
 
-ffmpeg (the default MJPEG encoder writes baseline):
+ffmpeg, whose default MJPEG encoder writes baseline:
 
 ```
 ffmpeg -i in.png -vf scale=160:80 -pix_fmt yuvj420p -q:v 4 out.jpg
@@ -171,24 +171,24 @@ every check matches or names the one that doesn't. If the file is too large, low
 time or add `--strip-metadata`. The yellow stock logo is 3532 bytes with 888 bytes of metadata, so a picture
 of similar simplicity fits easily at quality 80.
 
-### Before you flash it
+### Before you write it
 
 A custom logo hasn't been tried on a camera. Here's what is known. The decoder is in hardware, the boot code
 calls it once and blocks until it returns, and the file is only reached after the settings are loaded and
 the power-on sound has started. What isn't known is whether the decoder checks anything the toolkit doesn't,
-what it does with a file it dislikes (shows garbage, shows nothing, or hangs the boot before the SD card is
-mounted), and whether Huffman tables an encoder "optimizes" are accepted as readily as the standard ones.
+what it does with a file it dislikes, such as showing garbage, showing nothing or hanging the boot before the SD
+card is mounted, and whether Huffman tables an encoder "optimizes" are accepted as readily as the standard ones.
 Two ways to keep the risk small:
 
-- Have a full backup (`charmera backup`) and read [Recovery](02-RECOVERY.md) first. If the camera hangs at
+- Have a full chip backup (`charmera backup`) and read [Recovery](02-RECOVERY.md) first. If the camera hangs at
   the logo it never mounts the card, so the SD updater can't help. Getting back then means writing the
   backup with a CH341A ([Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)).
   Don't try a logo without one.
 - Try the recorder background first (`--name AUDIO_REC_BG.JPG`, 4608-byte budget). It's shown only when you
   enter the audio recorder, after the camera has booted and mounted the card, so a file the decoder rejects
   can be undone through the SD updater. If it displays correctly, the same encoder settings are a good
-  candidate for the logo. (This order is a suggestion based on how the files are used. It hasn't been
-  tested.)
+  candidate for the logo. This order is a suggestion based on how the files are used. It hasn't been
+  tested.
 
 If the camera doesn't boot after a logo change, go to [Recovery, section B](02-RECOVERY.md#b-the-camera-does-not-boot-read-and-write-the-flash-chip-directly)
 and restore the backup you made before the change.

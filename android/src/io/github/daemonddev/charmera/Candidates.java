@@ -381,32 +381,36 @@ public final class Candidates {
      * way. The cause is most likely a firmware that does not fit that camera's image sensor, which no file made from
      * the public dump can fix; a copy of C, A or B picked from the phone is recognised and refused.
      *
-     * The Repair route's versions (repairVersions(), newest first) are V026 (v0.26) and V025 (v0.25), both from the
-     * owner's own factory dump, and BRINGUP (v0.24, from the public stock dump). Adding a factory version is one entry
-     * here (base FACTORY, its menu text, label, file name and SHA-256), one Layer in layersOf() and its place in
-     * repairVersions().
+     * The Repair route's fixed kinds (repairVersions(), newest first) are V027, V026 and V025, made from the factory
+     * build v012, and BRINGUP (v006 with the OV9732 port and Volume and LED rows, from the public stock dump). Their
+     * Java names keep the numbers older versions of the app showed (v0.24 to v0.27). The screen names each by its base
+     * and mods (firmwareName()), and the recipes keep the old number (Recipe.Selection.oldName()). These four stay
+     * to recognise their files and to move a pick an older app remembered by Kind name. A new build is not a kind:
+     * it is a set in charmera_toolkit/recipes.json, and the screen describes every Repair pick from the recipes
+     * (Recipe.describe), these four included.
      */
     public enum Kind {
-        RESTORE(true, Base.STOCK, null, "The stock restore file is the first part of the public dump (build v006), under its published"
+        RESTORE(true, Base.STOCK, false, "The stock restore file is the first part of the public chip backup of build v006, under its published"
                 + " name. Made from the cleaned copy the app downloads, it has the factory settings and no stored photos."
-                + " Made from the original dump, it's a copy of one working camera's memory, with that camera's settings"
-                + " and its two stored photos. Several owners report working cameras after flashing it, but what their"
-                + " cameras ran before isn't known. After it was flashed, one original-series camera could no longer take"
+                + " Made from the original chip backup, it's a copy of one working camera's memory, with that camera's settings"
+                + " and its two stored photos. Several owners report working cameras after writing it, but what their"
+                + " cameras ran before isn't known. After it was written, one original-series camera could no longer take"
                 + " pictures. The likely cause is a sensor it doesn't drive.",
                 "JH_5408202610261427_0F065D55.bin", "b10a2f1c6302afbad8c205bd2f1e23c0ed244f6f3c553b513f2bd41f4b446906",
                 // from the cleaned copy: the same bytes as candidate C (stock software, factory settings, no photos)
                 "JH_5408202610261427_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
-        PROBE(true, Base.STOCK, null, "The sensor-ID probe is the stock restore file with a small reviewed patch. When the camera enters"
+        PROBE(true, Base.STOCK, false, "The sensor-ID probe is the stock restore file with a small patch. It's a known file. When the camera enters"
                 + " photo mode, it walks the sensor bus. For each address that answers, it reads the 16-bit chip-ID"
                 + " registers (0x3000..0x301F and 0x3100..0x310F) and writes them to SENSOR.TXT at the root of the"
-                + " card, then stops as the camera does now. It doesn't fix the camera. It reports which image sensor"
+                + " card, then stops there. It doesn't fix the camera, and it replaces the camera's firmware until you"
+                + " write another. It reports which image sensor"
                 + " is on the bus and at which address, so you can tell a wrong sensor from a dead one and name the"
                 + " exact part. Its boot code, update code and image-sensor table are the stock restore file's byte for"
                 + " byte. Only a dead debug routine and the one call that writes the sensor set-up are changed. The"
-                + " stock restore file (above) puts the camera back.",
+                + " stock restore file puts an SP140A camera back. On an OV9732 camera, write a v012 build.",
                 "JH_5408202611082300_0F065C4D.bin", "6a7aa6d66914805e741d7da3ae743a5250f0f1ef90622b3acc9da4bb75d2547b",
                 "JH_5408202611082300_0FB74B1C.bin", "02e2729cffa4dd835f2b138b4ff4df9be89baecfb96f473665dc4b3411e7d2d5"),
-        BRINGUP(true, Base.STOCK, "public build + OV9732 port", "The OV9732 port makes the public build, made for the SP140A, drive an OmniVision"
+        BRINGUP(true, Base.STOCK, true, "The OV9732 port makes the public build, made for the SP140A, drive an OmniVision"
                 + " OV9732 sensor. It flips the picture 180°, lifts blue in the white balance, and"
                 + " redirects the stock firmware's own per-frame auto-exposure to the OV9732's exposure and gain"
                 + " registers, so the picture follows the light instead of staying fixed and dark. Black level is"
@@ -414,56 +418,49 @@ public final class Candidates {
                 + " tuned against a stock camera on a colour card. It adds two setup-menu rows after FORMAT: Volume"
                 + " (system sounds, 0 to 8, which also sets playback volume) and LED (the automatic flash light, On as"
                 + " before or Off). Boot and update code are the stock restore file's, byte for byte. The stock restore"
-                + " file doesn't drive the OV9732, so it stops photo and video working on this camera. The way back is"
-                + " v0.23's file (JH_5408202611110023_….bin), which the app makes under Custom: pick base and mods"
-                + " (base v006, OV9732 port only). Like any update, the flash itself must not be interrupted.",
+                + " file doesn't drive the OV9732, so it stops photo and video working on an OV9732 camera.",
                 "JH_5408202611120024_0F0613AC.bin", "0919c5d857f855b11424407211a132ac61f4c91852e01af583bd6b76c85b1c69",
                 "JH_5408202611120024_0FB7027B.bin", "8a46998f48410b1f03f4e6f9231b6896757f106b4d4d6854b8cce4fbd6e2dc5b"),
-        V025(true, Base.FACTORY, "factory firmware + Volume/LED", "Firmware v0.25 is this camera's own factory firmware"
-                + " (build v012, read off its chip), which drives the OV9732 itself, with v0.24's two setup-menu rows"
-                + " after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off). The app"
-                + " makes it on the phone from your factory dump, which never leaves the phone. The camera starts with"
-                + " Volume 5 and LED On. Photos carry no EXIF date. The way back is v0.24's file"
-                + " (JH_5408202611120024_….bin), which this app makes. Like any update, the flash itself must not"
-                + " be interrupted.",
+        V025(true, Base.FACTORY, true, "v012 with Volume and LED rows is the factory firmware of OV9732 cameras"
+                + " (build v012) with two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the"
+                + " automatic flash light, On or Off). The camera starts with Volume 5 and LED On. Photos carry no EXIF"
+                + " date.",
                 "JH_5408202611130025_0FA3BF37.bin", "a5495ef4a7ab73e95e7f32351c7dca5dcfaa6d3c51f29860c017f547bbe1d3d0",
                 "JH_5408202611130025_0FB76FE9.bin", "bb0c826e4c5e27d5183b6a4e67d45434cc0d6196f8d0f914b396fb42ae0bd36a"),
-        V026(true, Base.FACTORY, "factory firmware + Volume/LED + EXIF", "Firmware v0.26 is v0.25 (this camera's own"
-                + " factory firmware, build v012, with the Volume and LED rows after FORMAT) plus EXIF in every photo:"
+        V026(true, Base.FACTORY, true, "v012 with Volume and LED rows and EXIF dates is the factory firmware of OV9732"
+                + " cameras (build v012) with the Volume and LED rows after FORMAT, plus EXIF in every photo:"
                 + " Make Kodak, Model Charmera, and the date and time from the camera's clock. Set the date in the"
-                + " camera's setup menu first, because an unset clock gives 2025:01:01. The app makes it on the phone from your"
-                + " factory dump, which never leaves the phone. The camera starts with Volume 5 and LED On. The way back"
-                + " is v0.25's or v0.24's file, both in the version menu. Like any update, the flash itself must not be"
-                + " interrupted.",
+                + " camera's setup menu first, because an unset clock gives 2025:01:01. The camera starts with Volume 5"
+                + " and LED On.",
                 "JH_5408202611130026_0FA38C7C.bin", "617770c3f3c9d880f93f06043090d3d07909c845633ca08e9c183deb44fa06d2",
                 "JH_5408202611130026_0FB73D2E.bin", "be3cb3ec0ed062c0772aaf2ecb9c1c80000b64e6ac8da11cd649ebde80719738"),
-        V027(true, Base.FACTORY, "v0.26 + boot to last mode + capture flash", "Firmware v0.27 is v0.26 (this camera's"
-                + " own factory firmware, build v012, with the Volume and LED rows and EXIF dates) plus two changes."
+        V027(true, Base.FACTORY, true, "v012 with Volume and LED rows, EXIF dates, boot to last mode and capture"
+                + " flash is the factory firmware of OV9732 cameras (build v012) with the Volume and LED rows and EXIF"
+                + " dates, plus two changes."
                 + " Power-on goes straight into the mode you last used, photo or video (photo the first time), instead"
                 + " of the SELECT MODE screen. A short press of the power button still opens it. And when you take a photo, the"
-                + " screen flashes black under the icons for a moment, so you can see the shot even at Volume 0. Both"
-                + " were tested in an emulator, then on a camera. The way back is v0.26's"
-                + " file, in the version menu."
-                + " Like any update, the flash itself must not be interrupted.",
+                + " screen flashes black under the icons for a moment, so you can see the shot even at Volume 0.",
                 "JH_5408202611170027_0FA38996.bin", "108af2997b108a05f8edc72a339705e77170061c042eb3b30857ff641b266968",
                 "JH_5408202611170027_0FB73A48.bin", "89d8b61e8e01e7e89807c766e01e6106eb589b4f927f69b9e50b3286430c0639"),
-        C(false, Base.STOCK, null, "Candidate C (withdrawn: the same software as the stock restore file with factory settings. A camera"
-                + " it was flashed on froze in photo and video mode, and so did the stock restore file).",
+        C(false, Base.STOCK, false, "Candidate C (withdrawn: the same software as the stock restore file with factory settings. A camera"
+                + " it was written to froze in photo and video mode, and so did the stock restore file).",
                 "JH_5408202611050003_0FB74C24.bin", "9b8841d7b0674ca047a67b06594b92e67d17c387b6fab11f4b5191abc644c3ec"),
-        A(false, Base.STOCK, null, "Candidate A (withdrawn: the same software as C with camera sounds off).",
+        A(false, Base.STOCK, false, "Candidate A (withdrawn: the same software as C with camera sounds off).",
                 "JH_5408202611050001_0FB74D14.bin", "c4822cd7eed63169d80c5105811ab6492444793fafcc7a96e809869f2e5ccda7"),
-        B(false, Base.STOCK, null, "Candidate B (withdrawn: the same software as A with silenced sound data).",
+        B(false, Base.STOCK, false, "Candidate B (withdrawn: the same software as A with silenced sound data).",
                 "JH_5408202611050002_0FB0BD3C.bin", "32a7f54e5090050d099681c33378e3d23822a736279ea78f9f3442a45edc3979");
 
         /** Whether the app offers it. */
         public final boolean offered;
         /** The dump it is made from. */
         public final Base base;
-        /** For a Repair version, the few words its menu row shows after the version; null for every other kind. */
-        public final String summary;
-        /** For a Repair version, its firmware version, read from its file name ("v0.25"); null for every other kind. */
-        public final String version;
-        /** What the file is, in plain words, for the owner. */
+        /** Whether it is one of the Repair route's fixed kinds (repairVersions()). */
+        private final boolean repair;
+        /**
+         * What the file is, in plain words. The screen shows it for RESTORE, PROBE and a withdrawn candidate. A Repair
+         * pick is described from the recipes (Recipe.describe) with its way back, so the Repair kinds' labels say only
+         * what the build is.
+         */
         public final String label;
         /** The reviewed file made from the original dump (the public dump, or the owner's factory dump). */
         public final String fileName;
@@ -476,16 +473,15 @@ public final class Candidates {
         public final String cleanFileName;
         public final String cleanSha256;
 
-        Kind(boolean offered, Base base, String summary, String label, String fileName, String sha256) {
-            this(offered, base, summary, label, fileName, sha256, fileName, sha256);
+        Kind(boolean offered, Base base, boolean repair, String label, String fileName, String sha256) {
+            this(offered, base, repair, label, fileName, sha256, fileName, sha256);
         }
 
-        Kind(boolean offered, Base base, String summary, String label, String fileName, String sha256,
+        Kind(boolean offered, Base base, boolean repair, String label, String fileName, String sha256,
              String cleanFileName, String cleanSha256) {
             this.offered = offered;
             this.base = base;
-            this.summary = summary;
-            this.version = summary == null ? null : versionOf(fileName);
+            this.repair = repair;
             this.label = label;
             this.fileName = fileName;
             this.sha256 = sha256;
@@ -510,12 +506,16 @@ public final class Candidates {
 
         /** Whether it is one of the Repair route's versions. */
         public boolean repair() {
-            return summary != null;
+            return repair;
         }
 
-        /** Its row in the Repair route's version menu: "v0.25: factory firmware + Volume/LED". */
-        public String menuText() {
-            return version + ": " + summary;
+        /**
+         * Its name, by its base and mods (Recipe.firmwareName): "v012 with Volume and LED rows". Read from the recipes
+         * when asked, never while the enum is made, since Recipe refers back to these kinds.
+         */
+        public String firmwareName() {
+            Recipe.Selection s = Recipe.selectionOf(sha256);
+            return s != null ? s.label() : name();
         }
 
         /** The kinds the app offers, in order. */
@@ -541,21 +541,14 @@ public final class Candidates {
     }
 
     /**
-     * The firmware version a file name carries (JH_&lt;12 digits&gt;&lt;NNNN&gt;_&lt;sum&gt;.bin, ...11130025_... -&gt;
-     * "v0.25"), or the file name itself when the pattern does not fit, so a wrong number is never shown.
+     * The Repair route's fixed kinds, newest first: the builds older versions of the app numbered. None is the default
+     * pick: that's stock v012 or stock v006, with no mods ticked (Recipe.defaultPick).
      */
-    static String versionOf(String fileName) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("JH_\\d{12}(\\d{4})_[0-9A-Fa-f]+\\.bin")
-                .matcher(fileName);
-        return m.matches() ? "v0." + Integer.parseInt(m.group(1)) : fileName;
-    }
-
-    /** The Repair route's versions, newest first. */
     public static Kind[] repairVersions() {
         return new Kind[]{Kind.V027, Kind.V026, Kind.V025, Kind.BRINGUP};
     }
 
-    /** The Repair version with this SHA-256 (a checked file's), or null. */
+    /** The fixed Repair kind with this SHA-256 (a checked file's), or null. */
     public static Kind repairVersion(String sha256) {
         for (Kind k : repairVersions()) {
             if (k.matches(sha256)) {
@@ -566,51 +559,16 @@ public final class Candidates {
     }
 
     /**
-     * Whether the app can make this kind now: every kind. A stock kind from the public dump's cleaned copy, which
-     * downloads; a factory kind from the factory dump kept on the phone (the owner's own read, picked by hand) or, when
-     * there is none, from the factory build's cleaned copy, which downloads too (CLEAN_FACTORY_DOWNLOAD). factoryDump
-     * says only which of those a factory kind will use.
-     */
-    public static boolean canBuild(Kind kind, boolean factoryDump) {
-        return true;
-    }
-
-    /** The newest Repair version the app can make now. */
-    public static Kind latestAvailable(boolean factoryDump) {
-        for (Kind k : repairVersions()) {
-            if (canBuild(k, factoryDump)) {
-                return k;
-            }
-        }
-        return Kind.BRINGUP;
-    }
-
-    /**
-     * The Repair version to show selected: the one the owner picked or wrote (remembered by its name), even when the
-     * app cannot make it now; with none remembered, the latest available.
-     */
-    public static Kind repairChoice(String remembered, boolean factoryDump) {
-        // A version the owner picked (or wrote) stays picked even when its dump is not on the phone now: the screen
-        // then asks for the dump, and the run of that version keeps its title and its stale-run check.
-        for (Kind k : repairVersions()) {
-            if (k.name().equals(remembered)) {
-                return k;
-            }
-        }
-        return latestAvailable(factoryDump);
-    }
-
-    /**
      * The owner's factory dump from what they picked: exactly the 2 MiB file with FACTORY_DUMP_SHA256. Throws
      * otherwise, with a message in the same form as stockDump's.
      */
     public static byte[] factoryDump(byte[] picked) {
         String sha = UpdateCheck.sha256Hex(picked, 0, picked.length);
         if (picked.length != DUMP_SIZE || !(sha.equals(FACTORY_DUMP_SHA256) || sha.equals(CLEAN_FACTORY_SHA256))) {
-            throw new IllegalArgumentException("the file is not the factory dump, so the app will not use it. The"
+            throw new IllegalArgumentException("the file is not the factory chip backup, so the app will not use it. The"
                     + " factory firmware is made only from that exact file, " + FACTORY_DUMP_NAME + ", or its public"
                     + " cleaned copy, " + CLEAN_FACTORY_NAME + " (the-dumping-grounds/charmera-firmware-v012), unchanged."
-                    + "\nDetail: its SHA-256 is " + sha + "; the factory dump's is " + FACTORY_DUMP_SHA256
+                    + "\nDetail: its SHA-256 is " + sha + "; the factory chip backup's is " + FACTORY_DUMP_SHA256
                     + " and its cleaned copy's " + CLEAN_FACTORY_SHA256 + ".");
         }
         return picked;
@@ -649,16 +607,16 @@ public final class Candidates {
             dump = Arrays.copyOf(picked, DUMP_SIZE);
             Arrays.fill(dump, UpdateCheck.UPDATE_SIZE, DUMP_SIZE, (byte) 0xFF);
         } else {
-            throw new IllegalArgumentException("the file is " + UpdateCheck.bytes(picked.length) + ", but the stock dump"
-                    + " is " + UpdateCheck.bytes(DUMP_SIZE) + ". A shorter file is usually a cut-off download."
+            throw new IllegalArgumentException("the file is " + UpdateCheck.bytes(picked.length) + ", but the public v006 chip"
+                    + " backup is " + UpdateCheck.bytes(DUMP_SIZE) + ". A shorter file is usually a cut-off download."
                     + " Download it again.");
         }
         String sha = UpdateCheck.sha256Hex(dump, 0, dump.length);
         if (!sha.equals(STOCK_DUMP_SHA256) && !sha.equals(CLEAN_STOCK_SHA256)) {
-            throw new IllegalArgumentException("the file is not the public stock dump, so the app will not use it. The"
+            throw new IllegalArgumentException("the file is not the v006 chip backup the app uses, so the app will not use it. The"
                     + " app makes the stock restore file only from that exact file, charmera-v006-2025-10-14-clean.bin"
                     + " (the-dumping-grounds/charmera-firmware-v006) or the original charmera_stock_latest.bin,"
-                    + " unchanged.\nDetail: its SHA-256 is " + sha + "; the stock dump's is " + CLEAN_STOCK_SHA256
+                    + " unchanged.\nDetail: its SHA-256 is " + sha + "; the public v006 chip backup's is " + CLEAN_STOCK_SHA256
                     + " (the original's " + STOCK_DUMP_SHA256 + ").");
         }
         return dump;
@@ -687,10 +645,10 @@ public final class Candidates {
         String want = kind.shaFrom(dump);
         if (!sha.equals(want)) {
             String what = kind == Kind.RESTORE ? "the stock restore file"
-                    : kind.repair() ? "firmware " + kind.version : "candidate " + kind.name();
-            String from = kind.base == Base.FACTORY ? "the factory dump" : "the stock dump";
+                    : kind.repair() ? kind.firmwareName() : "candidate " + kind.name();
+            String from = kind.base == Base.FACTORY ? "the factory chip backup" : "the public v006 chip backup";
             throw new IllegalStateException("the file made from " + from + " is not exactly " + what + ", so the app"
-                    + " will not use it. This should not happen. Please report it.\nDetail: its SHA-256 is " + sha
+                    + " will not use it. That's a bug in the app. Report it at https://github.com/daemond-dev/charmera-toolkit/issues.\nDetail: its SHA-256 is " + sha
                     + "; " + what + " has " + want + ".");
         }
         return out;
@@ -702,17 +660,15 @@ public final class Candidates {
     }
 
     /**
-     * Whether these exact bytes are one of the reviewed patches the app writes without a backup, by SHA-256: the
-     * sensor-ID probe or a Repair version (repairVersions(): the OV9732 bring-up v0.24, and v0.25 and v0.26 made from
-     * the owner's factory dump).
-     * - The probe and the bring-up (Base.STOCK) are built from the public build, and the stock restore file reverses
-     *   them: boot code, update code and the SP140A set-up table are the restore file's byte for byte. The probe patches
-     *   only a dead routine and the one sensor-setup call; the bring-up also patches the AE write tail (AE_HOOK), two
-     *   image-tuning data tables and two AE-target message handlers (TUNE_OFFSETS), and v0.24's setup-menu and LED code
-     *   (ROWS_OFFSETS); its black level is in BRINGUP_STUB's start-up table.
-     * - The factory versions (Base.FACTORY) are the camera's own factory build (v012) with authored patches only
-     *   (Layer); the stock restore file does not reverse them. Their way back is an older Repair version's file, which
-     *   the app makes too: v0.25's or v0.24's for v0.26, v0.24's for v0.25.
+     * Whether these exact bytes are one of the reviewed files the app writes without a backup, by SHA-256: the
+     * sensor-ID probe, a fixed Repair kind (repairVersions()) or any reviewed build of the recipe table.
+     * - The probe and BRINGUP (Base.STOCK) are built from the public build v006: boot code, update code and the SP140A
+     *   set-up table are the restore file's byte for byte. The probe patches only a dead routine and the one
+     *   sensor-setup call; BRINGUP also patches the AE write tail (AE_HOOK), two image-tuning data tables and two
+     *   AE-target message handlers (TUNE_OFFSETS), and the setup-menu and LED code (ROWS_OFFSETS); its black level is
+     *   in BRINGUP_STUB's start-up table.
+     * - V025, V026 and V027 (Base.FACTORY) are the factory build v012, from the owner's own dump or its public cleaned
+     *   copy, with authored patches only (Layer). Stock v012 or another v012 build is their way back.
      * Each is a fixed, reviewed file, so none needs a backup to be checked against.
      */
     public static boolean isReviewedPatch(byte[] data) {
@@ -820,29 +776,29 @@ public final class Candidates {
     /** The sensor line for a file checked alone against the sensor the backup's firmware drives (theirs, or null). */
     static UpdateCheck.Line backupSensorLine(String file, String mine, String theirs, String detail) {
         if (theirs != null && !theirs.equals(mine)) {
-            return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Wrong sensor?", "the firmware in your"
-                    + " backup drives the " + theirs + ", and " + file + " drives the " + mine + ". If the backup is"
-                    + " this camera's, the camera boots with this file but can't take pictures until you flash"
-                    + " firmware that fits. It's a reviewed file, so the app writes it if you go ahead.", detail);
+            return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", UpdateCheck.WRONG_SENSOR, "the firmware"
+                    + " in your chip backup drives the " + theirs + ", and " + file + " drives the " + mine + ". If the"
+                    + " backup is this camera's, the camera boots with this file but can't take photos until you write "
+                    + Recipe.fixFor(theirs) + ". It's a known file, so the app writes it if you go ahead.", detail);
         }
         if (theirs != null) {
             return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Image sensor set-up", "the firmware"
                     + " in your backup drives the " + theirs + " too, as " + file + " does. That's your camera's sensor"
-                    + " only if the backup was read before the camera was ever flashed.", detail);
+                    + " only if the backup was read before the camera was ever written to.", detail);
         }
         return new UpdateCheck.Line(UpdateCheck.Level.WARN, "sensor-table", "Image sensor set-up", "the app can't"
                 + " tell which sensor the firmware in your backup drives, so it can't say whether " + file + " fits"
                 + " your camera. This file drives the " + mine + ".", detail);
     }
 
-    /** What a reviewed file is called in a sensor line: its pick's label, or its Repair version. */
+    /** What a reviewed file is called in a sensor line: its name (base and mods), or "this file". */
     static String fileLabel(String sha256) {
         Recipe.Selection s = Recipe.selectionOf(sha256);
         if (s != null) {
             return s.label();
         }
         Kind k = repairVersion(sha256);
-        return k != null ? "firmware " + k.version : "this file";
+        return k != null ? k.firmwareName() : "this file";
     }
 
     /** check without the backup rule: UpdateCheck.check, with the reviewed files' known failures turned into warnings. */
@@ -874,11 +830,13 @@ public final class Candidates {
         for (UpdateCheck.Line l : r.lines) {
             if (l.level == UpdateCheck.Level.FAIL && "sensor-table".equals(l.name) && !failsAlone(alone, l)) {
                 changed = true;
-                lines.add(new UpdateCheck.Line(UpdateCheck.Level.WARN, l.name, "Wrong sensor?", "the firmware in your"
-                        + " backup drives the image sensor differently from " + s.label() + ", which drives the "
-                        + Recipe.sensorOf(s) + ". If the backup is this camera's, the camera boots with this file but"
-                        + " can't take pictures until you flash firmware that fits. It's a reviewed file, so the app"
-                        + " writes it if you go ahead.", l.text + (l.detail.isEmpty() ? "" : " " + l.detail)));
+                lines.add(new UpdateCheck.Line(UpdateCheck.Level.WARN, l.name, UpdateCheck.WRONG_SENSOR, "the firmware"
+                        + " in your chip backup drives the image sensor differently from " + s.label() + ", which drives"
+                        + " the " + Recipe.sensorOf(s) + ". If the backup is this camera's, the camera boots with this"
+                        + " file but can't take photos until you write firmware for its sensor (base v012 for the"
+                        + " OV9732, stock v006 for the SP140A). It's a known file, so the app writes it if you go"
+                        + " ahead.",
+                        l.text + (l.detail.isEmpty() ? "" : " " + l.detail)));
             } else {
                 lines.add(l);
             }
@@ -895,9 +853,9 @@ public final class Candidates {
      * (name, sum, size, start of the file, final erase, built-in parts...) stands as UpdateCheck gave it.
      */
     static UpdateCheck.Result asFactory(UpdateCheck.Result r, Kind k) {
-        return softened(r, r, "the app can't check this part. The file is firmware " + k.version + ", made from the"
+        return softened(r, r, "the app can't check this part. The file is " + k.firmwareName() + ", made from the"
                 + " camera's own factory firmware. That's a build the app doesn't know, and it drives the OV9732 without"
-                + " an SP140A-style sensor table. It's the reviewed file, identified by its SHA-256.");
+                + " an SP140A-style sensor table. It's the known file, identified by its SHA-256.");
     }
 
     /**
@@ -909,7 +867,7 @@ public final class Candidates {
                 + " doesn't know, and it drives the OV9732 without an SP140A-style sensor table"
                 : "made from build " + s.base + ", a later SP140A build the app doesn't know";
         return softened(r, alone, "the app can't check this part. The file is " + s.label() + ", " + what + ". It's the"
-                + " reviewed file, identified by its SHA-256.");
+                + " known file, identified by its SHA-256.");
     }
 
     /**
@@ -945,7 +903,7 @@ public final class Candidates {
     /** The recipe itself, without the final hash check (the tests run it on synthetic images). */
     static byte[] transform(byte[] dump, Kind kind) {
         if (dump.length != DUMP_SIZE) {
-            throw new IllegalArgumentException("the dump must be " + UpdateCheck.bytes(DUMP_SIZE) + ".");
+            throw new IllegalArgumentException("the chip backup must be " + UpdateCheck.bytes(DUMP_SIZE) + ".");
         }
         if (kind.base == Base.FACTORY) {
             return factoryImage(dump, layersOf(kind));
@@ -976,7 +934,7 @@ public final class Candidates {
         byte[] image = dump.clone();
         int first = firstValidRecord(image);
         if (first < 0) {
-            throw new IllegalArgumentException("the stock dump has no undamaged settings record.");
+            throw new IllegalArgumentException("the public v006 chip backup has no undamaged settings record.");
         }
         byte[] record = Arrays.copyOfRange(image, first, first + RECORD);
         if (kind == Kind.A || kind == Kind.B) {
@@ -1001,7 +959,7 @@ public final class Candidates {
             case V027:
                 return new Layer[]{V025_LAYER, V026_LAYER, V027_LAYER};
             default:
-                throw new IllegalArgumentException(kind + " is not made from the factory dump.");
+                throw new IllegalArgumentException(kind + " is not made from the factory chip backup.");
         }
     }
 
@@ -1016,7 +974,7 @@ public final class Candidates {
             for (int[] c : l.copies) {
                 if (c.length != 3 || c[2] <= 0 || c[0] < 0 || c[1] < 0 || c[0] + c[2] > dump.length
                         || c[1] + c[2] > out.length) {
-                    throw new IllegalStateException("a copy range lies outside the dump or the update file.");
+                    throw new IllegalStateException("a copy range lies outside the chip backup or the update file.");
                 }
                 System.arraycopy(dump, c[0], out, c[1], c[2]);
             }
@@ -1064,7 +1022,7 @@ public final class Candidates {
             }
             int off = (int) e.offset;
             if (!UpdateCheck.regionEquals(image, off, new byte[]{'R', 'I', 'F', 'F'})) {
-                throw new IllegalArgumentException("the sound " + e.displayName() + " in the stock dump is not a WAV"
+                throw new IllegalArgumentException("the sound " + e.displayName() + " in the public v006 chip backup is not a WAV"
                         + " file.");
             }
             long end = off + 8L + u32(image, off + 4);
@@ -1076,7 +1034,7 @@ public final class Candidates {
                     bits = (image[p + 8 + 14] & 0xFF) | (image[p + 8 + 15] & 0xFF) << 8;
                 } else if (image[p] == 'd' && image[p + 1] == 'a' && image[p + 2] == 't' && image[p + 3] == 'a') {
                     if (bits < 0 || p + 8 + size > image.length) {
-                        throw new IllegalArgumentException("the sound " + e.displayName() + " in the stock dump has"
+                        throw new IllegalArgumentException("the sound " + e.displayName() + " in the public v006 chip backup has"
                                 + " no format part before its sound data.");
                     }
                     Arrays.fill(image, p + 8, (int) (p + 8 + size), (byte) (bits == 8 ? 0x80 : 0x00));

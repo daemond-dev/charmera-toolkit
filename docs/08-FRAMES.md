@@ -6,11 +6,11 @@ The camera's frame mode lays one of four decorative overlays over the live view 
 four overlays and their menu thumbnails live in the resource pack at 0x120000, so a modified image can carry
 your own. `charmera frames` lists, extracts, previews and replaces them.
 
-The file formats below were checked against the stock dump byte for byte. The see-through rule the camera
-applies when it draws a frame comes from the community's disassembly and emulation of the firmware. This
-project hasn't flashed a replaced frame to a camera yet, so treat `replace` as an experiment. Its output goes
-through `pack` and `verify` like every other mod ([The first flash](01-FIRST-FLASH.md), steps 3 to 5), and you
-should keep your backup. The other resources, including the boot logo, are in
+The file formats below were checked byte for byte against a chip backup of stock firmware. The see-through
+rule the camera applies when it draws a frame comes from the community's disassembly and emulation of the
+firmware. This project hasn't written a replaced frame to a camera yet, so treat `replace` as an experiment.
+Its output goes through `pack` and `verify` like every other mod ([The first write](01-FIRST-FLASH.md), steps 3
+to 5). Keep your chip backup. The other resources, including the boot logo, are in
 [Resource pack and boot logo](09-RESOURCES.md). The byte layout of the pack is in [Image layout](11-FORMAT.md).
 
 ## Where the frames are
@@ -83,7 +83,7 @@ That has two consequences when you draw a frame:
   an even row.
 
 This rule is the community's reading of the compositor, confirmed in an emulator. This project hasn't
-flashed any of it yet.
+written any of it to a camera yet.
 
 ## Making a frame
 
@@ -103,8 +103,8 @@ one 2x2 block: a block's U and V are the average over its opaque pixels. Keep ed
 even rows and neither effect shows.
 
 `extract` writes the stock frames as PNGs you can edit. Some stock colours lie outside what RGB can hold
-(the saturated frame 2 most of all). The export desaturates those pixels towards grey instead of clipping
-each channel, so every luma byte comes back unchanged when the PNG is converted again. The see-through rule
+(the saturated frame 2 most of all). The export moves those pixels towards grey and doesn't clip each
+channel, so every luma byte comes back unchanged when the PNG is converted again. The see-through rule
 and the compression both depend on those bytes. Put back untouched, all four stock frames fit their own
 slots.
 
@@ -143,11 +143,11 @@ error: strip 1 cannot be written: the camera's frames hold fixed-Huffman blocks 
 ## The thumbnail
 
 `PV00n` is the picture the frame menu shows: 112x80 pixels, little-endian RGB565, 17,920 bytes inflated.
-See-through areas are painted with the key grey 0x8C71 (R 136, G 140, B 136).
+See-through areas are painted with the marker grey 0x8C71 (R 136, G 140, B 136).
 
 `replace` makes a thumbnail from the frame. Each thumbnail pixel covers about 7x7.5 frame pixels and takes
-the most common colour among the opaque ones. (Averaging would blend every edge into a new colour, and
-fixed-Huffman DEFLATE charges for each one.) An area that is mostly see-through gets 0x8C71, and an opaque
+the most common colour among the opaque ones. Averaging would blend every edge into a new colour, and
+fixed-Huffman DEFLATE charges for each one. An area that is mostly see-through gets 0x8C71, and an opaque
 pixel that happens to pack to exactly 0x8C71 is moved one blue level. The thumbnail slots are small
 (1,024 bytes, 1,536 for frame 3). When the full-colour thumbnail doesn't fit, colours are rounded to fewer
 RGB565 levels, one bit per channel at a time, until it does, and `replace` says when that happened. The four
@@ -155,15 +155,15 @@ stock frames, put back from their PNGs, get thumbnails of 400 to 1,406 bytes at 
 needs any rounding.
 
 To supply your own thumbnail, pass `--thumb` with a 112x80 PNG. Transparent pixels (alpha below 128) and
-pixels of the key grey itself (anything that packs to 0x8C71) become 0x8C71. Every other pixel is written as
-its RGB565 colour, without the nudge. `extract` writes `thumb-n.png` as RGBA with the key grey transparent
-(the grey is kept underneath), so a thumbnail put back unchanged gives the stock thumbnail word for word,
-key grey included. An RGB `thumb-n.png` without alpha goes back the same way.
+pixels of the marker grey itself (anything that packs to 0x8C71) become 0x8C71. Every other pixel is written
+as its RGB565 colour, without the nudge. `extract` writes `thumb-n.png` as RGBA with the marker grey
+transparent and the grey kept underneath. A thumbnail put back unchanged gives the stock thumbnail word for
+word, marker grey included. An RGB `thumb-n.png` without alpha goes back the same way.
 
-Nobody has checked whether the menu treats 0x8C71 as a key colour or just paints it. The stock thumbnails
+Nobody has checked whether the menu treats 0x8C71 as a transparent colour or just paints it. The stock thumbnails
 use it where the frame is see-through, so the toolkit does the same.
 
-## The flow
+## Commands to replace a frame
 
 ```
 charmera frames list my_backup.bin
@@ -199,13 +199,13 @@ budgets.
 
 ## What is not known
 
-- Nothing from this module has been flashed. The community verified the compositor rule in an emulator.
-  That the camera accepts the toolkit's streams (fixed Huffman, but with zlib's block boundaries instead of
-  the stock encoder's) is expected from the inflater's code, not shown on hardware.
-- Whether the menu keys on 0x8C71 in the thumbnail or just displays it.
-- Whether the firmware tolerates a frame entry whose file is longer than the stock one but within the
-  budget. The directory stores sectors, not lengths, and the trailer carries the length, so it should. That
-  doubt is why `replace` fills to the budget and never beyond.
+- Nothing from this module has been written to a camera. The community verified the compositor rule in an
+  emulator. The toolkit's streams are fixed Huffman with zlib's block boundaries, which differ from the stock
+  encoder's. The inflater's code suggests the camera accepts them. That hasn't been shown on hardware.
+- Whether the menu treats 0x8C71 in the thumbnail as transparent or just displays it.
+- Whether the firmware accepts a frame entry whose file is longer than the stock one but within the
+  budget. The directory stores sectors, not lengths, and the trailer carries the length, so the code suggests
+  it does. Nobody has tested it. That doubt is why `replace` fills to the budget and never beyond.
 - How the camera scales the 800x600 overlay onto a saved photo of a different size, if it does.
 
 ---

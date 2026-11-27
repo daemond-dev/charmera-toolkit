@@ -97,7 +97,7 @@ def test_published_restore_file_passes(stock_image, tmp_path, card, capsys):
     # against the public dump, which a read of a camera flashed with this very file looks like: a warning, not a pass
     by = {c.name: c for c in verify.verify_update(path, path.read_bytes(), stock=stock_image)}
     assert by["stock"].severity == "warn" and by["sensor-table"].severity == "warn"
-    assert "proves a fit only if --stock was read before the camera was ever flashed" in by["sensor-table"].detail
+    assert "proves a fit only if --stock was read before the camera was ever written to" in by["sensor-table"].detail
     assert stage_plan(path, card) == 0
     out = capsys.readouterr().out
     assert "WARN backup" in out and "PASS vector-table" in out and "WARN sensor-table" in out

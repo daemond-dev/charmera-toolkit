@@ -190,9 +190,9 @@ def test_happy_path_copies_and_verifies(update_file, backup, card, confirmed, ca
     assert "delete the update file" in low and "every power-on" in low          # the camera steps are printed
     assert low.index("take the card out first") < low.index("hold the power key about a second")
     assert "millennium" in low and "photos it stored there" in low
-    # a backup fits its camera only when it was read before the camera was ever flashed
+    # a backup fits its camera only when it was read before the camera was ever written to
     flat = " ".join(out.split())
-    assert ("A backup of a camera read before it was ever flashed fits that camera whatever its edition, made into a file "
+    assert ("A backup of a camera read before it was ever written to fits that camera whatever its edition, made into a file "
             "with pack or with charmera build --dump.") in flat
     assert "A camera's own backup" not in flat
     # Tags mirror verify: no FAIL line anywhere.
@@ -206,9 +206,9 @@ def test_without_a_backup_stage_warns_and_still_writes(update_file, card, confir
     assert "WARN backup" in out and "nothing here compares the file with the camera's own firmware" in out
     assert "cannot be undone" not in out and "the only way back" not in out
     flat = " ".join(out.split())
-    assert ("A file for the other sensor still boots, and flashing the stock build of the right base from the card undoes "
+    assert ("A file for the other sensor still boots, and writing the stock build of the right base from the card undoes "
             "it (charmera build --base v006 --download --out out/ for an SP140A camera, charmera build --base v012 --download "
-            "--out out/ for an OV9732 one). A flash that is cut off, or firmware that won't boot, needs a "
+            "--out out/ for an OV9732 one). A write that is cut off, or firmware that won't boot, needs a "
             "chip programmer.") in flat
     assert "backup:       none given (--stock)" in out
     assert "No backup of this camera's own flash chip was given" in out and "stage still writes the file" in flat
@@ -554,7 +554,7 @@ def test_stage_a_stock_update_file(stock_image, stock_image_path, card, confirme
     out = capsys.readouterr().out
     assert "PASS software-region" in out and "INFO resources" in out and "PASS vector-table" in out
     # --stock is a public build, as a read of a camera flashed with the public restore file is: a warning, not a pass
-    assert "WARN sensor-table" in out and "proves a fit only if --stock was read before the camera was ever flashed" in out
+    assert "WARN sensor-table" in out and "proves a fit only if --stock was read before the camera was ever written to" in out
     assert (card / name.filename).read_bytes() == payload
     assert card_files(card) == [name.filename]
     # once more: identical copy already there, nothing to do
@@ -739,7 +739,7 @@ def test_the_camera_steps_give_the_safe_way_to_connect_the_camera(update_file, c
 
 def test_stage_help_says_what_stock_is_for():
     text = " ".join(parser()._subparsers._group_actions[0].choices["stage"].format_help().split())
-    assert "Only a read made before the camera was ever flashed says whether a firmware fits it" in text
+    assert "Only a read made before the camera was ever written to says whether a firmware fits it" in text
     assert "Without --stock stage warns" in text
 
 

@@ -139,8 +139,8 @@ V012_BUILD = KnownBuild(
     key="v012",
     label=("the factory build v012 of OV9732 cameras (the-dumping-grounds/charmera-firmware-v012, same stamp 202505201029, "
            "compiled Jan 12 2026)"),
-    source=("the-dumping-grounds/charmera-firmware-v012 charmera-v012-2026-01-12-clean.bin (the cleaned copy of a never-flashed "
-            "camera's read; bytes 0..0x170000 are that read's, byte for byte)"),
+    source=("the-dumping-grounds/charmera-firmware-v012 charmera-v012-2026-01-12-clean.bin (the cleaned copy of the read of a "
+            "camera never written to; bytes 0..0x170000 are that read's, byte for byte)"),
     status="VERIFIED",
     stamp="202505201029",
     official_sha1="2cc13517f5b88d3253f5cde7b5fcde9e43df5fce",
@@ -379,7 +379,7 @@ OV9732_BUS = 0x6C
 
 # What a firmware image drives, from its bytes: the SP140A-class sensor (its 61-write init table, which starts
 # fd 00 2f 1b) or the OmniVision OV9732 (the SCCB context of v012's own driver, which our OV9732 port carries too).
-# The OV9732 context wins: a v006 build with our port (v0.21 to v0.24) still holds the SP140A table.
+# The OV9732 context wins: a v006 build with our OV9732 port still holds the SP140A table.
 SP140A_INIT = bytes.fromhex("fd002f1b")
 
 
@@ -624,6 +624,9 @@ def detect_build(image: bytes) -> BuildMatch:
                 break
     layout = exact if exact is not None else next(
         (b for b in KNOWN_BUILDS.values() if marks.layout is not None and b.layout == marks.layout), None)
+    # The code and software hashes are compared with the build the image is (or was made from), v006 when it is none.
+    # A build with no hash on record for one of them gets no line for it.
+    ref = build if build is not None else PUBLIC_BUILD
     checks = {
         "build_string": marks.build_string is not None,
         "stamp": marks.stamp is not None,
@@ -631,10 +634,12 @@ def detect_build(image: bytes) -> BuildMatch:
         "sensor_table": marks.sensor is not None,
         "sensor_table_referenced": marks.sensor is not None and marks.sensor.referenced_from is not None,
         "sensor_table_known": marks.sensor is not None and marks.sensor.sha256 in {b.sensor_table_sha256 for b in KNOWN_BUILDS.values()},
-        "code_sha256": len(image) >= 0x100000 and hashlib.sha256(image[0x200:0x100000]).hexdigest() == PUBLIC_BUILD.code_sha256,
-        "software_sha256": len(image) >= SOFTWARE_END and software_sha256(image) == PUBLIC_BUILD.software_sha256,
-        "fingerprint": exact is not None,
     }
+    if ref.code_sha256 is not None:
+        checks["code_sha256"] = len(image) >= 0x100000 and hashlib.sha256(image[0x200:0x100000]).hexdigest() == ref.code_sha256
+    if ref.software_sha256 is not None:
+        checks["software_sha256"] = len(image) >= SOFTWARE_END and software_sha256(image) == ref.software_sha256
+    checks["fingerprint"] = exact is not None
     return BuildMatch(marks, build, modified, checks, layout)
 
 
@@ -923,9 +928,9 @@ def photos_whose(image: bytes) -> str:
     if public:
         owner = public[0][1]
         return (f"the photos of the camera the {owner} dump was read from: every 0x1E0000-byte file made from that dump "
-                "carries them, so a camera flashed with one holds them too")
+                "carries them, so a camera with one written to it holds them too")
     return ("the photos stored in the camera this was read from: its own only if no 0x1E0000-byte file carrying "
-            "photos was flashed onto it before that read")
+            "photos was written to it before that read")
 
 
 # --- Summary -------------------------------------------------------------------------------------------

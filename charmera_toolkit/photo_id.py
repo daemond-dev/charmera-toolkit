@@ -2,20 +2,20 @@
 
 Every known build builds each JPEG from header templates in its initialised data. Three still-photo headers are known:
 
-- the v006 / v008_test family's (the SP140A builds, image.KNOWN_BUILDS; our v0.21 to v0.24 are built on v006 and keep
+- the v006 / v008_test family's (the SP140A builds, image.KNOWN_BUILDS; our OV9732 port is built on v006 and keeps
   it): 0x590 bytes, SOI, SOF0, a COM of 15 bytes ("GPEncoder" and six spaces, length field 0x11), two DQT, DRI 0, the
   four standard Huffman tables, an APP1 'Exif' block and SOS. In v006 the still template sits at file 0x107448 and
   the writer at VA 0x6DEC4 writes 0x590 bytes, with Make 'Generalplus', and Model 'CBB3' and Software '20150615'
   written over the template's own by code; v008_test holds the same templates 0xC8 further on (VERIFIED). A photo
   cannot tell v006 from v008_test: they share the template.
-- the factory build v012's (the OV9732 cameras' firmware; our v0.25 is v012 with two menu rows and keeps it): the
+- the factory build v012's (the OV9732 cameras' firmware; our v012 builds without EXIF dates keep it): the
   bare template, 0x270 bytes, the same segments without the APP1 block and with a 9-byte COM ("GPEncoder", length
   0x0B). v012 holds four copies of it (file 0xFFC68, 0x107538, 0x1077A8 and 0x107A18) and no 0x590 template at all
   (VERIFIED by search of the v012 dump). The v006 family holds the same bare template, byte for byte (file 0xFFB78, 0x1079D8 and
   0x107C48) but uses it only for thumbnails, video frames and a Wi-Fi stream, never for a still photo.
-- our EXIF mod's (v0.26 and later, built on v012): 0x340 bytes, the SOI, one APP1 'Exif' block of 0xD0 bytes (length
+- our EXIF mod's (every build with EXIF dates, built on v012): 0x340 bytes, the SOI, one APP1 'Exif' block of 0xD0 bytes (length
   field 0xCE) with Make 'Kodak', Model 'Charmera', Software naming the mod's version and the camera clock's dates,
-  then v012's bare template from its SOF0 on, byte for byte (VERIFIED in the v0.26 update file, where it sits at file
+  then v012's bare template from its SOF0 on, byte for byte (VERIFIED in the update file of v012 with Volume and LED rows and EXIF dates, where it sits at file
   0x89640).
 
 The toolkit's own exif-fix rewrites the EXIF block of COPIES with Make 'Kodak' and Model 'Charmera' and no Software
@@ -72,7 +72,7 @@ TEMPLATE_DQT = [(65, 0x00), (65, 0x01)]
 CAMERA_MAKE = "Generalplus"
 CAMERA_MODEL = "CBB3"
 CAMERA_SOFTWARE = "20150615"
-# Our EXIF mod's names (v0.26 and later), and the ones the toolkit's exif-fix writes on copies (exif.CAMERA_MAKE and
+# Our EXIF mod's names, and the ones the toolkit's exif-fix writes on copies (exif.CAMERA_MAKE and
 # exif.CAMERA_MODEL): the same two, so only the Software tag and the layout tell them apart.
 KODAK_MAKE = "Kodak"
 KODAK_MODEL = "Charmera"
@@ -121,10 +121,10 @@ STANDARD_DHT = (
 FAMILY_SP140A = "v006-v008_test"
 FAMILY_OV9732 = "v012"
 FAMILIES = {
-    FAMILY_SP140A: "the v006 / v008_test family (SP140A builds; our v0.21-v0.24 write it too; a photo cannot tell v006 "
-                   "from v008_test)",
-    FAMILY_OV9732: "the factory build v012's family (OV9732 cameras; our v0.25 keeps its header, our v0.26 and later "
-                   "add one EXIF block to it)",
+    FAMILY_SP140A: "the v006 / v008_test family (SP140A builds; our OV9732 port on v006 writes it too; a photo cannot "
+                   "tell v006 from v008_test)",
+    FAMILY_OV9732: "the factory build v012's family (OV9732 cameras; our v012 builds keep its header, and those with "
+                   "EXIF dates add one EXIF block to it)",
 }
 # Which family each camera-written kind shows. An exif-fix copy shows the family of the photo it was made from, by
 # its layout (see family_of).
@@ -134,11 +134,12 @@ CAMERA_KINDS = ("still", "bare", "exif-mod")
 
 CUT_SHORT = "the header could not be read to the start of scan: nothing to conclude from it"
 CONCLUSIONS = {
-    "still": ("the v006 / v008_test family's still-photo header (SP140A builds; our v0.21-v0.24 write it too; a photo "
-              "cannot tell v006 from v008_test)"),
-    "bare": ("the factory build v012's still-photo header (OV9732 cameras), which our v0.25 keeps; the v006 family "
+    "still": ("the v006 / v008_test family's still-photo header (SP140A builds; our OV9732 port on v006 writes it too; "
+              "a photo cannot tell v006 from v008_test)"),
+    "bare": ("the factory build v012's still-photo header (OV9732 cameras), which our v012 builds without EXIF dates "
+             "keep; the v006 family "
              "writes it only for thumbnails and video frames, so a frame taken out of a video has it too"),
-    "exif-mod": "our EXIF mod's still-photo header (v0.26 and later, built on the factory build v012)",
+    "exif-mod": "our EXIF mod's still-photo header (any of our builds with EXIF dates, built on the factory build v012)",
     "exif-fix": ("a copy the toolkit's exif-fix made (Make Kodak, Model Charmera, no Software; with --keep-make the "
                  "camera's Generalplus/CBB3, no Software), not a photo as the camera saved it and not the EXIF mod; "
                  "the rest of its header is the template of the photo it came from"),
@@ -675,20 +676,21 @@ def register(subparsers) -> None:
             "kind and its length, the frame size and sampling, the IJG quality that reproduces the quantisation "
             "tables exactly, the comment, and EXIF Make, Model and Software when there are any, then says what the "
             "header shows. Three still-photo headers are known. The v006 / v008_test family (the SP140A builds, and "
-            "our v0.21-v0.24 built on v006) writes 0x590 bytes: an EXIF block with Make Generalplus, Model CBB3 and "
+            "our OV9732 port built on v006) writes 0x590 bytes: an EXIF block with Make Generalplus, Model CBB3 and "
             "Software 20150615, and the comment 'GPEncoder' and six spaces. The factory build v012 (OV9732 cameras) "
-            "and our v0.25 write a bare 0x270-byte header: no EXIF block and the comment 'GPEncoder'. Our EXIF mod "
-            "(v0.26 and later) writes 0x340 bytes: one EXIF block with Make Kodak, Model Charmera and Software naming "
-            "its version right after the start marker, then v012's bare header. For the whole card at once, use "
+            "and our v012 builds without EXIF dates write a bare 0x270-byte header: no EXIF block and the comment "
+            "'GPEncoder'. Our EXIF mod writes 0x340 bytes: one EXIF block with Make Kodak, Model Charmera and Software "
+            "v0.26 (an old build number that's part of the mod's code) right after the start marker, then v012's bare "
+            "header. For the whole card at once, use "
             "identify."
         ),
         epilog=(
             "What the conclusions mean. 'The v006 / v008_test family's still-photo header': the camera ran an SP140A "
             "build when it took the photo; a photo cannot tell v006 from v008_test, since they share the header. "
-            "'The factory build v012's still-photo header': the camera ran v012 or our v0.25 when it took the photo; "
+            "'The factory build v012's still-photo header': the camera ran v012 or one of our v012 builds without EXIF dates when it took the photo; "
             "the v006 family writes the same bare header for thumbnails and video frames, so give photo-id the files "
             "as they came off the card's DCIM folder, not a frame taken out of a video. 'Our EXIF mod's still-photo "
-            "header': the camera ran v0.26 or later. 'A copy the toolkit's exif-fix made': Make Kodak and Model "
+            "header': the camera ran one of our builds with EXIF dates. 'A copy the toolkit's exif-fix made': Make Kodak and Model "
             "Charmera (or, with --keep-make, the camera's Generalplus and CBB3) without a Software tag, on a copy; "
             "it is not the EXIF mod, and the rest of its header still "
             "names the family of the photo it was made from. 'Re-saved by another program': the header carries a "
@@ -705,7 +707,7 @@ def register(subparsers) -> None:
             "header is not the one they write, and a JUNK text other than "
             "'GP$322 Generalplus AviPackerV3 20140916', the packer text v006, v008_test and v012 all carry, shows "
             "that other code wrote the file. A photo shows the firmware that took it, not the one that fits the "
-            "camera: a photo taken after a flash shows the flashed firmware. Nothing here says whether a firmware "
+            "camera: a photo taken after a write shows the firmware that was written. Nothing here says whether a firmware "
             "fits a camera."
         ),
     )

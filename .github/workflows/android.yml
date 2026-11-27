@@ -1,6 +1,7 @@
 # Builds the Charmera Card app and publishes it as the release "android-app", so the phone download link stays the
 # same: https://github.com/<owner>/charmera-toolkit/releases/download/android-app/charmera-card.apk
-# Runs on every push to main that touches android/, and from the Actions tab ("Run workflow").
+# Runs on every push to main that touches android/ or the recipes the app is generated from, and from the Actions
+# tab ("Run workflow").
 # Signing: every published APK is signed with the release key held in the repo secrets SIGNING_KEYSTORE_B64,
 # SIGNING_ALIAS and SIGNING_PASS, so each new version installs over the old one. Before publishing, the workflow
 # checks that the APK's certificate matches android/SIGNING_CERT_SHA256 and refuses otherwise. Without the secrets
@@ -9,7 +10,7 @@ name: android app
 on:
   push:
     branches: [main]
-    paths: ["android/**", ".github/workflows/android.yml"]
+    paths: ["android/**", "charmera_toolkit/recipes.json", ".github/workflows/android.yml"]
   workflow_dispatch:
 # One run at a time, so two publishes never race on the release. A run that starts while another is going waits
 # for it instead of cancelling it, so a publish is never cut off half way.
@@ -38,7 +39,7 @@ jobs:
             "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v006/123b76a8ead1322678bbb750ac1c85c8d8bd2099/charmera-v006-2025-10-14-clean.bin"
           echo "75b911e9fc62cb3e4b461501916d1f1c336a28587296f03eba1f9d90cbc01082  $RUNNER_TEMP/stock.bin" | sha256sum -c -
           echo "CHARMERA_STOCK_IMAGE=$RUNNER_TEMP/stock.bin" >> "$GITHUB_ENV"
-          # The factory build v012's cleaned copy, for the tests that make v0.25 and v0.26 from it. They skip without it.
+          # The factory build v012's cleaned copy, for the tests that make the v012 builds from it. They skip without it.
           if curl -fsSL --retry 5 -o "$RUNNER_TEMP/factory.bin"                "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v012/39150fbc584e4cb7c5bf091f56b9888f07379578/charmera-v012-2026-01-12-clean.bin"              && echo "63e396846f949600c2c1881920860821f2fcd70a70ac79ca54eebaee4a0ccb1c  $RUNNER_TEMP/factory.bin" | sha256sum -c -; then
             echo "CHARMERA_FACTORY_DUMP=$RUNNER_TEMP/factory.bin" >> "$GITHUB_ENV"
           else
@@ -58,7 +59,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Source and doc checks (the backup gate, the flash docs)
+      - name: Source and doc checks (the write gate, the flash docs)
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
@@ -109,7 +110,7 @@ jobs:
           # download link keeps working even if GitHub fails part way. Server errors are retried.
           VER=$(cat android/VERSION)
           TITLE="Charmera Card for Android $VER (build ${{ github.run_number }})"
-          NOTES="Charmera Card puts a firmware update on a Kodak Charmera's SD card from an Android phone (Android 7.0 or later). It identifies the firmware the camera runs from its photos, builds reviewed firmware (the stock restore file, the sensor-ID probe, v0.23 to v0.27, or Custom) and writes it to the card over the camera's USB-C cable. It works without a backup of the camera's flash chip, and warns when nothing confirms what the camera runs. A backup is the only way back to exactly what the camera ran, settings included. Without one, a camera that won't boot can still take the public stock file for its sensor through a chip programmer. Download charmera-card.apk on the phone, open it, and allow the install. Details: [android/README.md](https://github.com/${{ github.repository }}/blob/main/android/README.md)."
+          NOTES="Charmera Card puts a firmware update on a Kodak Charmera's SD card from an Android phone (Android 7.0 or later). It identifies the firmware the camera runs from its photos, builds reviewed firmware (the stock restore file, the sensor-ID probe, or a base with the mods you tick) and writes it to the card over the camera's USB-C cable. It works without a backup of the camera's flash chip, and warns when nothing confirms what the camera runs. A backup is the only way back to exactly what the camera ran, settings included. Without one, a camera that won't boot can still take the public stock file for its sensor through a chip programmer. Download charmera-card.apk on the phone, open it, and allow the install. Details: [android/README.md](https://github.com/${{ github.repository }}/blob/main/android/README.md)."
           retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i * 15)); done; return 1; }
           # Each step can be repeated safely, so a server error never leaves a half-made release behind:
           # create the release only if it is missing (gh also finds a draft by its tag), replace the APK,

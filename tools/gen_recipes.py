@@ -85,8 +85,9 @@ def java_source(doc) -> str:
            " */",
            "final class Recipes {", "",
            "    private Recipes() {", "    }", "",
-           f"    static final String CATALOG_VERSION = {q(doc['catalog']['version'])};",
-           f"    static final String CATALOG_STAMP = {q(doc['catalog']['stamp'])};", "",
+           "    /** Each base and what its stock firmware is, for its name (Recipe.firmwareName). */",
+           "    static final String[] BASE_IDS = " + strs([b["id"] for b in doc["bases"]]) + ";",
+           "    static final String[] BASE_STOCK = " + strs([b["stock"] for b in doc["bases"]]) + ";", "",
            "    /** {id, build, copy, prep, sha256, url or null}. */",
            "    static final String[][] DUMPS = {"]
     for d in doc["dumps"]:
@@ -97,6 +98,8 @@ def java_source(doc) -> str:
             "    static final String[] MOD_BASES = " + strs([m["base"] for m in doc["mods"]]) + ";",
             "    static final String[] MOD_NAMES = " + strs([m["name"] for m in doc["mods"]]) + ";",
             "    static final String[] MOD_TITLES = " + strs([m["title"] for m in doc["mods"]]) + ";",
+            "    /** How a build's name says each mod (Recipe.firmwareName): \"EXIF dates\", \"the OV9732 port\". */",
+            "    static final String[] MOD_PHRASES = " + strs([m["phrase"] for m in doc["mods"]]) + ";",
             "    static final String[] MOD_STATUS = " + strs([m["status"] for m in doc["mods"]]) + ";",
             "    static final String[] MOD_DESCRIPTIONS = {"]
     out += [f"            {q(m['description'])}," for m in doc["mods"]]
@@ -125,10 +128,10 @@ def java_source(doc) -> str:
         out += [f"                    {q(p['old_sha256'])}," for p in m["patches"]]
         out.append("            },")
     out += ["    };", "",
-            "    /** {base, mods joined by ',', stamp, status, label}. */",
+            "    /** {base, mods joined by ',', stamp, status, label (its name), old name or null (\"v0.27\")}. */",
             "    static final String[][] SETS = {"]
     for s in doc["sets"]:
-        out.append(f"            {strs([s['base'], ','.join(s['mods']), s['stamp'], s['status'], s['label']])},")
+        out.append(f"            {strs([s['base'], ','.join(s['mods']), s['stamp'], s['status'], s['label'], s.get('old_name')])},")
     out += ["    };", "",
             "    /** {base, mods joined by ',', dump id, file name, sha256}: the reviewed file of each set from each dump. */",
             "    static final String[][] BUILDS = {"]

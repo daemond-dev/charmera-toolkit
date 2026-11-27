@@ -46,7 +46,7 @@ public final class IdentifyTest {
         expect("the flash caveat says photos show the firmware that took them",
                 Identify.CAVEAT_AFTER_FLASH.startsWith("Photos show the firmware that took them")
                         && Identify.CAVEAT_AFTER_FLASH.contains("freezes in Photo mode")
-                        && Identify.CAVEAT_AFTER_FLASH.contains("only photos from before the flash say what fits"));
+                        && Identify.CAVEAT_AFTER_FLASH.contains("only photos from before the write say what fits"));
 
         // stock v012: bare everywhere, read in time order, not list order
         List<Identify.Entry> card = new ArrayList<>();
@@ -58,15 +58,15 @@ public final class IdentifyTest {
                 && "DCIM/PICT0003.jpg".equals(r.newest.path));
         expect("bare everywhere is stock v012, high", r.base == Identify.Base.V012
                 && r.family == Identify.Base.V012 && r.confidence == Identify.Confidence.HIGH && r.changes.isEmpty()
-                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If the camera was flashed after them, it runs something else now.") && r.notStock.isEmpty()
-                && !r.conclusion.contains("does not look stock") && !r.conclusion.contains("v0.21-v0.24"));
+                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If firmware was written to the camera after them, it runs something else now.") && r.notStock.isEmpty()
+                && !r.conclusion.contains("does not look stock") && !r.conclusion.contains("OV9732 port on v006"));
         expect("the evidence names both ends", any(r.evidence, "Oldest camera-written: DCIM/PICT0001.jpg")
                 && any(r.evidence, "Newest camera-written: DCIM/PICT0003.jpg"));
         expect("dates carry the year", any(r.evidence, "taken " + Identify.date(card.get(1), UTC))
                 && Identify.date(card.get(1), UTC).startsWith("2025-10-"));
         consistent("stock v012", r);
 
-        // stock v006 family: two agree, not capped: high, and the v0.21-v0.24 line instead of a lower confidence;
+        // stock v006 family: two agree, not capped: high, and the OV9732-port line instead of a lower confidence;
         // OTHER and unreadable photos at the ends are skipped and counted
         card = new ArrayList<>();
         card.add(photo("DCIM/PICT0001.jpg", T0, junk));
@@ -84,13 +84,16 @@ public final class IdentifyTest {
         expect("the v006 family is stock v006 or v008_test, high", r.base == Identify.Base.V006_FAMILY
                 && r.confidence == Identify.Confidence.HIGH && r.notStock.isEmpty()
                 && r.conclusion.startsWith("These photos were taken by stock v006 or v008_test (an SP140A camera)."));
-        expect("the v006 family's base is v006, as identify.py's", r.conclusion.contains("\nBase to build on: v006.")
+        expect("the v006 family's base is v006, as identify.py's, and the line says where each v006 file is written",
+                r.conclusion.contains("\nYour base is v006. For mods, pick base v006 on \"Write custom firmware\". Stock"
+                        + " v006 is written on \"Restore stock firmware\" or Advanced.")
+                && Identify.nextStep(Identify.Base.V012).equals("Pick base v012 on \"Write custom firmware\".")
                 && Identify.baseName(Identify.Base.V006_FAMILY).equals("v006")
                 && Identify.stockName(Identify.Base.V006_FAMILY).equals("v006 or v008_test"));
         expect("all read agree: high, and why", r.confidenceWhy.equals("all 2 camera-written photos read show the same"
                 + " family, oldest to newest"));
-        expect("the v006 family adds the one v0.21-v0.24 line", r.conclusion.contains(Identify.OUR_V021_V024)
-                && r.conclusion.indexOf("v0.21-v0.24") == r.conclusion.lastIndexOf("v0.21-v0.24"));
+        expect("the v006 family adds the one OV9732-port line", r.conclusion.contains(Identify.OUR_OV9732_PORT)
+                && r.conclusion.indexOf("OV9732 port on v006") == r.conclusion.lastIndexOf("OV9732 port on v006"));
         consistent("stock v006", r);
 
         // a single camera-written photo: medium
@@ -100,7 +103,7 @@ public final class IdentifyTest {
         expect("one photo is both the oldest and the newest", r.oldest == r.newest && r.evidence.size() >= 2
                 && !any(r.evidence, "Newest camera-written"));
         expect("a single photo is medium", r.base == Identify.Base.V012 && r.confidence == Identify.Confidence.MEDIUM
-                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If the camera was flashed after them, it runs something else now."));
+                && r.conclusion.startsWith("These photos were taken by stock v012 (an OV9732 camera). If firmware was written to the camera after them, it runs something else now."));
 
         // only OTHER photos: no verdict
         card = new ArrayList<>();
@@ -108,7 +111,7 @@ public final class IdentifyTest {
         card.add(photo("DCIM/B.jpg", T0 + DAY, junk));
         r = Identify.identify(card, UTC);
         expect("no recognised photo, no base", r.base == Identify.Base.UNKNOWN && r.oldest == null && r.other == 2
-                && r.conclusion.contains("None of the photos") && !r.conclusion.contains("Base to build on"));
+                && r.conclusion.contains("None of the photos") && !r.conclusion.contains("Your base is"));
 
         // our EXIF mod after stock v012's bare photos: one family, not a change; not stock; base v012, high
         card = new ArrayList<>();
@@ -120,8 +123,8 @@ public final class IdentifyTest {
         expect("bare then EXIF mod is one family", r.changes.isEmpty() && r.exifMod && r.family == Identify.Base.V012);
         expect("the EXIF mod is not stock, base v012, high", r.base == Identify.Base.V012
                 && r.confidence == Identify.Confidence.HIGH && r.notStock.size() == 1
-                && r.notStock.get(0).startsWith("This camera does not look stock: our EXIF mod (v0.26 or later,"
-                + " Software 'v0.26') is installed") && !r.conclusion.contains("taken by stock"));
+                && r.notStock.get(0).startsWith("This camera does not look stock: our EXIF mod (Software 'v0.26')"
+                + " is installed") && !r.conclusion.contains("taken by stock"));
         expect("the EXIF mod's install falls between the last bare and the first EXIF photo",
                 r.notStock.get(0).contains("installed between " + Identify.date(card.get(1), UTC) + " and "
                         + Identify.date(card.get(2), UTC)));
@@ -159,10 +162,10 @@ public final class IdentifyTest {
         expect("two families say so, with both dates", r.notStock.size() == 2 && r.notStock.get(0).equals(
                 "This camera does not look stock: photos from two firmware families, the v006 family up to "
                         + Identify.date(card.get(3), UTC) + " and the v012 family from " + Identify.date(card.get(4), UTC)
-                        + ". Either the camera was flashed in between, or the card holds photos from two cameras."));
+                        + ". Either firmware was written to the camera in between, or the card holds photos from two cameras."));
         expect("and the EXIF mod as well, without weakening the base", r.notStock.get(1).contains("our EXIF mod")
-                && r.conclusion.contains("Base to build on: v006 (from the oldest photos")
-                && !r.conclusion.contains("Base to build on: v012"));
+                && r.conclusion.contains("Your base is v006. That's from the oldest photos, since")
+                && !r.conclusion.contains("Your base is v012"));
         consistent("v006 then EXIF mod", r);
 
         // two families the other way round: never the newest family's base
@@ -173,7 +176,7 @@ public final class IdentifyTest {
         r = Identify.identify(card, UTC);
         expect("v012 then the v006 family is base v012, low", r.base == Identify.Base.V012
                 && r.confidence == Identify.Confidence.LOW && r.changes.size() == 1 && r.notStock.size() == 1
-                && r.notStock.get(0).contains("the v012 family up to") && r.conclusion.contains(Identify.OUR_V021_V024));
+                && r.notStock.get(0).contains("the v012 family up to") && r.conclusion.contains(Identify.OUR_OV9732_PORT));
         consistent("v012 then v006", r);
 
         // there and back: two changes, both found
@@ -188,7 +191,7 @@ public final class IdentifyTest {
                         + " v012 family " + Identify.date(card.get(0), UTC) + " to " + Identify.date(card.get(0), UTC)
                         + "; the v006 family " + Identify.date(card.get(1), UTC) + " to " + Identify.date(card.get(1), UTC)
                         + "; the v012 family " + Identify.date(card.get(2), UTC) + " to " + Identify.date(card.get(2), UTC)
-                        + "). Either the camera was flashed more than once, or the card holds photos from more than one"
+                        + "). Either firmware was written to the camera more than once, or the card holds photos from more than one"
                         + " camera."));
 
         // photos with no file time are left out of the dating: never read, counted and named
@@ -338,7 +341,7 @@ public final class IdentifyTest {
         card.add(photo("DCIM/PICT0003.jpg", T0 + 2 * DAY, bare));
         r = Identify.identify(card, UTC);
         expect("and makes no second family", r.changes.isEmpty() && r.base == Identify.Base.V012
-                && r.notStock.isEmpty() && !r.conclusion.contains(Identify.OUR_V021_V024));
+                && r.notStock.isEmpty() && !r.conclusion.contains(Identify.OUR_OV9732_PORT));
         // an exif-fix copy of a bare photo (Kodak/Charmera, no Software) is not our EXIF mod
         card = new ArrayList<>();
         card.add(photo("DCIM/PICT0001.jpg", T0, bare));
@@ -357,7 +360,7 @@ public final class IdentifyTest {
         r = Identify.identify(card, UTC, 3);
         expect("no newest within the cap: no answer", r.base == Identify.Base.UNKNOWN && r.newest == null
                 && r.oldest != null && r.conclusion.contains("None of the newest 3 photos")
-                && !r.conclusion.contains("Base to build on") && r.notes.isEmpty());
+                && !r.conclusion.contains("Your base is") && r.notes.isEmpty());
         // none at the oldest end within the cap, but one at the newest: the answer goes by those read
         card = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
@@ -374,7 +377,7 @@ public final class IdentifyTest {
         expect("labels name the family", Identify.label(PhotoId.Kind.PUBLIC_FAMILY).equals(
                 "v006 family (stock v006 or v008_test, SP140A cameras)")
                 && Identify.label(PhotoId.Kind.ORIGINAL_BARE).equals("v012 family (stock v012, OV9732 cameras)")
-                && Identify.label(PhotoId.Kind.FACTORY_EXIF).equals("our EXIF mod (v0.26 or later), v012 family"));
+                && Identify.label(PhotoId.Kind.FACTORY_EXIF).equals("our EXIF mod, v012 family"));
 
         System.out.printf(Locale.ROOT, "IdentifyTest: %d passed, %d failed%n", passes, failures);
         if (failures > 0) {
@@ -386,12 +389,12 @@ public final class IdentifyTest {
     static void consistent(String what, Identify.Result r) {
         String name = Identify.baseName(r.base);
         boolean ok = r.base != Identify.Base.UNKNOWN && r.family == r.base
-                && r.conclusion.contains("Base to build on: " + name);
+                && r.conclusion.contains("Your base is " + name + ".");
         for (Identify.Base b : Identify.Base.values()) {
             if (b != r.base && b != Identify.Base.UNKNOWN) {
                 ok &= !r.conclusion.contains("taken by stock " + Identify.stockName(b))
                         && !r.conclusion.contains("show stock " + Identify.stockName(b))
-                        && !r.conclusion.contains("Base to build on: " + Identify.baseName(b));
+                        && !r.conclusion.contains("Your base is " + Identify.baseName(b) + ".");
             }
         }
         for (String line : r.notStock) {

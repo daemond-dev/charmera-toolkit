@@ -107,8 +107,8 @@ known. The yellow boot screen and the "original series" body didn't tell the pub
   the app's backup) are a PASS. A file laid out like the reference (the stamp, the build string and the
   sensor table at the same offsets) with other bytes there is a FAIL. A file laid out differently from the
   reference, and any file checked without one, is compared with the known build whose layout it has, using a
-  SHA-256 of those bytes kept for each known build. (The two known builds carry the same 64 bytes,
-  SHA-256 `cf38b73d…`, VERIFIED.) The same bytes are a PASS, other bytes a FAIL. So a file laid out like the
+  SHA-256 of those bytes kept for each known build. The two known builds carry the same 64 bytes,
+  SHA-256 `cf38b73d…` (VERIFIED). The same bytes are a PASS, other bytes a FAIL. So a file laid out like the
   film-mods build, checked against a backup of the public build, is held to the film-mods build's table. Only
   a file laid out like neither the reference nor a known build, whose table isn't the reference's, gets a
   WARN saying the table couldn't be compared. No flag overrides a FAIL here, since a camera with a broken
@@ -117,7 +117,7 @@ known. The yellow boot screen and the "original series" body didn't tell the pub
   is another question. Both known builds carry the same 61-write sensor table, byte for byte, and drive one
   sensor without reading which one is fitted, and the public dump left an original-series camera unable to
   take pictures. A known build's fingerprint is taken over 0..0x169000. The sensor-table rules, which
-  `verify` and the app share, are in [The first flash, step 3](01-FIRST-FLASH.md#3-verify).
+  `verify` and the app share, are in [The first write, step 3](01-FIRST-FLASH.md#3-verify).
 
 ## Update file (`JH_5408<stamp>_<sum>.bin`)
 
@@ -128,8 +128,8 @@ known. The yellow boot screen and the "original series" body didn't tell the pub
     blank block 0x1F0000.
   - The film-mods files are 0x169000 bytes (`pack --official-size`). The name comes from that project's
     reading that official updates would end there. No official Charmera update has ever been published.
-    That author reports flashing a 0x169000-byte file on their own camera (REPORTED), and this project has
-    flashed none. Such a file holds the code and the whole resource pack and nothing of the camera's own
+    That author reports writing a 0x169000-byte file on their own camera (REPORTED), and this project has
+    written none. Such a file holds the code and the whole resource pack and nothing of the camera's own
     area. The extra erase lands on 0x170000, the settings bank and the photo directory, so the camera starts
     with factory defaults and an empty photo list. The stored photo data at 0x180000 and the blocks above
     0x1E0000 aren't touched.
@@ -139,18 +139,18 @@ known. The yellow boot screen and the "original series" body didn't tell the pub
   padding a cut-off file would erase part of the code or the resource pack.
 - The block 0x1E0000..0x1EFFFF (block 30) is the one block that a 0x1E0000-byte file and its final erase
   never touch. The file ends at its start, and the final erase hits the block after it. Whatever a camera's
-  chip held there before its first such flash is still there after any number of them, probably 0xFF as in
+  chip held there before its first such write is still there after any number of them, probably 0xFF as in
   every known dump (INFERRED). A first backup reads it with the rest of the chip, so keep that backup as it
   is. When `pack` trims a 2 MiB dump it leaves this block out and only notes data there, since a
-  0x1E0000-byte flash leaves it on the chip. It refuses a dump whose last block, 0x1F0000..0x200000, isn't
+  0x1E0000-byte update leaves it on the chip. It refuses a dump whose last block, 0x1F0000..0x200000, isn't
   blank, because the final erase clears that block.
 - `<stamp>` is 12 ASCII digits (0-9 only, because the camera reads fixed character positions). It must
   differ from the stamp compiled into the running firmware, or the updater ignores the file. Both known
   builds carry `202505201029`. With `--stock`, `verify` also refuses the stamp found there (`stamp-camera`).
-  The toolkit never changes the stamp inside the file, so a toolkit-built file flashes again at every
+  The toolkit never changes the stamp inside the file, so the camera writes a toolkit-built file again at every
   power-on while it's on the card. The film-mods tool writes the new stamp inside its files too, so a camera
-  ignores them once it runs one. (REPORTED in that project's notes. That the camera then ignores the file
-  follows from the stamp compare, INFERRED.)
+  ignores them once it runs one. This is REPORTED in that project's notes. That the camera then ignores the
+  file follows from the stamp compare (INFERRED).
 - `<sum>` is the unsigned 32-bit sum of every byte of the file, as 8 hex digits. A mismatch shows
   "Program error" and nothing is written.
 - The updater looks only in the card's root, and only during the first 5 seconds after power-on. It erases
@@ -161,7 +161,7 @@ known. The yellow boot screen and the "original series" body didn't tell the pub
   For a 2 MiB file it's 0x210000, beyond the chip: the address wraps to block 1 and the camera no longer
   boots (confirmed on hardware by the film-mods author). That's why the length matters, and `verify` names
   the block it would hit.
-- The file isn't deleted afterwards. Take the card out before the next power-on, or it flashes again.
+- The file isn't deleted afterwards. Take the card out before the next power-on, or the camera writes it again.
 
 ## Resource entries
 
@@ -178,8 +178,8 @@ self-test sector at 0x16E000. Every slot must lie after the directory and inside
 | `.PAK` | starts `GPRS` |
 
 The two public dumps, the published stock restore file, the film-mods restore file and the three withdrawn
-[flash candidates](03-FLASH-CANDIDATES.md) pass this check. (`verify` refuses the candidates for what they
-are, not for their resources.) A cut-off download padded with 0xFF fails here even when the rest of the file
+[candidate files](03-FLASH-CANDIDATES.md) pass this check. `verify` refuses candidates A and B by their SHA-256
+and names C in an INFO line. None of them fails this resource check. A cut-off download padded with 0xFF fails here even when the rest of the file
 looks right. In an official-size file the last entry's slot ends at 0x169000 instead of 0x16E000.
 
 ## Resource sound slots
@@ -199,8 +199,8 @@ says what it cut. The event player in this build never requests BEEP.WAV.
 
 `GPZP` + raw DEFLATE (fixed Huffman) + trailer {u32 CRC32 of the inflated data, u32 inflated length} + 0xFF
 padding to the next entry. The 800×600 frames inflate to three 240,000-byte strips in a row-pair 4:2:0
-layout ([Y even row][U,V per pair][Y odd row]). Luma 0x8C in both rows of a pair is the see-through key.
-Thumbnails (`PV00n`) are 112×80 RGB565 little-endian with 0x8C71 as the key colour.
+layout ([Y even row][U,V per pair][Y odd row]). Luma 0x8C in both rows of a pair marks a see-through pixel.
+Thumbnails (`PV00n`) are 112×80 RGB565 little-endian with 0x8C71 as the see-through colour.
 
 The stock encoder isn't zlib: its blocks hold exactly 4,096 symbols. Python's
 `zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_FIXED)` reproduces 23 of the 35 stock streams byte for

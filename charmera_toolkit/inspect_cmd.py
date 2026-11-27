@@ -36,7 +36,7 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         print("reg init list:   " + ", ".join(f"[{r:#010x}]={v:#x}" for r, v in info["reg_init"]) + "  (INFERRED meaning)")
     print(f"build:           {info['identity']}  ({info['identity_label']})")
     print("                 a build match says which public image this is, not whether it fits a given camera: only a dump of")
-    print("                 that camera's own chip read before it was ever flashed does. The stamp 202505201029 is carried by")
+    print("                 that camera's own chip read before it was ever written to does. The stamp 202505201029 is carried by")
     print("                 every known build (v006, v008_test and v012).")
     for k, v in info["identity_checks"].items():
         print(f"  check {k:24s} {_fmt_bool(v)}")
@@ -62,12 +62,12 @@ def print_report(path: Path, image: bytes, show_resources: bool = False, show_se
         if not info["identity_checks"].get("sensor_table_known"):
             print("                 NOT the known builds' table")
             if ported:
-                print("                 the code also carries our OV9732 port (v0.21 to v0.24): this firmware drives an OV9732")
+                print("                 the code also carries our OV9732 port (built on v006): this firmware drives an OV9732")
         elif t.sensor == "OV9732":
             print("                 v012's table for the OmniVision OV9732 (bus 0x6C, 16-bit registers): its own driver, with no")
             print("                 SP140A-style table")
         elif ported:
-            print("                 the SP140A table, but the code also carries our OV9732 port (v0.21 to v0.24): this firmware")
+            print("                 the SP140A table, but the code also carries our OV9732 port (built on v006): this firmware")
             print("                 drives an OV9732")
         else:
             print("                 the SP140A table v006 and v008_test carry (public dump, film-mods): it drives one sensor and reads")
@@ -165,9 +165,12 @@ def handler(args) -> int:
             "source_tree": m.source_tree, "source_tree_offset": m.source_tree_offset, "source_tree_paths": m.source_tree_paths,
             "sensor_table": None if not m.sensor else {"reset": list(m.sensor.reset), "init": list(m.sensor.init), "pairs": m.sensor.pairs,
                                                        "sha256": m.sensor.sha256, "bus_address": m.sensor.bus_address,
-                                                       "referenced_from": m.sensor.referenced_from, "sensor": m.sensor.sensor},
-            "sensor_programs": [{"init": list(p.init), "pairs": p.pairs, "sha256": p.sha256, "referenced_from": p.referenced_from}
-                                for p in m.sensor_programs],
+                                                       "referenced_from": m.sensor.referenced_from, "sensor": m.sensor.sensor,
+                                                       # what the code drives: OV9732 for a v006 build with our port
+                                                       "drives": sensor_of(image) or m.sensor.sensor},
+            "sensor_programs": [{"init": list(p.init), "pairs": p.pairs, "sha256": p.sha256, "referenced_from": p.referenced_from,
+                                 "sensor": p.sensor}
+                                for p in (m.sensor_programs or m.ov9732_programs)],
             "several_sensor_programs": bool(m.several_sensor_programs),
             "stamp_conflict": list(m.stamp_conflict),
         }

@@ -100,8 +100,6 @@ public class RecipesTest {
             pinned &= both;
         }
         expect("every version the app pins is a reviewed row of the table, from both copies of its dump", pinned);
-        expect("the catalog version is the newest", Recipes.CATALOG_VERSION.equals("v0.27")
-                && Recipes.CATALOG_STAMP.endsWith("0027"));
 
         System.out.printf(Locale.ROOT, "RecipesTest: %d passed, %d failed%n", passes, failures);
         if (failures > 0) {

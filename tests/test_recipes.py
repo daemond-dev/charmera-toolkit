@@ -146,6 +146,50 @@ def test_build_writes_the_file_and_verify_names_it(var, tmp_path, capsys):
     by = {c.name: c for c in verify.verify_update(files[0], files[0].read_bytes())}
     assert by["reviewed"].ok and by["reviewed"].severity == "info"
     assert not any(not c.ok and c.severity == "fail" for c in by.values())
+    # the number an older app gave this build, for someone matching a file to old notes
+    old = "v0.26" if entry["build"] == "v012" else "v0.24"
+    assert f"older versions of the app called this {old}" in by["reviewed"].detail
+
+
+def test_build_list_marks_the_dump_download_takes(capsys):
+    """--list and --download go by one rule (build_cmd.public_dump): v008_test's only public file is the one fetched."""
+    build_cmd.print_list(DOC)
+    lines = capsys.readouterr().out.splitlines()
+    for base in ("v006", "v008_test", "v012"):
+        chosen = build_cmd.public_dump(DOC, base)["id"]
+        marked = [l.split()[1] for l in lines if l.startswith("  dump") and l.endswith("downloads with --download")]
+        assert chosen in marked, base
+    assert sum(l.endswith("downloads with --download") for l in lines) == 3
+
+
+def test_an_eased_line_of_a_reviewed_build_does_not_talk_about_refusing(monkeypatch):
+    """The refusal clause and the donor pointer go together, in each shape verify writes them."""
+    row = {"base": "v012", "mods": ["v012/volume-led"], "dump": "v012-clean", "name": "JH_x.bin", "sha256": "0" * 64}
+    monkeypatch.setattr(R, "reviewed", lambda sha, recipes=None: row)
+    shapes = ["can be expected to freeze in photo and video mode after the write (refusing; no flag accepts it)"
+              + verify.DONOR_ROUTE_AFTER,
+              "cannot be matched to that camera (refusing; no flag accepts it. If this camera's own firmware is gone and "
+              "the file is another, working camera's firmware, that is the donor route, --donor)",
+              "does not see (refusing; no flag accepts it)"]
+    for text in shapes:
+        (c,) = [c for c in verify.reviewed_build(b"\0" * 0x200000, [verify.Check("sensor-table", False, text)],
+                                                 stock=b"\0" * 0x200000) if c.name == "sensor-table"]
+        assert c.ok and c.severity == "warn"
+        assert "refus" not in c.detail and "donor" not in c.detail and "no flag" not in c.detail, c.detail
+        assert c.detail.endswith(" (a known build: this is expected)")
+    assert "freeze in photo and video mode after the write (a known build" in verify.reviewed_build(
+        b"\0" * 0x200000, [verify.Check("sensor-table", False, shapes[0])])[-1].detail
+
+
+def test_an_unusable_stock_is_not_called_a_backup_of_another_build():
+    """A --stock that is not a read of a chip fails on its own line; the reviewed build's lines say nothing about it."""
+    dump = DUMPS["CHARMERA_FACTORY_DUMP"]
+    if dump is None:
+        pytest.skip("set CHARMERA_FACTORY_DUMP")
+    built = R.make(dump, ["volume-led"], DOC)
+    by = {c.name: c for c in verify.verify_update(Path(built.name), built.data, stock=b"x" * 100)}
+    assert "vector-table-stock" not in by and "wrong-sensor" not in by
+    assert not by["stock"].ok and by["stock"].severity == "fail"
 
 
 # --- verify and the reviewed builds: the sensor gate stays -------------------------------------------------------------
@@ -188,7 +232,7 @@ def test_a_reviewed_build_never_asks_for_allow_modified(monkeypatch):
         for c in verify.reviewed_build(b"\0" * 0x200000, checks):
             assert "--allow-modified" not in c.detail, c.detail
             if c.name == "software-region":
-                assert c.detail.endswith(" (a reviewed build: this is expected)")
+                assert c.detail.endswith(" (a known build: this is expected)")
 
 
 def test_reviewed_files_from_real_dumps_never_mention_allow_modified():
@@ -225,3 +269,58 @@ def test_the_sensor_gate_on_real_images():
     by = {c.name: c for c in verify.verify_update(Path(restore.name), restore.data, stock=factory)}
     assert by["wrong-sensor"].severity == "warn" and "drives the SP140A" in by["wrong-sensor"].detail
     assert not any(not c.ok and c.severity == "fail" for c in by.values())   # warned, not refused: the owner decides
+
+
+# --- names: a build is its base and the mods on it, never a number --------------------------------------------------
+
+def test_every_set_is_named_by_its_base_and_mods():
+    for s in DOC["sets"]:
+        assert s["label"] == R.firmware_name(s["base"], s["mods"], DOC), s["label"]
+        assert "v0." not in s["label"] and " + " not in s["label"]
+    for m in DOC["mods"]:
+        assert m["phrase"] and "v0." not in m["phrase"]
+    assert [b["id"] for b in DOC["bases"]] == ["v012", "v006", "v008_test"]
+
+
+def test_the_name_rule():
+    name = lambda base, *mods: R.firmware_name(base, list(mods), DOC)     # noqa: E731
+    assert name("v012", "v012/capture-flash", "v012/exif", "v012/volume-led", "v012/boot-last-mode") == \
+        "v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash"   # the table's order
+    assert name("v012", "v012/exif", "v012/volume-led") == "v012 with Volume and LED rows and EXIF dates"
+    assert name("v012", "v012/exif") == "v012 with EXIF dates"
+    assert name("v006", "v006/ov9732-port") == "v006 with the OV9732 port"
+    assert name("v006", "v006/volume-led", "v006/ov9732-port") == "v006 with the OV9732 port and Volume and LED rows"
+    assert name("v006", "v006/sensor-probe") == "v006 with the sensor-ID probe"
+    assert name("v012") == "stock v012 (the factory firmware, unchanged)"
+    assert name("v006") == "stock v006 (the stock restore file)"
+    assert name("v008_test") == "stock v008_test (the charmera-film-mods restore file, unchanged under a new file name)"
+    assert name("v099") == "stock v099"
+    assert name("v012", "v012/nope", "v012/exif") == "v012 with EXIF dates and v012/nope"   # an unknown id: itself, last
+
+
+def test_only_the_five_numbered_builds_keep_their_old_name():
+    old = {(s["base"], tuple(s["mods"])): s["old_name"] for s in DOC["sets"] if "old_name" in s}
+    assert old == {
+        ("v006", ("v006/ov9732-port",)): "v0.23",
+        ("v006", ("v006/ov9732-port", "v006/volume-led")): "v0.24",
+        ("v012", ("v012/volume-led",)): "v0.25",
+        ("v012", ("v012/volume-led", "v012/exif")): "v0.26",
+        ("v012", ("v012/volume-led", "v012/exif", "v012/boot-last-mode", "v012/capture-flash")): "v0.27",
+    }
+    assert R.old_name("v012", ("v012/volume-led", "v012/exif"), DOC) == "v0.26"
+    assert R.old_name("v012", ("v012/exif",), DOC) is None
+    # any order of the same mods is the same build, as in the app's Recipe.Selection
+    assert R.old_name("v012", ["v012/exif", "v012/volume-led"], DOC) == "v0.26"
+    assert R.old_name("v006", ["v006/volume-led", "v006/ov9732-port"], DOC) == "v0.24"
+    assert R.set_for("v012", ["v012/exif", "v012/volume-led"], DOC)["old_name"] == "v0.26"
+
+
+def test_build_list_names_each_set_and_maps_the_old_numbers(capsys):
+    args = type("A", (), {"list": True})
+    assert build_cmd.handler(args) == 0
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if l.startswith("  set ")]
+    assert any(l.endswith("v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash  (older "
+                          "versions of the app called this v0.27)") for l in lines)
+    assert sum("older versions of the app called this" in l for l in lines) == 5
+    assert not any("v0." in l.split("(older versions")[0] for l in lines)

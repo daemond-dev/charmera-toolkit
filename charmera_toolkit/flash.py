@@ -391,7 +391,7 @@ def build_marks_found(data: bytes) -> Dict[str, Optional[dict]]:
         "sensor_table": None if m.sensor is None else {"offset": f"0x{m.sensor.init[0]:X}", "writes": m.sensor.pairs,
                                                        "sha256": m.sensor.sha256, "sensor": m.sensor.sensor,
                                                        # what the code drives: OV9732 for a v006 build with our port
-                                                       # (v0.21 to v0.24), which keeps the SP140A table
+                                                       # (on v006), which keeps the SP140A table
                                                        "drives": image_mod.sensor_of(data) or m.sensor.sensor},
     }
 
@@ -523,14 +523,14 @@ def public_read_note(source: str) -> List[str]:
     if source == CLEAN_V012:
         return [
             f"this read is byte-identical to {source}: the OV9732 cameras' factory build v012 with only",
-            "its factory settings record and no stored photos. It may be this camera after it was flashed with",
-            "a file made from that copy, or someone else's copy of it. The app does not take it as a backup:",
+            "its factory settings record and no stored photos. It may be this camera after a file made from that",
+            "copy was written to it, or someone else's copy of it. The app does not take it as a backup:",
             "byte for byte it cannot be told from someone else's copy.",
         ]
     return [
-        f"this read is byte-identical to the public dump from {source}. A camera flashed with the",
-        "public restore file, or with another file made from that dump, reads exactly like that until a",
-        "setting changes, so this may be this camera after such a flash. It is then the way back to that",
+        f"this read is byte-identical to the public dump from {source}. A camera with the",
+        "public restore file, or another file made from that dump, written to it reads exactly like that",
+        "until a setting changes, so this may be this camera after such a write. It is then the way back to that",
         "state, not a reference for which image sensor the camera has. The app does not take it as a",
         "backup: byte for byte it cannot be told from someone else's copy of that dump.",
     ]
@@ -552,9 +552,9 @@ def public_image_note(source: str) -> List[str]:
         ]
     return [
         f"this image is byte-identical to the public dump from {source}. It is that dump, or the read",
-        "of a camera flashed with the public restore file (or another file made from that dump) that changed",
-        "no setting since, such as a camera after the stock restore flash, and then the way back to that",
-        "state. Either way it is not firmware known to fit this camera: after it was flashed, one camera could",
+        "of a camera that had the public restore file (or another file made from that dump) written to it and",
+        "changed no setting since, such as a camera after the stock restore write, and then the way back to that",
+        "state. Either way it is not firmware known to fit this camera: after it was written to one camera, that camera could",
         "no longer take pictures; the likely cause is a sensor it does not drive (INFERRED). Its settings and",
         "its two internal photos are that dump's owner's.",
     ]
@@ -742,7 +742,7 @@ def read_and_keep(flashrom: str, version: str, programmer: str, chip: Optional[s
                        else "and the chip is not being read whole, so nothing was written to it")
         kept.problem = (
             f"the read is {info['size']:,} bytes, not {FLASH_SIZE:,}: this file is not a full-flash image\n"
-            f"{consequence}. `probe` should report a 2048 kB chip; a different size usually\n"
+            f"{consequence}. `probe` reports the right chip as 2048 kB; a different size usually\n"
             "means a bad clip contact, a back-powered board (battery still connected) or the wrong --chip.\n"
             f"Fix that and run {command} again. The file above is kept only as a record of what was read."
         )
@@ -966,7 +966,7 @@ def _drives(table: dict) -> str:
 
 
 def _ported(table: dict) -> bool:
-    """An SP140A table in code that carries our OV9732 port (v0.21 to v0.24): that firmware drives an OV9732."""
+    """An SP140A table in code that carries our OV9732 port (built on v006): that firmware drives an OV9732."""
     return table.get("sensor", "SP140A") == "SP140A" and _drives(table) == "OV9732"
 
 
@@ -996,6 +996,9 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
     names = {"OV9732": "the OmniVision OV9732", "SP140A": "the SP140A-class sensor"}
     other_sensor = (image_table is not None and chip_table is not None and not chip_several
                     and _drives(image_table) != _drives(chip_table))
+    # Two set-ups of one sensor: stock v012's own driver and our OV9732 port on v006, for example.
+    same_sensor = (image_table is not None and chip_table is not None and not chip_several and not other_sensor
+                   and image_table["sha256"] != chip_table["sha256"])
     if chip_several:
         # Which of them sets up the sensor cannot be told, so the image's table is not the same as the chip's, whichever
         # it is (verify refuses such a --stock).
@@ -1014,7 +1017,7 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
         ask = ["The image and the firmware on the chip drive different image sensors (the sensor lines above)."]
     elif image_table is not None and chip_table is not None and image_table["sha256"] == chip_table["sha256"]:
         _note(["The same table: the image sets up the image sensor as the firmware on the chip does. That",
-               "firmware fits this camera only if it is the one the camera came with, not one flashed onto it since."],
+               "firmware fits this camera only if it is the one the camera came with, not one written to it since."],
               indent)
         return None
     elif chip_table is None:
@@ -1038,6 +1041,14 @@ def print_sensor_comparison(image_table: Optional[dict], chip_table: Optional[di
                f"one. Write it only if this camera has {sensor}.",
                "Recovery, section B, says how to tell. The read kept above is the way back."], indent)
         return ask + [f"Write it if this camera has {sensor}."]
+    if same_sensor and image_source in (CLEAN_V006, CLEAN_V012):
+        sensor = names[_drives(image_table)]
+        _note(["DIFFERENT: the image and the firmware on the chip set up the image sensor in different ways.",
+               f"Both drive {sensor}.",
+               f"Expected when you're going back to the stock build. Write it only if this camera has {sensor}.",
+               "Recovery, section B, says how to tell. The read kept above is the way back."], indent)
+        return [f"The image and the firmware on the chip both drive {sensor}, set up in different ways (the sensor",
+                "lines above).", f"Write it if this camera has {sensor}."]
     if other_sensor:
         ask = ask + ["Nothing here can tell whether that firmware fits this camera."]
     _note(first + [
@@ -1201,12 +1212,13 @@ def register(subparsers) -> None:
     restore = subparsers.add_parser(
         "restore",
         help="read the chip twice, then write a full 2 MiB image to it through flashrom (asks for a typed RESTORE)",
-        description="Check the image (2 MiB, SPII magic, Charmera build marks found by content, not several sensor "
-        "programs), read the chip twice and keep that read in --out as backup does (nothing is written when the reads "
-        "differ), show a 64 KiB block diff against it, the two sensor tables, the SHA-256 and the plan, wait for the "
-        "word RESTORE (and DIFFERENT when the sensor tables differ, only one of the two has one, or the chip's code refers "
-        "to several), then run flashrom -w (erase, write, verify) on a private copy of the checked image and read the "
-        "chip back to compare.",
+        description="Check the image. It must be 2 MiB, start with the SPII magic, carry the Charmera build marks and a "
+        "vector table a known build carries, and not refer to several sensor programs. Then read the chip twice and keep "
+        "that read in --out as backup does (nothing is written when the reads differ). Show a 64 KiB block diff against "
+        "it, the two sensor tables, the SHA-256 and the plan, then wait for the word RESTORE. The word DIFFERENT is "
+        "asked too when the sensor tables differ, only one side has one, the chip's code refers to several, or the "
+        "image's resource pack is damaged or missing. Then run flashrom -w (erase, write, verify) on a private copy of "
+        "the checked image and read the chip back to compare.",
     )
     _add_common(restore)
     restore.add_argument("--image", required=True, metavar="FILE", help="full 2 MiB image to write")
@@ -1223,7 +1235,7 @@ def register(subparsers) -> None:
         "--allow-unknown-build",
         action="store_true",
         help="write an image that carries no Charmera build marks, or whose ARM vector table (0x200..0x240) no known build "
-        "carries. After a flash, one camera started but froze in photo and "
+        "carries. After a write, one camera started but froze in photo and "
         "video mode; the likely cause, a sensor the firmware does not drive, is INFERRED. It never writes an image whose "
         "code refers to several sensor programs",
     )

@@ -45,7 +45,7 @@ final class WriteGate {
                           boolean checking) {
         // The withdrawn candidates are refused whatever their checks say (and whatever backup is on record).
         if (check != null && Candidates.withdrawn(check.sha256) != null) {
-            return "this file is a withdrawn candidate, so don't put it on the card";
+            return "this is an early test build the project has withdrawn, so don't put it on the card";
         }
         // The reviewed files are the ones the app writes without a backup on record (see the class note). They are
         // recognised only by the reviewed SHA-256 of the bytes that passed the check, and confirms() ties the data

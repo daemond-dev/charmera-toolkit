@@ -97,8 +97,8 @@ def identify16(b: bytes, off: int) -> str:
             "are what a datasheet comparison needs.")
 
 
-OV9732_NEXT = ("That's the sensor the factory build v012 drives. Flash stock v012 or v0.25 to v0.27 from the card "
-               "(`charmera build --base v012 --download --out out/`, or Flash custom firmware in the app). The stock "
+OV9732_NEXT = ("That's the sensor the factory build v012 drives. Write a v012 build (stock or with mods) from the card "
+               "(`charmera build --base v012 --download --out out/`, or Write custom firmware in the app). The stock "
                "restore file can't take pictures on it.")
 
 
@@ -187,11 +187,11 @@ def decode_sensor(b: Optional[bytes]) -> str:
         return decode_scan(b)
     if len(b) < 2:
         return (f"SENSOR.TXT holds {len(b)} {'byte' if len(b) == 1 else 'bytes'}, not a result the probe writes. The "
-                "probe may not have finished. Flash it again, open Photo mode, and read it again.")
+                "probe may not have finished. Write it again, open Photo mode, and read it again.")
     hi, lo = b[0], b[1]
     id_text = f"0x{hi:02X} 0x{lo:02X}"
     if (hi, lo) in ((0xFF, 0xFF), (0x00, 0x00)):
-        return (f"Sensor ID {id_text}: nothing answered at the one address this older probe tried. Flash the current "
+        return (f"Sensor ID {id_text}: nothing answered at the one address this older probe tried. Write the current "
                 "probe, which scans every address and tells a wrong address apart from a sensor that is truly silent.")
     if (hi, lo) in ((0x14, 0x0A), (0x0A, 0x14)):
         return f"Sensor ID {id_text}: the SP140A, the sensor the firmware already drives."

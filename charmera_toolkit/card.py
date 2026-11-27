@@ -1896,7 +1896,7 @@ def cmd_card_fix(args: argparse.Namespace) -> int:
     if not target.is_image:
         if target.removable is False:
             if not args.i_know_what_i_am_doing:
-                _print(f"error: {target.description} is not a card: not removable. Refusing; pass --i-know-what-i-am-doing if it really is the card.")
+                _print(f"error: {target.description} is not a card: not removable. Refusing; pass --i-know-what-i-am-doing if it is the card.")
                 return 2
             _print(f"warning: {target.description} is not a card: not removable; going on because of --i-know-what-i-am-doing")
         elif target.removable is None:

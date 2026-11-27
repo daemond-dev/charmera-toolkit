@@ -193,7 +193,7 @@ final class CardState {
                 sb.append("  ").append(f.describe()).append('\n');
             }
             sb.append(updateFiles.size() == 1 ? "Remove it" : "Remove them").append(" with \"").append(REMOVE_BUTTON)
-                    .append("\" after the flash, or before you write a different file.\n");
+                    .append("\" after the camera writes it, or before you write a different file.\n");
         }
         return sb.toString().trim();
     }

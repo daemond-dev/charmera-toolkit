@@ -22,7 +22,7 @@ final class Recipe {
     static final String V006 = "v006";
     static final String V008 = "v008_test";
     static final String V012 = "v012";
-    /** The bases, in the order the Repair route's base menu lists them. */
+    /** The bases, in the order the Repair route's base radios list them. */
     static final String[] BASES = {V012, V006, V008};
     /** The mod whose photos carry the EXIF block (PhotoId.Kind.FACTORY_EXIF). */
     static final String EXIF_MOD = "v012/exif";
@@ -102,18 +102,18 @@ final class Recipe {
             return s == null ? null : s[3];
         }
 
-        /** Its set's label, or the base and mod names when it is not a set. */
+        /**
+         * Its name: the base and the mods on it (firmwareName), e.g. "v012 with Volume and LED rows and EXIF dates". A
+         * set's label in the recipes is the same name (a test checks it).
+         */
         String label() {
+            return firmwareName(base, mods);
+        }
+
+        /** The number older versions of the app called this build ("v0.27"), from its set, or null. */
+        String oldName() {
             String[] s = set();
-            if (s != null) {
-                return s[4];
-            }
-            StringBuilder b = new StringBuilder(base);
-            for (String m : mods) {
-                int i = modIndex(m);
-                b.append(" + ").append(i < 0 ? m : Recipes.MOD_TITLES[i]);
-            }
-            return b.toString();
+            return s == null || s.length < 6 ? null : s[5];
         }
 
         /** Whether a file with this SHA-256 is this selection made from any of its base's dumps. */
@@ -142,18 +142,6 @@ final class Recipe {
             return null;
         }
 
-        /** The firmware version of a preset ("v0.26"), or null for any other selection. */
-        String version() {
-            Candidates.Kind k = kind();
-            return k == null ? null : k.version;
-        }
-
-        /** How the screen names it: a preset by its version, any other by its set's label. */
-        String name() {
-            String v = version();
-            return v != null ? v : label();
-        }
-
         /** "base|mod,mod", for the preferences; parse() reads it back. */
         String serialize() {
             return base + "|" + csv();
@@ -175,9 +163,54 @@ final class Recipe {
         }
     }
 
-    /** The fixed kinds that are sets of the table, so a preset builds the same file it always did. */
+    /** The fixed kinds that are sets of the table: a pick that is one of them builds the same file it always did. */
     static final Candidates.Kind[] LEGACY = {Candidates.Kind.RESTORE, Candidates.Kind.PROBE, Candidates.Kind.BRINGUP,
             Candidates.Kind.V025, Candidates.Kind.V026, Candidates.Kind.V027};
+
+    /** "a", "a and b", "a, b and c". */
+    static String joinAnd(List<String> parts) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            b.append(i == 0 ? "" : i == parts.size() - 1 ? " and " : ", ").append(parts.get(i));
+        }
+        return b.toString();
+    }
+
+    /**
+     * What a build is called: its base and the mods on it, e.g. "v012 with Volume and LED rows and EXIF dates", or
+     * "stock v012 (the factory firmware, unchanged)" with no mods. Each mod is named by its phrase (Recipes.MOD_PHRASES)
+     * in the table's order; an unknown id by itself, at the end. charmera_toolkit/recipes.py's firmware_name follows
+     * the same rule (tests/test_android.py checks they agree).
+     */
+    static String firmwareName(String base, List<String> mods) {
+        if (mods.isEmpty()) {
+            for (int i = 0; i < Recipes.BASE_IDS.length; i++) {
+                if (Recipes.BASE_IDS[i].equals(base)) {
+                    return "stock " + base + " (" + Recipes.BASE_STOCK[i] + ")";
+                }
+            }
+            return "stock " + base;
+        }
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < Recipes.MOD_IDS.length; i++) {
+            if (mods.contains(Recipes.MOD_IDS[i])) {
+                parts.add(Recipes.MOD_PHRASES[i]);
+            }
+        }
+        for (String m : mods) {
+            if (modIndex(m) < 0 && !parts.contains(m)) {
+                parts.add(m);
+            }
+        }
+        return base + " with " + joinAnd(parts);
+    }
+
+    /** The "older name" line for a reviewed file that had a number in older versions of the app, or null. */
+    static String olderNameNote(String sha) {
+        Selection s = selectionOf(sha);
+        String old = s == null ? null : s.oldName();
+        return old == null ? null : "Older versions of the app called this " + old + ".";
+    }
 
     /** A selection written by Selection.serialize(), or null when the text is not one (or names no base). */
     static Selection parse(String text) {
@@ -198,8 +231,8 @@ final class Recipe {
 
     /**
      * The Repair pick to show: the one remembered (Selection.serialize()) when it is still a reviewed combination;
-     * else the version an older app remembered by its Kind name (V027, V026, V025, BRINGUP), as its set; else the
-     * newest preset.
+     * else the build an older app remembered by its Kind name (V027, V026, V025, BRINGUP), as its set; else the
+     * default pick, defaultPick().
      */
     static Selection remembered(String set, String legacyKind) {
         Selection s = parse(set);
@@ -211,7 +244,24 @@ final class Recipe {
                 return of(k);
             }
         }
-        return presets()[0];
+        return defaultPick();
+    }
+
+    /**
+     * The pick before the owner has made one, with no Identify answer: stock v012, the base with no mods ticked. A
+     * remembered pick wins over this.
+     */
+    static Selection defaultPick() {
+        return defaultPick(null);
+    }
+
+    /**
+     * The pick before the owner has made one, from Identify's answer (found, or null for none): stock v006 for the
+     * v006 family (SP140A cameras), else stock v012. No mod is ticked. A remembered pick wins over this, and so does a
+     * pick made this session (MainActivity moves the pick only while nothing is remembered).
+     */
+    static Selection defaultPick(Identify.Base found) {
+        return new Selection(found == Identify.Base.V006_FAMILY ? V006 : V012);
     }
 
     /** The set of a fixed kind (by its reviewed file). */
@@ -219,7 +269,10 @@ final class Recipe {
         return selectionOf(kind.sha256);
     }
 
-    /** The Repair route's presets, newest first: one per Candidates.repairVersions() entry. */
+    /**
+     * The picks of the fixed Repair kinds, newest first: one per Candidates.repairVersions() entry. None is the default
+     * pick (defaultPick() is), and the screen has no list of them.
+     */
     static Selection[] presets() {
         Candidates.Kind[] kinds = Candidates.repairVersions();
         Selection[] out = new Selection[kinds.length];
@@ -335,7 +388,7 @@ final class Recipe {
             }
         }
         if (sel.set() == null) {
-            return sel.label() + " is not one of the reviewed combinations";
+            return sel.label() + " is not one of the known combinations";
         }
         return null;
     }
@@ -407,7 +460,7 @@ final class Recipe {
             int to = copies[c][1];
             int n = copies[c][2];
             if (from < 0 || to < 0 || n <= 0 || from + n > dump.length || to + n > out.length) {
-                throw new IllegalStateException(id + ": a copy lies outside the dump or the file.");
+                throw new IllegalStateException(id + ": a copy lies outside the chip backup or the file.");
             }
             if (!UpdateCheck.sha256Hex(out, to, to + n).equals(Recipes.MOD_COPY_OLD[mod][c])) {
                 throw new IllegalStateException(id + ": the bytes at file 0x" + Integer.toHexString(to).toUpperCase(
@@ -451,11 +504,11 @@ final class Recipe {
     static byte[] build(byte[] dump, Selection sel) {
         String[] entry = dumpFor(dump);
         if (entry == null) {
-            throw new IllegalArgumentException("the file is not a dump the app makes firmware from, so the app will not"
+            throw new IllegalArgumentException("the file is not a chip backup the app makes firmware from, so the app will not"
                     + " use it.\nDetail: its SHA-256 is " + UpdateCheck.sha256Hex(dump, 0, dump.length) + ".");
         }
         if (!entry[1].equals(sel.base)) {
-            throw new IllegalArgumentException("the dump is build " + entry[1] + ", but " + sel.label() + " is made"
+            throw new IllegalArgumentException("the chip backup is build " + entry[1] + ", but " + sel.label() + " is made"
                     + " from build " + sel.base + ", so the app will not use it.");
         }
         String why = problem(sel);
@@ -469,14 +522,15 @@ final class Recipe {
             }
         }
         if (row == null) {
-            throw new IllegalStateException("no reviewed file is listed for " + sel.label() + " from " + entry[0]
-                    + ", so the app will not make it. This should not happen. Please report it.");
+            throw new IllegalStateException("no known file is listed for " + sel.label() + " from " + entry[0]
+                    + ", so the app will not make it. That's a bug in the app. Report it at https://github.com/daemond-dev/charmera-toolkit/issues.");
         }
         byte[] out = compose(dump, entry, sel);
         String sha = UpdateCheck.sha256Hex(out, 0, out.length);
         if (!sha.equals(row[4])) {
-            throw new IllegalStateException("the file made from the " + sel.base + " dump is not exactly "
-                    + sel.label() + ", so the app will not use it. This should not happen. Please report it.\nDetail:"
+            throw new IllegalStateException("the file made from the " + sel.base + " chip backup is not exactly "
+                    + sel.label() + ", so the app will not use it. That's a bug in the app. Report it at"
+                    + " https://github.com/daemond-dev/charmera-toolkit/issues.\nDetail:"
                     + " its SHA-256 is " + sha + "; " + sel.label() + " has " + row[4] + ".");
         }
         return out;
@@ -507,7 +561,44 @@ final class Recipe {
         return b == null ? null : new Selection(b[0], b[1].isEmpty() ? new String[0] : b[1].split(","));
     }
 
-    /** The v006 mod that makes the public build drive the OV9732 (v0.23; with the Volume and LED rows, v0.24). */
+    /**
+     * The selection of the reviewed file whose SHA-256 starts with this prefix (the flash log keeps 12 hex digits), or
+     * null when none does, or more than one selection does.
+     */
+    static Selection selectionOfPrefix(String prefix) {
+        if (prefix == null || prefix.length() < 12) {
+            return null;
+        }
+        String p = prefix.toLowerCase(java.util.Locale.ROOT);
+        Selection found = null;
+        for (String[] b : Recipes.BUILDS) {
+            if (b[4].startsWith(p)) {
+                Selection s = selectionOf(b[4]);
+                if (found != null && !(found.base.equals(s.base) && found.mods.equals(s.mods))) {
+                    return null;
+                }
+                found = s;
+            }
+        }
+        return found;
+    }
+
+    /**
+     * A short name for a file name, e.g. "v012-volume-led-exif-boot-last-mode-capture-flash" or "v012-stock": the
+     * base and each mod's id without its base, joined by '-'. The full name (label()) is too long for a file name.
+     */
+    static String fileTag(Selection sel) {
+        StringBuilder b = new StringBuilder(sel.base);
+        if (sel.stock()) {
+            b.append("-stock");
+        }
+        for (String m : sel.mods) {
+            b.append('-').append(m.substring(m.indexOf('/') + 1));
+        }
+        return b.toString().replaceAll("[^A-Za-z0-9._-]+", "");
+    }
+
+    /** The v006 mod that makes the public build drive the OV9732 (on its own, or with the Volume and LED rows). */
     static final String OV9732_PORT = "v006/ov9732-port";
     /** The v006 mod that is the sensor-ID probe (the Probe route's file). */
     static final String PROBE_MOD = "v006/sensor-probe";
@@ -544,15 +635,21 @@ final class Recipe {
             if (theirs.equals(mine)) {
                 return null;
             }
-            return "Wrong sensor? Identify says this camera's photos come from " + ("v012".equals(identified)
-                    ? "build v012" : "the v006 family") + ", firmware for the " + theirs + ", but this file drives the "
-                    + mine + ". On an " + theirs + " camera it boots but can't take pictures until you flash firmware"
-                    + " that fits.";
+            return "Wrong sensor? Identify found " + ("v012".equals(identified) ? "build v012" : "the v006 family")
+                    + " in this camera's photos. That's firmware for the " + theirs + ", and this file is for the "
+                    + mine + ". On an " + theirs + " camera it boots but can't take photos until you write "
+                    + fixFor(theirs) + ".";
         }
-        return "Not confirmed: no backup is chosen and Identify hasn't been run, so the app doesn't know which"
-                + " firmware this camera runs. This file drives the " + mine + ". On an " + other + " camera it boots but"
-                + " can't take pictures until you flash firmware that fits. To check without opening the camera, run"
-                + " \"Identify this camera's firmware\" on its photos.";
+        return "Not confirmed. The app doesn't know which sensor this camera has. No chip backup is chosen and Identify"
+                + " hasn't been run on this card since the app started. This file is for the " + mine + ". On an "
+                + other + " camera it boots but can't take photos until you write " + fixFor(other) + ". To find out"
+                + " first, run \"Identify this camera's firmware\".";
+    }
+
+    /** What to flash, and where in the app, to get photos back on a camera with this sensor. */
+    static String fixFor(String sensor) {
+        return "OV9732".equals(sensor) ? "base v012 on \"Write custom firmware\""
+                : "stock v006 on \"Restore stock firmware\" or Advanced";
     }
 
     /** The header the photos of this firmware should have. */
@@ -566,23 +663,31 @@ final class Recipe {
         return PhotoId.Kind.PUBLIC_FAMILY;
     }
 
-    /** The plain words for a selection the app has no fixed kind for: its label and each mod's description. */
+    /** The plain words for a pick: its name, each mod's description, the sensor it is for, and what was tried. */
     static String describe(Selection sel) {
-        StringBuilder b = new StringBuilder(sel.label()).append(".");
+        StringBuilder b = new StringBuilder("This is ").append(sel.label()).append(".");
         for (String m : sel.mods) {
             b.append(" ").append(title(m)).append(experimental(m) ? " (experimental, not yet tried on a camera)" : "")
                     .append(": ").append(description(m));
         }
         if (sel.stock() && V012.equals(sel.base)) {
-            b.append(" The factory firmware of OV9732 cameras, unchanged.");
+            b.append(" It's what OV9732 cameras ship with.");
         } else if (!drivesOv9732(sel)) {
-            b.append(sel.stock() ? " The base's stock firmware, unchanged." : " SP140A firmware. It doesn't drive the"
-                    + " OV9732.");
+            b.append(" SP140A firmware. It doesn't drive the OV9732.");
         }
         if (untriedCombination(sel)) {
-            b.append(" Experimental: this combination hasn't been tried on a camera yet, though each of its mods"
-                    + " has.");
+            b.append(" ").append(untriedNote(sel));
         }
         return b.toString();
+    }
+
+    /**
+     * The experimental line for a pick whose mods were each tried on a camera, but never as this set. One mod alone is
+     * no combination: it was only tried together with others.
+     */
+    static String untriedNote(Selection sel) {
+        return sel.mods.size() == 1 ? "This pick is experimental. Its mod has only been tried on a camera together with"
+                + " others." : "This pick is experimental. Each ticked mod has been tried on a camera, but this combination"
+                + " hasn't.";
     }
 }

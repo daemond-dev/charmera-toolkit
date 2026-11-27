@@ -1,9 +1,5 @@
 {
  "format": 1,
- "catalog": {
-  "version": "v0.27",
-  "stamp": "202611170027"
- },
  "dumps": [
   {
    "id": "v006-original",
@@ -42,7 +38,7 @@
    "prep": "truncate-blank-photos",
    "size": 2097152,
    "sha256": "08a7d993996b93cf2468fe08d70a0e77d5e1a9d6ff16bf647f5c7a0edf5d85ce",
-   "source": "the owner's own read of a never-flashed camera (private, not published)",
+   "source": "the owner's own read of a camera never written to (private, not published)",
    "url": null
   },
   {
@@ -56,13 +52,28 @@
    "url": "https://raw.githubusercontent.com/the-dumping-grounds/charmera-firmware-v012/39150fbc584e4cb7c5bf091f56b9888f07379578/charmera-v012-2026-01-12-clean.bin"
   }
  ],
+ "bases": [
+  {
+   "id": "v012",
+   "stock": "the factory firmware, unchanged"
+  },
+  {
+   "id": "v006",
+   "stock": "the stock restore file"
+  },
+  {
+   "id": "v008_test",
+   "stock": "the charmera-film-mods restore file, unchanged under a new file name"
+  }
+ ],
  "mods": [
   {
    "id": "v006/sensor-probe",
    "base": "v006",
    "name": "sensor-probe",
    "title": "Sensor-ID probe",
-   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops as before.",
+   "phrase": "the sensor-ID probe",
+   "description": "A diagnostic for finding out which sensor a camera has. It repairs nothing. In photo mode it reads which image sensor answers on the bus, writes SENSOR.TXT to the card, then stops there. It replaces the camera's firmware until you write another.",
    "status": "tested",
    "conflicts": [
     "v006/ov9732-port",
@@ -88,7 +99,8 @@
    "base": "v006",
    "name": "ov9732-port",
    "title": "OV9732 port",
-   "description": "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning (v0.23). It's for an OV9732 camera that was flashed with this build.",
+   "phrase": "the OV9732 port",
+   "description": "Makes the build drive an OmniVision OV9732 instead of the SP140A it was made for, with its own start-up table, exposure and gain, black level and colour tuning. It's for an OV9732 camera that had this build written to it.",
    "status": "tested",
    "conflicts": [
     "v006/sensor-probe"
@@ -143,6 +155,7 @@
    "base": "v006",
    "name": "volume-led",
    "title": "Volume and LED rows",
+   "phrase": "Volume and LED rows",
    "description": "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
    "status": "tested",
    "conflicts": [
@@ -233,6 +246,7 @@
    "base": "v012",
    "name": "volume-led",
    "title": "Volume and LED rows",
+   "phrase": "Volume and LED rows",
    "description": "Adds two setup-menu rows after FORMAT: Volume (system sounds, 0 to 8) and LED (the automatic flash light, On or Off).",
    "status": "tested",
    "conflicts": [],
@@ -426,7 +440,8 @@
    "base": "v012",
    "name": "exif",
    "title": "EXIF dates",
-   "description": "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26, and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",
+   "phrase": "EXIF dates",
+   "description": "Every still photo gets an EXIF block with Make Kodak, Model Charmera, Software v0.26 (an old build number that's part of the mod's code, so it can't change), and the date and time from the camera's clock. Set the date first, because an unset clock gives 2025:01:01.",
    "status": "tested",
    "conflicts": [],
    "requires": [],
@@ -670,7 +685,8 @@
    "id": "v012/boot-last-mode",
    "base": "v012",
    "name": "boot-last-mode",
-   "title": "Boot to the last mode",
+   "title": "Boot to last mode",
+   "phrase": "boot to last mode",
    "description": "Power-on goes straight into the mode you last used, photo or video (photo the first time), instead of the SELECT MODE screen. A short press of the power button still opens it.",
    "status": "tested",
    "conflicts": [],
@@ -734,6 +750,7 @@
    "base": "v012",
    "name": "capture-flash",
    "title": "Capture flash",
+   "phrase": "capture flash",
    "description": "When you take a photo, the picture area goes black for 120 ms under the on-screen icons, so you can see the shot was taken even at Volume 0.",
    "status": "tested",
    "conflicts": [],
@@ -828,7 +845,7 @@
    ],
    "stamp": "202611082300",
    "status": "tested",
-   "label": "v006 + sensor-ID probe"
+   "label": "v006 with the sensor-ID probe"
   },
   {
    "base": "v006",
@@ -837,7 +854,8 @@
    ],
    "stamp": "202611110023",
    "status": "tested",
-   "label": "v0.23: v006 + OV9732 port"
+   "label": "v006 with the OV9732 port",
+   "old_name": "v0.23"
   },
   {
    "base": "v006",
@@ -846,7 +864,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v006 + Volume and LED rows"
+   "label": "v006 with Volume and LED rows"
   },
   {
    "base": "v006",
@@ -856,14 +874,15 @@
    ],
    "stamp": "202611120024",
    "status": "tested",
-   "label": "v0.24: v006 + OV9732 port + Volume/LED"
+   "label": "v006 with the OV9732 port and Volume and LED rows",
+   "old_name": "v0.24"
   },
   {
    "base": "v008_test",
    "mods": [],
    "stamp": "202611170027",
    "status": "tested",
-   "label": "stock v008_test (the film-mods restore file, renamed but unchanged)"
+   "label": "stock v008_test (the charmera-film-mods restore file, unchanged under a new file name)"
   },
   {
    "base": "v012",
@@ -879,7 +898,8 @@
    ],
    "stamp": "202611130025",
    "status": "tested",
-   "label": "v0.25: v012 + Volume/LED"
+   "label": "v012 with Volume and LED rows",
+   "old_name": "v0.25"
   },
   {
    "base": "v012",
@@ -888,7 +908,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + EXIF dates"
+   "label": "v012 with EXIF dates"
   },
   {
    "base": "v012",
@@ -897,7 +917,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Boot to the last mode"
+   "label": "v012 with boot to last mode"
   },
   {
    "base": "v012",
@@ -906,7 +926,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Capture flash"
+   "label": "v012 with capture flash"
   },
   {
    "base": "v012",
@@ -916,7 +936,8 @@
    ],
    "stamp": "202611130026",
    "status": "tested",
-   "label": "v0.26: v012 + Volume/LED + EXIF"
+   "label": "v012 with Volume and LED rows and EXIF dates",
+   "old_name": "v0.26"
   },
   {
    "base": "v012",
@@ -926,7 +947,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Volume and LED rows + Boot to the last mode"
+   "label": "v012 with Volume and LED rows and boot to last mode"
   },
   {
    "base": "v012",
@@ -936,7 +957,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Volume and LED rows + Capture flash"
+   "label": "v012 with Volume and LED rows and capture flash"
   },
   {
    "base": "v012",
@@ -946,7 +967,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + EXIF dates + Boot to the last mode"
+   "label": "v012 with EXIF dates and boot to last mode"
   },
   {
    "base": "v012",
@@ -956,7 +977,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + EXIF dates + Capture flash"
+   "label": "v012 with EXIF dates and capture flash"
   },
   {
    "base": "v012",
@@ -966,7 +987,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Boot to the last mode + Capture flash"
+   "label": "v012 with boot to last mode and capture flash"
   },
   {
    "base": "v012",
@@ -977,7 +998,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Volume and LED rows + EXIF dates + Boot to the last mode"
+   "label": "v012 with Volume and LED rows, EXIF dates and boot to last mode"
   },
   {
    "base": "v012",
@@ -988,7 +1009,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Volume and LED rows + EXIF dates + Capture flash"
+   "label": "v012 with Volume and LED rows, EXIF dates and capture flash"
   },
   {
    "base": "v012",
@@ -999,7 +1020,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + Volume and LED rows + Boot to the last mode + Capture flash"
+   "label": "v012 with Volume and LED rows, boot to last mode and capture flash"
   },
   {
    "base": "v012",
@@ -1010,7 +1031,7 @@
    ],
    "stamp": "202611170027",
    "status": "experimental",
-   "label": "v012 + EXIF dates + Boot to the last mode + Capture flash"
+   "label": "v012 with EXIF dates, boot to last mode and capture flash"
   },
   {
    "base": "v012",
@@ -1022,7 +1043,8 @@
    ],
    "stamp": "202611170027",
    "status": "tested",
-   "label": "v0.27: v012 + Volume/LED + EXIF + boot to last mode + capture flash"
+   "label": "v012 with Volume and LED rows, EXIF dates, boot to last mode and capture flash",
+   "old_name": "v0.27"
   }
  ],
  "builds": [

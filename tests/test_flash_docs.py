@@ -1,6 +1,6 @@
-"""The flash steps in docs/01..06 say the same thing: how an update ends, the battery, the edition, the stored
+"""The write steps in docs/01..06 say the same thing: how an update ends, the battery, the edition, the stored
 photos, --allow-modified for mods, eject before removing, the Android 11 slot limit and the USB-C cleanup. Every doc
-holds to the rule: knowing what the camera runs is stated where a flash starts, every stage example gives --stock, the public
+holds to the rule: knowing what the camera runs is stated where a write starts, every stage example gives --stock, the public
 dump is never anyone's --stock outside the candidates' recipe, and no doc calls the series or the stamp a proof.
 Every probe, backup, restore and photo-id command line in the docs runs with the options the tool registers, restore
 keeps its read in --out, the docs name backup's files as backup writes them, and they name the warning about a read
@@ -52,11 +52,11 @@ def section(name: str, heading: str) -> str:
 
 CANDIDATES_STEPS = "If you rebuild one of these from your own backup"
 FLASH_STEPS = [
-    ("01-FIRST-FLASH.md", "5. Flash (the point of no return)"),
+    ("01-FIRST-FLASH.md", "5. Write (the point of no return)"),
     ("02-RECOVERY.md", "A. The camera boots and the updater runs: restore through the SD card"),
     ("03-FLASH-CANDIDATES.md", CANDIDATES_STEPS),
     ("04-STAGE.md", "The sequence on the camera"),
-    ("06-ANDROID.md", "4. Flash"),
+    ("06-ANDROID.md", "4. Write"),
 ]
 FILES = ["01-FIRST-FLASH.md", "02-RECOVERY.md", "03-FLASH-CANDIDATES.md", "04-STAGE.md", "05-CARDS.md", "06-ANDROID.md"]
 
@@ -80,9 +80,9 @@ def test_every_flash_step_ends_the_same_way(name, heading):
 @pytest.mark.parametrize("name,heading", FLASH_STEPS)
 def test_every_flash_step_names_battery_and_edition(name, heading):
     s = section(name, heading)
-    # 06's flash step points back to its own "Before you flash from a phone" list; read both.
+    # 06's write step points back to its own "Before you write from a phone" list; read both.
     if name == "06-ANDROID.md":
-        s += " " + section(name, "Before you flash from a phone")
+        s += " " + section(name, "Before you write from a phone")
     if name == "03-FLASH-CANDIDATES.md":
         s += " " + text(name)[:3000]
     assert re.search(r"fully charged|charge the battery fully", s, re.I), name
@@ -90,7 +90,7 @@ def test_every_flash_step_names_battery_and_edition(name, heading):
     assert "Millennium" in s and "CLOT" in s, name
 
 
-@pytest.mark.parametrize("name,before", [("01-FIRST-FLASH.md", "## 5. Flash"), ("03-FLASH-CANDIDATES.md", "## " + CANDIDATES_STEPS)])
+@pytest.mark.parametrize("name,before", [("01-FIRST-FLASH.md", "## 5. Write"), ("03-FLASH-CANDIDATES.md", "## " + CANDIDATES_STEPS)])
 def test_stored_photos_warning_before_the_flash_step(name, before):
     raw = (DOCS / name).read_text(encoding="utf-8")
     head = " ".join(raw[: raw.index(before) + 2000].split())
@@ -142,7 +142,7 @@ def test_android_slot_limit_and_fallback():
 def test_usb_c_cleanup():
     s = section("06-ANDROID.md", "Through the camera's own USB port")
     assert "without its card and wait 10 seconds" in s
-    assert "Never switch the camera on with the update file on its card except to flash" in s
+    assert "Never switch the camera on with the update file on its card except to write it" in s
 
 
 def test_ignored_file_diagnosis_lists_the_real_causes():
@@ -162,7 +162,7 @@ def test_candidates_agree_with_first_flash():
     assert "The diff confirms" not in t
 
 
-RULE = re.compile(r"know what (?:your|the|this) camera runs before you flash", re.I)
+RULE = re.compile(r"know what (?:your|the|this) camera runs before you write", re.I)
 OLD_HARD_STOP = re.compile(r"no backup[^.]{0,40}no flash", re.I)
 
 
@@ -176,10 +176,10 @@ def intro(path: Path) -> str:
 @pytest.mark.parametrize("name,heading", [("01-FIRST-FLASH.md", "1. Know what your camera runs (Identify, or a backup of its chip)"),
                                           ("02-RECOVERY.md", "A. The camera boots and the updater runs: restore through the SD card"),
                                           ("03-FLASH-CANDIDATES.md", CANDIDATES_STEPS),
-                                          ("06-ANDROID.md", "Before you flash from a phone"),
+                                          ("06-ANDROID.md", "Before you write from a phone"),
                                           ("04-STAGE.md", "What it does, in order")])
 def test_the_rule_is_stated_before_every_flash(name, heading):
-    """Know what your camera runs before you flash: a backup or Identify; without either the tools warn, not refuse."""
+    """Know what your camera runs before you write: a backup or Identify; without either the tools warn, not refuse."""
     s = section(name, heading)
     assert RULE.search(s), name
     assert not OLD_HARD_STOP.search(s), name
@@ -194,7 +194,7 @@ def test_the_rule_opens_the_readme_and_recovery(path):
     assert "recommended" not in s.lower(), path.name
     if path == README:
         t = path.read_text(encoding="utf-8")
-        assert "- Know what your camera runs before you flash: a backup of its chip, or the Identify route" in t
+        assert "- Know what your camera runs before you write: a backup of its chip, or the Identify route" in t
         assert "Neither refuses" in t and "the only way back" in t                          # the first ground rule
 
 

@@ -26,9 +26,9 @@ public final class CandidatesFactoryTest {
 
         // The SHA-256 gate on the input: only the factory dump makes a factory kind.
         expect("a synthetic 2 MiB image is not the factory dump", !Candidates.isFactoryDump(img)
-                && refused(() -> Candidates.factoryDump(img), "not the factory dump"));
+                && refused(() -> Candidates.factoryDump(img), "not the factory chip backup"));
         expect("build() refuses a factory kind from any other dump, before making anything",
-                refused(() -> Candidates.build(img, Candidates.Kind.V025), "not the factory dump"));
+                refused(() -> Candidates.build(img, Candidates.Kind.V025), "not the factory chip backup"));
         expect("a short file is not the factory dump", !Candidates.isFactoryDump(new byte[10])
                 && refused(() -> Candidates.factoryDump(new byte[10]), Candidates.FACTORY_DUMP_NAME));
         expect("the refusal names the dump's SHA-256 on its Detail line",
@@ -100,7 +100,7 @@ public final class CandidatesFactoryTest {
         expect("a patch table needs one offset per entry", refused(() -> new Candidates.Layer(new int[0][],
                 new int[]{1, 2}, new byte[][]{{1}}), "one offset per entry"));
         expect("only factory kinds have layers", refused(() -> Candidates.layersOf(Candidates.Kind.BRINGUP),
-                "not made from the factory dump"));
+                "not made from the factory chip backup"));
 
         // v0.26 = v0.25's layer, then its own: one copy of the vendor template (from the dump), then 332 authored bytes.
         expect("v0.26 is v0.25's layer plus its own", Arrays.equals(Candidates.layersOf(Candidates.Kind.V026),
@@ -166,48 +166,44 @@ public final class CandidatesFactoryTest {
         expect("no v0.26 patch lies in the photo slots or past the update file", outside(Candidates.V026_OFFSETS,
                 Candidates.V026_BYTES));
         expect("build() refuses v0.26 from any other dump", refused(() -> Candidates.build(img, Candidates.Kind.V026),
-                "not the factory dump"));
+                "not the factory chip backup"));
 
-        // The menu: the Repair versions, newest first, and the latest available.
+        // The fixed Repair kinds (the builds older apps numbered v0.27 to v0.24), newest first.
         Candidates.Kind[] versions = Candidates.repairVersions();
-        expect("the Repair versions are v0.27, v0.26, v0.25 then v0.24", Arrays.equals(versions, new Candidates.Kind[]{
+        expect("the fixed Repair kinds are V027, V026, V025 then BRINGUP", Arrays.equals(versions, new Candidates.Kind[]{
                 Candidates.Kind.V027, Candidates.Kind.V026, Candidates.Kind.V025, Candidates.Kind.BRINGUP}));
         boolean newestFirst = true;
         for (int i = 1; i < versions.length; i++) {
             newestFirst &= versions[i - 1].fileName.compareTo(versions[i].fileName) > 0;
         }
         expect("newest first, by the stamp in their file names", newestFirst);
-        expect("each version is read from its file name", "v0.26".equals(Candidates.Kind.V026.version)
-                && "v0.25".equals(Candidates.Kind.V025.version)
-                && "v0.24".equals(Candidates.Kind.BRINGUP.version) && Candidates.Kind.RESTORE.version == null
-                && Candidates.Kind.PROBE.version == null && !Candidates.Kind.PROBE.repair());
-        expect("the menu rows are short", "v0.26: factory firmware + Volume/LED + EXIF".equals(
-                Candidates.Kind.V026.menuText()) && "v0.25: factory firmware + Volume/LED".equals(
-                Candidates.Kind.V025.menuText()) && "v0.24: public build + OV9732 port".equals(
-                Candidates.Kind.BRINGUP.menuText()));
+        expect("each fixed kind is named by its base and mods", "v012 with Volume and LED rows and EXIF dates".equals(
+                Candidates.Kind.V026.firmwareName()) && "v012 with Volume and LED rows".equals(
+                Candidates.Kind.V025.firmwareName()) && "v006 with the OV9732 port and Volume and LED rows".equals(
+                Candidates.Kind.BRINGUP.firmwareName()) && Candidates.Kind.BRINGUP.repair()
+                && !Candidates.Kind.RESTORE.repair() && !Candidates.Kind.PROBE.repair());
+        boolean noNumber = true;
+        for (Candidates.Kind k : Candidates.Kind.values()) {
+            noNumber &= !k.label.contains("v0.") && !k.firmwareName().contains("v0.");
+        }
+        expect("no kind's words name a build by a number", noNumber);
         expect("v0.26 and v0.25 are made from the factory dump, v0.24 from the stock dump", Candidates.Kind.V026.base
                 == Candidates.Base.FACTORY && Candidates.Kind.V025.base == Candidates.Base.FACTORY
                 && Candidates.Kind.BRINGUP.base == Candidates.Base.STOCK);
-        expect("latest available: v0.27, with the factory dump kept or not (its cleaned copy downloads)",
-                Candidates.latestAvailable(true) == Candidates.Kind.V027
-                        && Candidates.latestAvailable(false) == Candidates.Kind.V027
-                        && Candidates.canBuild(Candidates.Kind.V025, false));
+        boolean plainLabels = true;
+        for (Candidates.Kind k : versions) {
+            // A Repair pick is described from the recipes with its way back, so its kind's label only says what the
+            // build is: nothing about whose dump it was made from, and no way back that could go stale.
+            plainLabels &= !k.label.contains("your factory dump") && !k.label.contains("read off its chip")
+                    && !k.label.contains("this camera's own") && !k.label.contains("way back");
+        }
+        expect("the Repair kinds' labels say what the build is, and nothing about one camera's dump", plainLabels);
         expect("the factory dump downloads from its repository at a fixed commit",
                 Candidates.CLEAN_FACTORY_DOWNLOAD.startsWith("https://raw.githubusercontent.com/the-dumping-grounds/"
                         + "charmera-firmware-v012/") && Candidates.CLEAN_FACTORY_DOWNLOAD.endsWith("/"
                         + Candidates.CLEAN_FACTORY_NAME) && Candidates.CLEAN_FACTORY_DOWNLOAD.matches(".*/[0-9a-f]{40}/.*"));
-        expect("no pick remembered: the latest available", Candidates.repairChoice(null, true) == Candidates.Kind.V027
-                && Candidates.repairChoice(null, false) == Candidates.Kind.V027);
-        expect("the owner's pick is kept while it can be made", Candidates.repairChoice("BRINGUP", true)
-                == Candidates.Kind.BRINGUP && Candidates.repairChoice("V025", true) == Candidates.Kind.V025
-                && Candidates.repairChoice("V026", true) == Candidates.Kind.V026);
-        expect("a remembered v0.25 or v0.26 stays picked with no factory dump (the screen asks for it)",
-                Candidates.repairChoice("V025", false) == Candidates.Kind.V025
-                        && Candidates.repairChoice("V026", false) == Candidates.Kind.V026);
-        expect("a remembered name that is no Repair version is ignored", Candidates.repairChoice("RESTORE", true)
-                == Candidates.Kind.V027 && Candidates.repairChoice("V099", false) == Candidates.Kind.V027);
 
-        // Every Repair version belongs to the Repair route and is a reviewed patch (WriteGate's waiver), by SHA-256.
+        // Every fixed Repair kind belongs to the Repair route and is a reviewed patch (WriteGate's waiver), by SHA-256.
         for (Candidates.Kind k : versions) {
             expect(k + " is found by its SHA-256 and is a reviewed patch", Candidates.repairVersion(k.sha256) == k
                     && Candidates.isReviewedPatch(k.sha256));
@@ -227,7 +223,7 @@ public final class CandidatesFactoryTest {
                 Candidates.Kind.V025.sha256, UpdateCheck.UPDATE_SIZE, false, null);
         UpdateCheck.Result soft = Candidates.asFactory(marks, Candidates.Kind.V025);
         expect("unknown build marks are a warning for v0.25, which then passes", !marks.ok && soft.ok
-                && soft.lines.get(1).level == UpdateCheck.Level.WARN && soft.lines.get(1).text.contains("v0.25")
+                && soft.lines.get(1).level == UpdateCheck.Level.WARN && soft.lines.get(1).text.contains("v012 with Volume and LED rows")
                 && soft.lines.get(1).detail.contains("no sensor table.") && soft.lines.get(0).level == UpdateCheck.Level.PASS
                 && soft.sha256.equals(marks.sha256) && !soft.compared && soft.referenceSha256 == null);
         List<UpdateCheck.Line> sum = new ArrayList<>(lines);

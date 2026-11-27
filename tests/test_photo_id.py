@@ -1,7 +1,7 @@
 """photo-id: what the header of a photo says about the firmware that took it.
 
 tests/fixtures/original-photo-header.jpg-header is the owner's camera's header: the first 624 bytes of a photo
-that camera took on its original firmware, before it was ever flashed, cut at the end of the SOS header, so it
+that camera took on its original firmware, before it was ever written to, cut at the end of the SOS header, so it
 holds no image data. The other headers are built here, from the parts the templates share (the JPEG standard's
 tables, no firmware bytes; the EXIF mod's block from its authored names and lengths only), and, when
 CHARMERA_STOCK_IMAGE points at the public dump, from the templates and the two stored photos in it, and when
@@ -143,11 +143,11 @@ def test_the_owners_header_is_the_bare_template_with_its_size_and_quality(stock_
 # --- the three still-photo headers the known builds write ---------------------------------------------------------
 
 
-STILL = ("the v006 / v008_test family's still-photo header (SP140A builds; our v0.21-v0.24 write it too; a photo cannot "
+STILL = ("the v006 / v008_test family's still-photo header (SP140A builds; our OV9732 port on v006 writes it too; a photo cannot "
          "tell v006 from v008_test)")
-BARE = ("the factory build v012's still-photo header (OV9732 cameras), which our v0.25 keeps; the v006 family writes it "
+BARE = ("the factory build v012's still-photo header (OV9732 cameras), which our v012 builds without EXIF dates keep; the v006 family writes it "
         "only for thumbnails and video frames, so a frame taken out of a video has it too")
-EXIF_MOD = "our EXIF mod's still-photo header (v0.26 and later, built on the factory build v012)"
+EXIF_MOD = "our EXIF mod's still-photo header (any of our builds with EXIF dates, built on the factory build v012)"
 
 
 def test_the_still_and_the_bare_header(tmp_path):
@@ -403,8 +403,8 @@ def test_help_explains_what_the_conclusions_mean():
     sub = next(a for a in parser._actions if a.dest == "command").choices["photo-id"]
     text = " ".join(sub.format_help().split()).replace("- ", "-")     # argparse may wrap a line after a hyphen
     for words in ("only the header", "never more than the first 64 KiB", "Make Generalplus, Model CBB3 and Software 20150615",
-                  "The factory build v012 (OV9732 cameras) and our v0.25 write a bare 0x270-byte header",
-                  "Our EXIF mod (v0.26 and later) writes 0x340 bytes", "a photo cannot tell v006 from v008_test",
+                  "The factory build v012 (OV9732 cameras) and our v012 builds without EXIF dates write a bare 0x270-byte header",
+                  "Our EXIF mod writes 0x340 bytes", "a photo cannot tell v006 from v008_test",
                   "the v006 family writes the same bare header for thumbnails and video frames",
                   "'A copy the toolkit's exif-fix made'", "it is not the EXIF mod",
                   "says nothing about the camera",
@@ -417,7 +417,7 @@ def test_help_explains_what_the_conclusions_mean():
                   "does not tell the builds apart (INFERRED), any other frame header is not the one they write",
                   "a JUNK text other than 'GP$322 Generalplus AviPackerV3 20140916', the packer text v006, v008_test and "
                   "v012 all carry, shows that other code wrote the file",
-                  "a photo taken after a flash shows the flashed firmware", "not a frame taken out of a video",
+                  "a photo taken after a write shows the firmware that was written", "not a frame taken out of a video",
                   "Nothing here says whether a firmware fits a camera", "use identify"):
         assert words in text, words
     assert "USB" not in text                                   # the bare template's USB-camera role is not shown

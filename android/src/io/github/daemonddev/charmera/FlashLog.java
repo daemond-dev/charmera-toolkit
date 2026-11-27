@@ -18,18 +18,20 @@ import java.util.TimeZone;
  * round-trips. parse() never throws: a line it cannot read is skipped, and anything that is not a log reads as empty.
  *
  * The log records what the owner told the app and what the app did. It is not proof of what the camera runs:
- * summary() says the latest state the log knows, or "unknown".
+ * summary() says the latest state the log knows, "unknown", or "none yet" for a log with no flash in it.
  */
 final class FlashLog {
 
     static final int MAX = 200;
     static final String HEADER = "charmera-flash-log 1";
     static final String UNKNOWN = "unknown";
+    /** summary() for a log with no write, flash or check in it: the app has flashed nothing yet. */
+    static final String NONE_YET = "none yet";
 
     enum Event {
         WRITTEN("written to the card"),
-        FLASH_SEEN("flash seen"),
-        FLASH_NOT_SEEN("flash not seen"),
+        FLASH_SEEN("Upgrade 100% seen"),
+        FLASH_NOT_SEEN("Upgrade 100% not seen"),
         FILE_REMOVED("update file removed"),
         CHECK_OK("photo check OK"),
         CHECK_FAILED("photo check failed"),
@@ -46,7 +48,10 @@ final class FlashLog {
     static final class Entry {
         final long timeMs;
         final Event event;
-        /** The firmware it concerns, as the app names it ("v0.23", "stock restore", "probe"); "" when none. */
+        /**
+         * The firmware it concerns, as the app named it when it logged it ("v006 with the OV9732 port", "stock
+         * restore", "probe"; an older app wrote numbers such as "v0.23", kept as they are); "" when none.
+         */
         final String firmware;
         /** The start of the file's SHA-256 in lowercase hex; "" when none. */
         final String sha256Prefix;
@@ -206,8 +211,9 @@ final class FlashLog {
     }
 
     /**
-     * The latest camera firmware state the log knows, in one short line, e.g. "v0.23, flash seen 11 Nov 13:02",
-     * or "unknown". Removing the update file and saving a backup say nothing about the firmware and are passed over.
+     * The latest camera firmware state the log knows, in one short line, e.g. "v006 with the OV9732 port, flash seen
+     * 11 Nov 13:02", "unknown" after a flash not seen or a failed check, or "none yet" when nothing was written.
+     * Removing the update file and saving a backup say nothing about the firmware and are passed over.
      */
     String summary(TimeZone tz) {
         for (int i = 0; i < entries.size(); i++) {
@@ -215,41 +221,55 @@ final class FlashLog {
             String at = when(e.timeMs, tz);
             switch (e.event) {
                 case FLASH_SEEN:
-                    return named(e.firmware, i) + ", flash seen " + at;
+                    return named(e.firmware, i) + ", Upgrade 100% seen " + at;
                 case FLASH_NOT_SEEN:
-                    return UNKNOWN + " (" + named(e.firmware, i) + " flash not seen " + at + ")";
+                    return UNKNOWN + " (" + named(e.firmware, i) + " Upgrade 100% not seen " + at + ")";
                 case WRITTEN:
-                    return named(e.firmware, i) + " written " + at + ", flash not confirmed";
+                    return named(e.firmware, i) + " written " + at + ", Upgrade 100% not confirmed";
                 case CHECK_OK:
-                    // the photo's header shows only the public-build family, not which of its files was written
-                    return named(e.firmware, i) + " written, a new photo has the public-build family's header " + at;
+                    // A check logged with no name passed on the public-build family's header, which shows the family
+                    // and not which of its files was written. One logged with a name passed on that firmware's own.
+                    return e.firmware.isEmpty()
+                            ? named(e.firmware, i) + " written, a new photo has the public-build family's header " + at
+                            : e.firmware + ", photo check OK " + at;
                 case CHECK_FAILED:
                     return UNKNOWN + " (photo check failed " + at + ")";
                 default:
                     break;
             }
         }
-        return UNKNOWN;
+        return NONE_YET;
     }
 
     /**
-     * The firmware the owner saw the camera take, for a file name that carries it (the test-shot zip's): the latest
-     * firmware state must be a flash seen of a named file, or a photo check that passed whose nearest older entry
+     * The firmware the owner saw the camera take, for a file name that carries it (the test-shot zip's). The app reads
+     * the entry itself with confirmed(), which also gives the SHA-256; this is its name alone, and the tests use it.
+     * The latest firmware state must be a flash seen of a named file, or a photo check that passed whose nearest older entry
      * naming a firmware is a flash seen of that same file. The check alone cannot say which file it was (the stock
      * restore file, the probe and the bring-up write the same header), so it names one only after a flash seen. Null
      * when the latest state is a write not yet confirmed, a flash not seen, a failed check or nothing, and for a
      * check that follows a write or a flash not seen. Removing the update file and saving a backup are passed over.
      */
     String confirmedFirmware() {
+        Entry e = confirmed();
+        return e == null ? null : e.firmware;
+    }
+
+    /**
+     * The flash seen entry confirmedFirmware() names, so a caller can also read its SHA-256 prefix; null when it names
+     * none. A passed check and the flash seen before it are the same file when their SHA-256 prefixes match, or, when
+     * either has none, when they name the same firmware. So a check this app logged as "v012 with ..." still follows a
+     * flash seen an older app logged as "v0.27".
+     */
+    Entry confirmed() {
         for (int i = 0; i < entries.size(); i++) {
             Entry e = entries.get(i);
             switch (e.event) {
                 case FLASH_SEEN:
-                    return e.firmware.isEmpty() ? null : e.firmware;
+                    return e.firmware.isEmpty() ? null : e;
                 case CHECK_OK:
                     Entry before = olderNaming(i);
-                    return before != null && before.event == Event.FLASH_SEEN
-                            && (e.firmware.isEmpty() || e.firmware.equals(before.firmware)) ? before.firmware : null;
+                    return before != null && before.event == Event.FLASH_SEEN && sameFile(e, before) ? before : null;
                 case FLASH_NOT_SEEN:
                 case WRITTEN:
                 case CHECK_FAILED:
@@ -259,6 +279,17 @@ final class FlashLog {
             }
         }
         return null;
+    }
+
+    /** Whether a passed check is of the file in the flash seen before it (confirmed()). */
+    private static boolean sameFile(Entry check, Entry seen) {
+        if (check.firmware.isEmpty()) {
+            return true;        // a check that names no firmware (the public family's header) takes the one before it
+        }
+        if (!check.sha256Prefix.isEmpty() && !seen.sha256Prefix.isEmpty()) {
+            return check.sha256Prefix.equals(seen.sha256Prefix);
+        }
+        return check.firmware.equals(seen.firmware);
     }
 
     /**

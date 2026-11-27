@@ -7,7 +7,10 @@ android/.../Recipes.java, is generated from it by tools/gen_recipes.py). It list
            (the-dumping-grounds repositories), with the fixed-commit address of the public ones.
   mods     per base: patches ({file_offset, new bytes, SHA-256 of the bytes they replace}) and copies ({from, to, len}:
            vendor bytes taken from the dump at build time, so none are stored here). Every new byte is ours.
-  sets     the combinations offered, each with the stamp its file name carries and whether it was tested on a camera.
+  bases    what each base's stock firmware is, for its name ("stock v012 (the factory firmware, unchanged)").
+  sets     the combinations offered, each with the stamp its file name carries, whether it was tested on a camera, its
+           name (label: firmware_name of its base and mods) and, for the five that had one, the number older versions
+           of the app and the docs called it (old_name, e.g. "v0.27"). The camera never shows either.
   builds   every set made from every dump: the file name and SHA-256 of the result. make() refuses a result that is not
            listed here, so a file it writes is always one this project generated, reviewed and published by hash.
 
@@ -66,24 +69,28 @@ OWN_READ_BASES = {"public-dump": "v006", "v012": "v012"}
 
 def own_read(data: bytes, recipes: Optional[dict] = None) -> dict:
     """A dumps entry for an owner's own read of a v006 or v012 chip, or RecipeError. The read must be a complete 2 MiB
-    read of the chip whose firmware (bytes 0..0x169000) is that build's unchanged; it is prepared as that base's
-    cleaned copy is."""
+    read of the chip whose firmware (bytes 0..0x169000) is that build's unchanged. It is cut to the update file's
+    length and nothing else: its settings, stored photos and photo directory stay as read (a cleaned public copy has
+    its photos blanked only to keep them out of a published file)."""
     from . import image
     recipes = recipes or load()
     problem = image.chip_read_problem(data)
     if problem:
         raise RecipeError(f"not a dump the recipes start from (SHA-256 {sha256(data)}), and not a read of a v006 or v012 "
-                          f"chip either: {problem}")
+                          f"chip either: {problem}. Give a full read of the chip, or build from the public copy instead "
+                          "(--base v006 or v012 with --download)")
     build = image.match_known_build(data)
     base = OWN_READ_BASES.get(build.key) if build is not None else None
+    if build is not None and build.key == "film-mods":
+        raise RecipeError("not a dump the recipes start from: this read is stock v008_test. Its public file is the whole "
+                          "update, so use charmera build --base v008_test --download")
     if base is None:
         found = image.detect_build(data)
         raise RecipeError("not a dump the recipes start from, and the firmware in this read is not stock v006 or v012 byte "
-                          f"for byte (it is {found.identity}: {found.label}). A camera flashed with a mod reads like this. "
+                          f"for byte (it is {found.identity}: {found.label}). A camera with a mod written to it reads like this. "
                           "Build from the public copy instead (--download), or from a read taken before the camera was "
-                          "flashed")
-    clean = next(d for d in recipes["dumps"] if d["build"] == base and d["copy"] == "clean")
-    return {"id": f"{base}-own-read", "build": base, "copy": "own", "prep": clean["prep"], "size": len(data),
+                          "written to")
+    return {"id": f"{base}-own-read", "build": base, "copy": "own", "prep": "truncate", "size": len(data),
             "sha256": sha256(data), "source": "your own read of the chip", "url": None}
 
 
@@ -125,13 +132,23 @@ def resolve(base: str, names: Iterable[str], recipes: Optional[dict] = None) -> 
     return tuple(m["id"] for m in chosen)
 
 
+def in_table_order(mod_ids: Sequence[str], recipes: Optional[dict] = None) -> Tuple[str, ...]:
+    """The mods in the table's order, each once, whatever order they were given in; an unknown id is kept at the end
+    (the app's Recipe.Selection orders them the same way)."""
+    recipes = recipes or load()
+    order = [m["id"] for m in recipes["mods"]]
+    known = [i for i in order if i in mod_ids]
+    return tuple(known + [i for i in dict.fromkeys(mod_ids) if i not in order])
+
+
 def set_for(base: str, mod_ids: Sequence[str], recipes: Optional[dict] = None) -> dict:
     recipes = recipes or load()
+    ids = in_table_order(mod_ids, recipes)
     for s in recipes["sets"]:
-        if s["base"] == base and tuple(s["mods"]) == tuple(mod_ids):
+        if s["base"] == base and tuple(s["mods"]) == ids:
             return s
     raise RecipeError(f"base {base} with {', '.join(i.split('/')[-1] for i in mod_ids) or 'no mods'} is not one of "
-                      "the reviewed combinations (charmera build --list shows them)")
+                      "the known combinations (charmera build --list shows them)")
 
 
 def prepare(dump: bytes, entry: dict) -> bytearray:
@@ -209,10 +226,10 @@ def make(dump: bytes, names: Iterable[str] = (), recipes: Optional[dict] = None,
     for b in recipes["builds"]:
         if b["base"] == base and tuple(b["mods"]) == ids and b["dump"] == entry["id"]:
             if b["sha256"] != sha:
-                raise RecipeError(f"the file made is not the reviewed one, so it is not written. This should not happen."
-                                  f" Its SHA-256 is {sha}; the reviewed file's is {b['sha256']}.")
+                raise RecipeError(f"the file made is not the known one, so it is not written. That is a bug in the toolkit."
+                                  f" Its SHA-256 is {sha}; the known file's is {b['sha256']}.")
             return Made(data, b["name"], sha, base, ids, entry["id"], s["status"], s["label"])
-    raise RecipeError(f"no reviewed file is listed for {s['label']} from {entry['id']}")
+    raise RecipeError(f"no known file is listed for {s['label']} from {entry['id']}")
 
 
 def reviewed(sha: str, recipes: Optional[dict] = None) -> Optional[dict]:
@@ -221,6 +238,40 @@ def reviewed(sha: str, recipes: Optional[dict] = None) -> Optional[dict]:
     for b in recipes["builds"]:
         if b["sha256"] == sha:
             return b
+    return None
+
+
+def join_and(parts: Sequence[str]) -> str:
+    """"a", "a and b", "a, b and c"."""
+    parts = list(parts)
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def firmware_name(base: str, mod_ids: Sequence[str], recipes: Optional[dict] = None) -> str:
+    """What a build is called: its base and the mods on it, e.g. "v012 with Volume and LED rows and EXIF dates", or
+    "stock v012 (the factory firmware, unchanged)" with no mods. Each mod is named by its phrase in recipes.json, in the
+    table's order whatever order they were given in; an unknown id is named by itself, at the end. The app's
+    Recipe.firmwareName follows the same rule, and every set's label is this name (tests check both)."""
+    recipes = recipes or load()
+    if not mod_ids:
+        stock = next((b["stock"] for b in recipes.get("bases", []) if b["id"] == base), None)
+        return f"stock {base}" + (f" ({stock})" if stock else "")
+    order = [m["id"] for m in recipes["mods"]]
+    phrase = {m["id"]: m["phrase"] for m in recipes["mods"]}
+    known = [i for i in order if i in mod_ids]
+    unknown = [i for i in dict.fromkeys(mod_ids) if i not in phrase]
+    return f"{base} with " + join_and([phrase[i] for i in known] + unknown)
+
+
+def old_name(base: str, mod_ids: Sequence[str], recipes: Optional[dict] = None) -> Optional[str]:
+    """The number an older app and older notes used for this build ("v0.27"), or None. Only five builds had one."""
+    recipes = recipes or load()
+    ids = in_table_order(mod_ids, recipes)
+    for s in recipes["sets"]:
+        if s["base"] == base and tuple(s["mods"]) == ids:
+            return s.get("old_name")
     return None
 
 

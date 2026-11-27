@@ -360,5 +360,5 @@ def register(subparsers) -> None:
                    help="pack an image that carries no Charmera build marks: only a dump read from the camera it goes back into "
                         "(stage refuses such a file outside the donor route (--donor))")
     p.add_argument("--overwrite", action="store_true", help="replace an existing output file of the same name")
-    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="actually write the update file")
+    p.add_argument(GATE_FLAG, dest="gate", action="store_true", help="write the update file")
     p.set_defaults(func=handler)
